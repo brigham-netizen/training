@@ -5,7 +5,7 @@ import { Renderer } from './render.js'
 import { Input } from './input.js'
 import { Audio } from './audio.js'
 import { Saves } from './saves.js'
-import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, TOTAL_WAVES, waveComposition } from './config.js'
+import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, waveComposition } from './config.js'
 
 const ICONS = {
   look: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>',
@@ -158,9 +158,23 @@ function giveOrders(zone, post) {
   }
 }
 
+// Tapping a staked plot with any tool builds it, so the village never
+// waits on finding the right tool.
+function trySettle(i) {
+  const t = game.world.tiles[i]
+  if (!t || t.type !== 'plot' || ui.tool === 'demolish') return false
+  const def = STRUCTURES[t.plot]
+  if (!game.place(i, 'settle')) {
+    if (game.gold < def.cost) warnGold()
+  } else banner(`${def.label} built<small>+${def.income} gold after every wave</small>`, 1800)
+  refreshHud()
+  return true
+}
+
 let noGoldWarned = false
 function paint(i) {
   const tool = ui.tool
+  if (trySettle(i)) return
   if (tool === 'demolish') {
     game.demolish(i)
   } else if (tool === 'upgrade') {
@@ -170,7 +184,7 @@ function paint(i) {
     const cost = tool === 'hoard' ? HOARDING.cost : STRUCTURES[t.plot]?.cost
     if (!game.place(i, tool) && cost && game.gold < cost) warnGold()
   } else if (STRUCTURES[tool]) {
-    if (!game.place(i, tool) && game.world.canBuild(i, tool) && game.gold < costOf(tool)) warnGold()
+    if (!game.place(i, tool) && game.world.canBuild(i, tool) && game.gold < game.costAt(i, tool)) warnGold()
   }
   refreshHud()
 }
@@ -221,7 +235,11 @@ new Input(canvas, camera, {
     }
     refreshHud(true)
   },
+  tapTile: (i) => {
+    if (i >= 0) trySettle(i)
+  },
   placeAt: (i) => {
+    if (trySettle(i)) return
     if (!game.place(i, ui.tool) && game.gold < costOf(ui.tool)) warnGold()
     noGoldWarned = false
     refreshHud()
@@ -451,6 +469,10 @@ function toolHint() {
       return `<b>${n} selected</b>: drag over the area to cover,<br>or tap a spot to hold`
     }
     default:
+      if (game.world.isRough(ui.tool) && game.phase === 'build') {
+        const r = ROUGH_COST
+        return `<b>${TOOL_LABELS[ui.tool]}</b> goes through anything, at a price<br>Marsh ×${r.marsh} · Ford ×${r.shallows} · Water ×${r.water} · Trees ×${r.tree} · Rocks ×${r.rock}`
+      }
       return ''
   }
 }
@@ -493,7 +515,8 @@ const HELP = `
     <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
     <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
     <li><b>Enemies</b>: raiders and brutes hack at walls, rams smash them, bowmen shoot your troops, and catapults throw boulders from beyond archer range.</li>
-    <li><b>Terrain</b>: rivers and lakes block the way except at fords. Marsh and fords slow enemies down, and you can't build on them.</li>
+    <li><b>Terrain</b>: rivers and lakes block the way except at fords; marsh and fords slow enemies down. Walls, gates, towers and pikes can be built across marsh, water, trees and rocks, but cost more there.</li>
+    <li><b>Village</b>: after each wave the village stakes out plots where it feels safe. Tap a plot to build it; it pays gold after every wave.</li>
     <li><b>Remove</b>: full refund between waves, half during an attack.</li>
   </ul>
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
@@ -641,6 +664,11 @@ async function mapAction(btn) {
   showMaps()
 }
 
+function listKinds(kinds) {
+  const names = kinds.map((k) => `a ${STRUCTURES[k].label.toLowerCase()}`)
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 }
@@ -668,7 +696,10 @@ function handleEvents() {
       closeFlyout()
     } else if (ev.type === 'waveEnd') {
       const village = ev.village ? ` and +${ev.village} from the village` : ''
-      banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold${village}. Strengthen your defenses.</small>`, 3400)
+      const plots = ev.plots?.length
+        ? `<br>The village staked out ${listKinds(ev.plots)}. Tap a plot to build it.`
+        : ''
+      banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold${village}.${plots}</small>`, plots ? 5000 : 3400)
       autosave()
       setView('top')
       audio.play('waveEnd')

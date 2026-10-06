@@ -138,6 +138,9 @@ export class Input {
       this.mode = null
       return
     }
+    // A tap while looking around (no drag) can still act on a tile.
+    if (!cancelled && this.mode === 'pan' && Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_SLOP)
+      this.h.tapTile?.(this.tileAt(p.x, p.y))
     if (!cancelled) {
       if (this.mode === 'pending') this.paintTo(this.tileAt(p.x, p.y))
       if (this.mode === 'tower' && this.lastTile >= 0) this.h.placeAt(this.lastTile)

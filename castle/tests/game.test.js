@@ -455,3 +455,64 @@ test('a saved map rebuilds the same landscape', () => {
   assert.deepEqual(b.world.snapshotMap(), map)
   assert.ok(new World(1, map).spawnsConnected())
 })
+
+// ---- rough ground and village flow -------------------------------------------
+
+import { ROUGH_COST } from '../src/config.js'
+
+test('walls go through marsh, water, trees and rocks at a higher price', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const tiles = ring(game, 6)
+  const cases = [
+    ['marsh', null, ROUGH_COST.marsh],
+    ['water', null, ROUGH_COST.water],
+    ['grass', 'tree', ROUGH_COST.tree],
+    ['grass', 'rock', ROUGH_COST.rock],
+  ]
+  cases.forEach(([terrain, scenery, mult], k) => {
+    const i = tiles[3 + k * 2]
+    world.tiles[i].terrain = terrain
+    if (scenery) world.tiles[i].type = scenery
+    const before = game.gold
+    assert.ok(game.place(i, 'wall'), `${terrain}/${scenery}`)
+    assert.equal(before - game.gold, Math.ceil(STRUCTURES.wall.cost * mult))
+    assert.equal(world.tiles[i].type, 'wall')
+  })
+  // Removing it refunds what was paid, and a tree doesn't grow back.
+  const treeTile = tiles[7]
+  const before = game.gold
+  game.demolish(treeTile)
+  assert.equal(game.gold - before, Math.ceil(STRUCTURES.wall.cost * ROUGH_COST.tree))
+  assert.equal(world.tiles[treeTile].type, 'grass')
+})
+
+test('village buildings and traps still need clear, dry ground', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const i = ring(game, 6)[3]
+  world.tiles[i].terrain = 'marsh'
+  assert.equal(game.place(i, 'trap'), false)
+  assert.equal(world.canBuild(i, 'cottage'), false)
+  // The village never stakes plots on water or marsh.
+  for (let seed = 1; seed <= 15; seed++) {
+    const g = new Game(seed * 131)
+    for (const t of g.world.tiles) if (t.type === 'plot') assert.equal(t.terrain === 'grass' || t.terrain === 'hill', true)
+  }
+})
+
+test('the end-of-wave event lists the plots the village just staked', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  game.startWave()
+  game.enemies = []
+  game.spawnQueue = []
+  game.update(1 / 60)
+  const ev = game.events.find((e) => e.type === 'waveEnd')
+  assert.ok(ev && Array.isArray(ev.plots) && ev.plots.length >= 1)
+})

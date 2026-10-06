@@ -277,9 +277,17 @@ export class World {
   }
 
   // Why a structure can't go here, or null if it can.
+  // Walls and other fortifications push through anything for a price
+  // (see ROUGH_COST); everything else needs clear, dry ground.
+  isRough(type) {
+    const def = STRUCTURES[type]
+    return !!def?.solid && !def.village
+  }
+
   buildProblem(i, type) {
     const t = this.tiles[i]
     if (this.reserved[i]) return 'reserved'
+    if (this.isRough(type)) return t.type === 'grass' || t.type === 'tree' || t.type === 'rock' ? null : 'occupied'
     if (t.type !== 'grass') return 'occupied'
     const terrain = TERRAIN[t.terrain]
     if (terrain.blocked || terrain.noBuild) return 'terrain'
@@ -306,6 +314,7 @@ export class World {
     t.type = 'grass'
     t.hoard = false
     t.plot = null
+    t.paid = undefined
     t.hp = t.maxHp = 0
     this.dirty = true
   }

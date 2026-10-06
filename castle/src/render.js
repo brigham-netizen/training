@@ -283,6 +283,7 @@ export class Renderer {
     for (const fx of game.effects) this.drawEffect(fx)
     if (ui.preview) this.drawPreview(game, ui.preview)
     this.drawBars(game)
+    this.drawPlotTags(game)
     this.drawFloaters(game)
   }
 
@@ -1062,6 +1063,50 @@ export class Renderer {
     }
     for (const e of game.enemies) this.hpBar(e.x, e.y, e.z + 1.0, e.hp / e.maxHp, 0.5)
     for (const u of [...game.archers, ...game.swordsmen]) this.hpBar(u.x, u.y, u.z + 0.95, u.hp / u.maxHp, 0.4)
+  }
+
+  // Price tags over the village's plots: what it wants and what it costs.
+  drawPlotTags(game) {
+    const { ctx, cam } = this
+    const { world } = game
+    const size = Math.round(Math.max(10, Math.min(14, cam.k * 0.36)))
+    ctx.font = `700 ${size}px system-ui, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    for (let i = 0; i < world.tiles.length; i++) {
+      const t = world.tiles[i]
+      if (t.type !== 'plot') continue
+      const def = STRUCTURES[t.plot]
+      cam.P((i % world.w) + 0.5, ((i / world.w) | 0) + 0.5, world.elev(i) + 1.15)
+      const text = `${def.label} · ${def.cost}`
+      const w = ctx.measureText(text).width + size * 2
+      const h = size * 1.7
+      const x = cam.sx - w / 2
+      const y = cam.sy - h / 2
+      const afford = game.gold >= def.cost
+      ctx.fillStyle = 'rgba(24,20,15,0.88)'
+      ctx.beginPath()
+      ctx.roundRect(x, y, w, h, h / 2)
+      ctx.fill()
+      ctx.strokeStyle = afford ? 'rgba(240,194,75,0.9)' : 'rgba(160,140,110,0.6)'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      // Little coin before the text.
+      ctx.beginPath()
+      ctx.arc(x + size * 0.85, cam.sy, size * 0.32, 0, Math.PI * 2)
+      ctx.fillStyle = '#f0c24b'
+      ctx.fill()
+      ctx.fillStyle = afford ? '#f3ead8' : '#b9ae98'
+      ctx.fillText(text, cam.sx + size * 0.5, cam.sy + 1)
+      // Pointer down to the plot.
+      ctx.beginPath()
+      ctx.moveTo(cam.sx - 4, y + h)
+      ctx.lineTo(cam.sx + 4, y + h)
+      ctx.lineTo(cam.sx, y + h + 5)
+      ctx.fillStyle = 'rgba(24,20,15,0.88)'
+      ctx.fill()
+    }
+    ctx.textBaseline = 'alphabetic'
   }
 
   drawFloaters(game) {

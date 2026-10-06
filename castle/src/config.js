@@ -32,6 +32,10 @@ export const STRUCTURES = {
   market: { label: 'Market', cost: 60, hp: 260, height: 1.0, solid: true, village: true, income: 25 },
 }
 
+// Walls, gates, towers and pikes can be built over rough ground at a price.
+// Multipliers stack: terrain times whatever has to be cleared first.
+export const ROUGH_COST = { hill: 1, marsh: 2, shallows: 3, water: 4, tree: 2, rock: 3 }
+
 // Wooden hoarding built on top of a stone wall, gate or tower.
 export const HOARDING = { label: 'Hoarding', cost: 3, cover: 0.2, splash: 0.5, on: ['wall', 'thick', 'gate', 'tower'] }
 

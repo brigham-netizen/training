@@ -2,7 +2,7 @@ import { World, mulberry32 } from './world.js'
 import { computeFlow, computeRamFlow } from './pathing.js'
 import {
   START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
-  HOARDING, VILLAGE, ZONE_MARGIN,
+  HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST,
   waveComposition, waveBonus,
 } from './config.js'
 
@@ -87,7 +87,7 @@ export class Game {
     if (type === 'hoard') return this.canHoard(i)
     if (type === 'settle') return this.canSettle(i)
     if (!this.world.canBuild(i, type)) return false
-    if (this.gold < STRUCTURES[type].cost) return false
+    if (this.gold < this.costAt(i, type)) return false
     if (STRUCTURES[type].solid && (this.enemyOnTile(i) || this.swordsmanOnTile(i))) return false
     return true
   }
@@ -99,11 +99,26 @@ export class Game {
     if (type === 'hoard') return this.hoard(i)
     if (type === 'settle') return this.settle(i)
     if (!this.canPlace(i, type)) return false
-    this.gold -= STRUCTURES[type].cost
+    const cost = this.costAt(i, type)
+    this.gold -= cost
     this.world.build(i, type)
+    this.world.tiles[i].paid = cost
+    if (cost > STRUCTURES[type].cost) {
+      const [x, y] = this.center(i)
+      this.floaters.push({ x, y, z: this.world.surface(i), text: `-${cost}`, t: 0, color: 'cost' })
+    }
     for (let k = 0; k < (STRUCTURES[type].freeArchers || 0); k++) this.addArcher(i)
     this.sfx('build', ...this.center(i))
     return true
+  }
+
+  // Price of building `type` on tile i, including rough ground.
+  costAt(i, type) {
+    const base = STRUCTURES[type].cost
+    if (!this.world.isRough(type)) return base
+    const t = this.world.tiles[i]
+    const mult = (ROUGH_COST[t.terrain] || 1) * (ROUGH_COST[t.type] || 1)
+    return Math.ceil(base * mult)
   }
 
   // What the Upgrade tool would do here: upgrade to the next tier, or
@@ -130,6 +145,7 @@ export class Game {
     const t = this.world.tiles[i]
     if (info.kind === 'upgrade') {
       // Rebuild in place; archers standing on it stay put.
+      t.paid = (t.paid ?? STRUCTURES[t.type].cost) + info.cost
       t.type = info.to
       t.hp = t.maxHp = STRUCTURES[info.to].hp
       t.weakened = false
@@ -151,7 +167,7 @@ export class Game {
     const health = t.maxHp ? t.hp / t.maxHp : 1
     // Free rearranging between waves; half value once the fighting starts.
     const rate = this.phase === 'build' ? 1 : 0.5
-    const value = def.cost + (t.hoard ? HOARDING.cost : 0)
+    const value = (t.paid ?? def.cost) + (t.hoard ? HOARDING.cost : 0)
     return Math.floor(value * health * rate)
   }
 
@@ -247,7 +263,7 @@ export class Game {
     const k = world.keep
     const score = new Float32Array(w * h).fill(-Infinity)
     for (let i = 0; i < w * h; i++) {
-      if (!world.canBuild(i, 'wall') || this.tiles_villageBlocked(i)) continue
+      if (!world.canBuild(i, 'cottage') || this.tiles_villageBlocked(i)) continue
       const x = i % w
       const y = (i / w) | 0
       let s = open[i] ? 0 : 30
@@ -286,7 +302,7 @@ export class Game {
   proposePlots() {
     const { world } = this
     const plots = world.tiles.filter((t) => t.type === 'plot').length
-    if (plots >= VILLAGE.maxPlots) return
+    if (plots >= VILLAGE.maxPlots) return []
     const score = this.safetyMap()
     const near = (i, types) => {
       const x = i % world.w
@@ -312,11 +328,13 @@ export class Game {
       }
       return pick
     }
+    const added = []
     const propose = (kind, bonus) => {
       const i = best(bonus)
       if (i < 0) return
       world.tiles[i].type = 'plot'
       world.tiles[i].plot = kind
+      added.push(kind)
     }
     const cottages = this.villageCount('cottage')
     const want = []
@@ -329,6 +347,7 @@ export class Game {
       if (kind === 'farm') propose(kind, (i) => near(i, ['cottage', 'farm']) * 6)
       else propose(kind, (i) => near(i, ['cottage', 'market']) * 3)
     }
+    return added
   }
 
   // ---- archers --------------------------------------------------------------
@@ -822,8 +841,8 @@ export class Game {
     // Masons patch up the keep between waves; walls are on you.
     this.world.keep.hp = this.world.keep.maxHp
     this.phase = 'build'
-    this.proposePlots()
-    this.emit('waveEnd', { wave: this.wave, bonus, village })
+    const plots = this.proposePlots()
+    this.emit('waveEnd', { wave: this.wave, bonus, village, plots })
   }
 
   blockedAt(x, y, r, troop = false) {
