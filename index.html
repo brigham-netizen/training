@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1712" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Hold the Keep" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <title>Hold the Keep</title>
+    <script type="module" crossorigin src="./assets/index-1YZknEku.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Wn--Kq5h.css">
+  </head>
+  <body>
+    <canvas id="game3d" class="hidden"></canvas>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div class="top-left">
+        <div class="pill gold" title="Gold"><span class="coin"></span><b id="gold">0</b></div>
+        <div class="pill" id="archer-pill" title="Archers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3c6 3 6 15 0 18M7 3v18M3 12h17M17 9l3 3-3 3"/></svg><b id="archers">0</b></div>
+        <div class="pill" id="wave-pill">Wave <b id="wave">1</b>/<span id="wave-total">10</span></div>
+      </div>
+      <div class="top-center">
+        <div class="keep-bar"><div id="keep-fill"></div><span>Lord</span></div>
+      </div>
+      <div class="top-right">
+        <button class="icon-btn hidden" id="fs-btn" aria-label="Full screen"></button>
+        <button class="icon-btn" id="sound-btn" aria-label="Mute"></button>
+        <button class="icon-btn" id="menu-btn" aria-label="Menu"></button>
+      </div>
+
+      <div class="toolbar" id="toolbar"></div>
+      <div class="flyout hidden" id="flyout"></div>
+
+      <div class="right-col">
+        <button class="icon-btn view-btn" id="view-btn" aria-label="Toggle 2D/3D view"></button>
+        <button class="icon-btn" id="rotate-btn" aria-label="Rotate view"></button>
+        <button class="icon-btn" id="speed-btn" aria-label="Game speed">1×</button>
+        <div class="next-info" id="next-info"></div>
+        <div class="next-info hidden" id="tool-hint"></div>
+        <button class="primary" id="start-btn">Start wave</button>
+      </div>
+
+      <div class="banner" id="banner"></div>
+    </div>
+
+    <div class="modal hidden" id="modal">
+      <div class="card">
+        <h1 id="modal-title">Hold the Keep</h1>
+        <div id="modal-body"></div>
+        <div class="modal-actions" id="modal-actions"></div>
+      </div>
+    </div>
+
+    <div class="rotate-hint">
+      <div class="phone"></div>
+      <p>Turn your phone sideways to play</p>
+    </div>
+
+  </body>
+</html>
