@@ -20,17 +20,35 @@ export const STRUCTURES = {
   palisade: { label: 'Palisade', cost: 1, hp: 120, height: 0.9, solid: true, thin: 0.3, upgrade: 'wall' },
   wall: { label: 'Wall', cost: 2, hp: 300, height: 1.0, solid: true, thin: 0.6, rampart: true, slots: 1, perch: 0.5, upgrade: 'thick' },
   thick: { label: 'Thick wall', cost: 5, hp: 750, height: 1.35, solid: true, rampart: true, slots: 2, perch: 1 },
-  gate: { label: 'Gate', cost: 15, hp: 650, height: 1.25, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
+  // Weaker than stone on purpose: attackers go for gates first.
+  gate: { label: 'Gate', cost: 15, hp: 240, height: 1.25, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
   tower: { label: 'Tower', cost: 60, hp: 550, height: 2.2, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1 },
   moat: { label: 'Moat', cost: 3, slow: 0.35, flatOnly: true },
   pikes: { label: 'Pikes', cost: 3, hp: 110, height: 0.6, solid: true, thorns: 18 },
   trap: { label: 'Spikes', cost: 20, dps: 22 },
+  // Village buildings: proposed by the village, built by you, pay out each wave.
+  cottage: { label: 'Cottage', cost: 30, hp: 160, height: 0.9, solid: true, village: true, income: 10 },
+  farm: { label: 'Farm', cost: 15, hp: 40, village: true, income: 6, trample: 90 },
+  market: { label: 'Market', cost: 60, hp: 260, height: 1.0, solid: true, village: true, income: 25 },
 }
+
+// Wooden hoarding built on top of a stone wall, gate or tower.
+export const HOARDING = { label: 'Hoarding', cost: 3, cover: 0.2, splash: 0.5, on: ['wall', 'thick', 'gate', 'tower'] }
+
+// How the village grows: plots appear between waves where it feels safe.
+// It judges safety from your walls and towers, never from where attacks come.
+export const VILLAGE = { maxPlots: 3, marketAfter: 3 }
+
+// Gates draw attackers: path cost multiplier on a gate's HP (rams care most).
+export const GATE_LURE = 0.5
+export const RAM_GATE_LURE = 0.12
 
 export const ARCHER = { label: 'Archer', cost: 20, hp: 50, range: 4, fireRate: 0.9, damage: 10, speed: 2.4 }
 
 // Melee troops: guard a spot, charge enemies within `guard` tiles of it.
 export const SWORDSMAN = { label: 'Swordsman', cost: 25, hp: 130, dps: 20, speed: 1.9, guard: 4, r: 0.22 }
+// Swordsmen with orders cover their zone plus this margin.
+export const ZONE_MARGIN = 0.75
 
 export const KEEP = { size: 3, hp: 1000, height: 2.6, slots: 2, perch: 1.5, archers: 2 }
 

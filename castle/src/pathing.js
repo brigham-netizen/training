@@ -1,4 +1,4 @@
-import { SIEGE_COST_PER_HP } from './config.js'
+import { SIEGE_COST_PER_HP, GATE_LURE, RAM_GATE_LURE } from './config.js'
 
 // Flow field toward the keep. Walls are not impassable: they cost extra in
 // proportion to their HP, so enemies walk around when a gap exists and
@@ -51,9 +51,13 @@ class MinHeap {
 
 // Cost of stepping into tile i: slow ground takes longer to cross, and
 // structures cost time to break in proportion to their remaining HP.
-function stepCost(world, i, step) {
-  if (world.tiles[i].type === 'keep') return step
-  if (world.isSolid(i)) return step + Math.max(0, world.tiles[i].hp) * SIEGE_COST_PER_HP
+function stepCost(world, i, step, gateLure) {
+  const t = world.tiles[i]
+  if (t.type === 'keep') return step
+  if (world.isSolid(i)) {
+    const lure = t.type === 'gate' ? gateLure : 1
+    return step + Math.max(0, t.hp) * SIEGE_COST_PER_HP * lure
+  }
   return step / world.slow(i)
 }
 
@@ -63,7 +67,8 @@ function diagonalOk(world, x, y, dx, dy) {
   return world.isWalkable(world.idx(x + dx, y)) && world.isWalkable(world.idx(x, y + dy))
 }
 
-export function computeFlow(world) {
+// `gateLure` scales how cheap gates look; rams get their own, lower value.
+export function computeFlow(world, gateLure = GATE_LURE) {
   const { w, h } = world
   const n = w * h
   const dist = new Float64Array(n).fill(Infinity)
@@ -90,7 +95,7 @@ export function computeFlow(world) {
       const v = world.idx(vx, vy)
       if (world.isBlocked(v) || world.tiles[v].type === 'keep') continue
       if (!diagonalOk(world, vx, vy, dx, dy)) continue
-      const nd = d + stepCost(world, u, step)
+      const nd = d + stepCost(world, u, step, gateLure)
       if (nd < dist[v]) {
         dist[v] = nd
         heap.push(v, nd)
@@ -109,7 +114,7 @@ export function computeFlow(world) {
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
       const j = world.idx(nx, ny)
       if (world.isBlocked(j) || !diagonalOk(world, x, y, dx, dy)) continue
-      const c = dist[j] + stepCost(world, j, step)
+      const c = dist[j] + stepCost(world, j, step, gateLure)
       if (c < best) {
         best = c
         next[i] = j
@@ -118,4 +123,8 @@ export function computeFlow(world) {
   }
 
   return { dist, next }
+}
+
+export function computeRamFlow(world) {
+  return computeFlow(world, RAM_GATE_LURE)
 }

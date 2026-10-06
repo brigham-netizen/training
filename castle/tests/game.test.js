@@ -117,7 +117,7 @@ function clearMap(game) {
   // Flatten terrain and scenery so tests don't depend on map generation.
   for (const t of game.world.tiles) {
     t.terrain = 'grass'
-    if (t.type === 'tree' || t.type === 'rock') t.type = 'grass'
+    if (t.type === 'tree' || t.type === 'rock' || t.type === 'plot') t.type = 'grass'
   }
   game.world.dirty = true
 }
@@ -157,7 +157,7 @@ test('archers walk along a connected wall to reach attackers', () => {
   // An enemy far to the west, out of reach of the keep.
   game.phase = 'attack'
   game.spawnQueue = [{ t: 999 }]
-  game.spawnEnemy({ type: 'brute', spawn: { x: k.x - 12, y: y - 2 }, hpMult: 50 })
+  game.spawnEnemy({ type: 'brute', spawn: { x: k.x - 11, y: y - 2 }, hpMult: 50 })
   const e = game.enemies[0]
   e.speed = 0
   for (let t = 0; t < 10; t += 1 / 60) game.update(1 / 60)
@@ -308,4 +308,150 @@ test('catapults bombard towers from beyond archer range', () => {
   assert.ok(t.type !== 'tower' || t.hp < t.maxHp, 'tower took boulder damage')
   // It stopped at range rather than walking up to the wall.
   assert.ok(Math.hypot(cat.x - (world.keep.x - 3.5), cat.y - (world.keep.y + 1.5)) > 4)
+})
+
+// ---- stage 4 ----------------------------------------------------------------
+
+import { World } from '../src/world.js'
+import { computeRamFlow } from '../src/pathing.js'
+import { HOARDING } from '../src/config.js'
+
+function followFlow(world, flow, from) {
+  const seen = []
+  let i = from
+  for (let n = 0; n < 300 && world.tiles[i].type !== 'keep'; n++) {
+    seen.push(i)
+    i = flow.next[i]
+  }
+  return seen
+}
+
+test('attackers head for a gate even when a wall is closer', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const { world } = game
+  const tiles = ring(game, 3)
+  const gate = tiles[3] // north side; the west spawn faces the west wall
+  for (const i of tiles) game.place(i, i === gate ? 'gate' : 'wall')
+  const from = world.idx(world.spawns[0].x, world.spawns[0].y)
+  for (const flow of [computeFlow(world), computeRamFlow(world)]) {
+    const path = followFlow(world, flow, from)
+    assert.ok(path.includes(gate), 'goes through the gate')
+    assert.ok(!path.some((i) => world.tiles[i].type === 'wall'), 'never through a wall')
+  }
+})
+
+test('the village proposes plots inside the walls, ignoring where attacks come from', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const { world } = game
+  for (const i of ring(game, 5)) game.place(i, 'wall')
+  for (const t of world.tiles) if (t.type === 'plot') world.clear(world.tiles.indexOf(t))
+  game.proposePlots()
+  const plots = world.tiles.flatMap((t, i) => (t.type === 'plot' ? [i] : []))
+  assert.ok(plots.length >= 1)
+  const k = world.keep
+  for (const i of plots) {
+    const x = i % world.w
+    const y = (i / world.w) | 0
+    assert.ok(Math.max(Math.abs(x - (k.x + 1)), Math.abs(y - (k.y + 1))) < 5, 'plot inside the ring')
+  }
+  // Same castle, attacks from a different gate order: same choice.
+  const a = game.safetyMap()
+  world.spawns.reverse()
+  const b = game.safetyMap()
+  assert.deepEqual([...a], [...b])
+})
+
+test('built village buildings pay out each wave; farms get trampled', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const plot = world.tiles.findIndex((t) => t.type === 'plot')
+  assert.ok(plot < 0, 'clearMap removed the starting plot')
+  game.proposePlots()
+  const i = world.tiles.findIndex((t) => t.type === 'plot')
+  assert.equal(world.tiles[i].plot, 'cottage')
+  const before = game.gold
+  assert.ok(game.place(i, 'settle'))
+  assert.equal(before - game.gold, STRUCTURES.cottage.cost)
+  assert.equal(game.income(), STRUCTURES.cottage.income)
+  // A farm in an enemy's way gets trampled.
+  const f = world.idx(world.keep.x - 4, world.keep.y + 1)
+  world.build(f, 'farm')
+  skirmish(game)
+  game.archers = []
+  game.spawnEnemy({ type: 'raider', spawn: { x: world.keep.x - 7, y: world.keep.y + 1 }, hpMult: 10 })
+  step(game, 6)
+  assert.notEqual(world.tiles[f].type, 'farm')
+})
+
+test('hoardings protect archers from arrows', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const i = ring(game, 4)[3]
+  game.place(i, 'wall')
+  game.place(i, 'archer')
+  const a = game.archers.find((u) => u.tile === i)
+  const bare = game.coverFor(a)
+  assert.ok(game.place(i, 'hoard'))
+  assert.equal(game.coverFor(a), HOARDING.cover)
+  assert.ok(game.coverFor(a) < bare)
+})
+
+test('swordsmen with orders cover their zone, not just their post', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  game.archers = []
+  const { world } = game
+  const k = world.keep
+  game.place(world.idx(k.x - 3, k.y + 1), 'swordsman')
+  const s = game.swordsmen[0]
+  // Zone: a long strip to the north-west, far from the original post.
+  const zone = { x0: k.x - 10, y0: k.y - 6, x1: k.x - 2, y1: k.y - 5 }
+  assert.ok(game.orderSwordsmen([s.id], zone))
+  skirmish(game)
+  game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 9, y: k.y - 5 }, hpMult: 1 })
+  const e = game.enemies[0]
+  e.speed = 0
+  assert.ok(game.covers(s, e))
+  step(game, 10)
+  assert.ok(e.dead || e.hp < e.maxHp, 'swordsman went and fought in the zone')
+})
+
+test('a saved game restores castle, troops, gold and wave', () => {
+  const game = new Game(4242)
+  clearMap(game)
+  game.gold = 2000
+  const tiles = ring(game, 4)
+  for (const i of tiles) game.place(i, 'wall')
+  game.place(tiles[3], 'hoard')
+  game.place(tiles[5], 'archer')
+  game.place(ring(game, 6)[2], 'swordsman')
+  game.wave = 3
+  const data = JSON.parse(JSON.stringify(game.serialize()))
+  const back = Game.restore(data)
+  assert.equal(back.wave, 3)
+  assert.equal(back.gold, game.gold)
+  assert.equal(back.archers.length, game.archers.length)
+  assert.equal(game.swordsmen.length, 1)
+  assert.equal(back.swordsmen.length, 1)
+  assert.ok(back.world.tiles[tiles[3]].hoard)
+  for (let i = 0; i < game.world.tiles.length; i++) {
+    assert.equal(back.world.tiles[i].type, game.world.tiles[i].type, `tile ${i}`)
+    assert.equal(back.world.tiles[i].terrain, game.world.tiles[i].terrain)
+  }
+})
+
+test('a saved map rebuilds the same landscape', () => {
+  const a = new Game(777)
+  const map = a.world.snapshotMap()
+  const b = new Game(1, map)
+  assert.deepEqual(b.world.snapshotMap(), map)
+  assert.ok(new World(1, map).spawnsConnected())
 })

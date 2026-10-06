@@ -15,8 +15,12 @@ export function mulberry32(seed) {
   }
 }
 
+const TERRAIN_CODES = { grass: 'g', hill: 'h', marsh: 'm', shallows: 's', water: 'w' }
+const TERRAIN_NAMES = Object.fromEntries(Object.entries(TERRAIN_CODES).map(([k, v]) => [v, k]))
+
 export class World {
-  constructor(seed = 1) {
+  // `map` (from snapshotMap) rebuilds a saved landscape instead of generating one.
+  constructor(seed = 1, map = null) {
     this.w = GRID_W
     this.h = GRID_H
     this.tiles = []
@@ -24,7 +28,74 @@ export class World {
     this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, x: 0, y: 0 }
     this.spawns = []
     this.dirty = true // path costs changed
-    this.generate(seed)
+    if (map) this.applyMap(map)
+    else this.generate(seed)
+  }
+
+  // The landscape only (terrain, trees, rocks), compact enough to store.
+  snapshotMap() {
+    let terrain = ''
+    let scenery = ''
+    let v = ''
+    for (const t of this.tiles) {
+      terrain += TERRAIN_CODES[t.terrain]
+      scenery += t.type === 'tree' ? 't' : t.type === 'rock' ? 'r' : '.'
+      v += Math.min(9, Math.floor(t.v * 10))
+    }
+    return { w: this.w, h: this.h, terrain, scenery, v }
+  }
+
+  applyMap(map) {
+    if (map.w !== this.w || map.h !== this.h) throw new Error('map size mismatch')
+    this.tiles = []
+    for (let i = 0; i < this.w * this.h; i++) {
+      const sc = map.scenery[i]
+      this.tiles.push({
+        type: sc === 't' ? 'tree' : sc === 'r' ? 'rock' : 'grass',
+        terrain: TERRAIN_NAMES[map.terrain[i]] || 'grass',
+        hp: 0,
+        maxHp: 0,
+        v: (Number(map.v[i]) + 0.5) / 10,
+        weakened: false,
+      })
+    }
+    this.placeFixtures()
+    this.dirty = true
+  }
+
+  // Keep in the middle, four gates on the edges, reserved ground around them.
+  placeFixtures() {
+    const { w, h } = this
+    const kx = Math.floor(w / 2) - 1
+    const ky = Math.floor(h / 2) - 1
+    const cx = kx + 1
+    const cy = ky + 1
+    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, x: kx, y: ky }
+    // Order matters: waves unlock gates in this order.
+    this.spawns = [
+      { x: 0, y: cy, name: 'west' },
+      { x: w - 1, y: cy - 1, name: 'east' },
+      { x: cx, y: 0, name: 'north' },
+      { x: cx - 1, y: h - 1, name: 'south' },
+    ]
+    this.reserved.fill(0)
+    for (let y = ky; y < ky + KEEP.size; y++)
+      for (let x = kx; x < kx + KEEP.size; x++) {
+        const t = this.tiles[this.idx(x, y)]
+        t.type = 'keep'
+        t.terrain = 'grass'
+      }
+    for (const s of this.spawns) {
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!this.inBounds(s.x + dx, s.y + dy)) continue
+          const i = this.idx(s.x + dx, s.y + dy)
+          this.reserved[i] = 1
+          const t = this.tiles[i]
+          if (t.terrain === 'water') t.terrain = 'shallows'
+          if (t.type === 'tree' || t.type === 'rock') t.type = 'grass'
+        }
+    }
   }
 
   idx(x, y) {
@@ -95,21 +166,9 @@ export class World {
     this.tiles = []
     for (let i = 0; i < w * h; i++)
       this.tiles.push({ type: 'grass', terrain: 'grass', hp: 0, maxHp: 0, v: rnd(), weakened: false })
-    this.reserved.fill(0)
-
-    const kx = Math.floor(w / 2) - 1
-    const ky = Math.floor(h / 2) - 1
-    const cx = kx + 1
-    const cy = ky + 1
-    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, x: kx, y: ky }
-
-    // Order matters: waves unlock gates in this order.
-    this.spawns = [
-      { x: 0, y: cy, name: 'west' },
-      { x: w - 1, y: cy - 1, name: 'east' },
-      { x: cx, y: 0, name: 'north' },
-      { x: cx - 1, y: h - 1, name: 'south' },
-    ]
+    this.placeFixtures()
+    const cx = this.keep.x + 1
+    const cy = this.keep.y + 1
     const nearSpawn = (x, y, d) => this.spawns.some((s) => Math.abs(x - s.x) + Math.abs(y - s.y) < d)
     const nearKeep = (x, y, dx, dy) => Math.abs(x - cx) < dx && Math.abs(y - cy) < dy
     const set = (x, y, terrain) => {
@@ -173,21 +232,7 @@ export class World {
       })
 
     // Keep and spawn areas are always flat, dry ground.
-    for (let y = ky; y < ky + KEEP.size; y++)
-      for (let x = kx; x < kx + KEEP.size; x++) {
-        const t = this.tiles[this.idx(x, y)]
-        t.type = 'keep'
-        t.terrain = 'grass'
-      }
-    for (const s of this.spawns) {
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!this.inBounds(s.x + dx, s.y + dy)) continue
-          const i = this.idx(s.x + dx, s.y + dy)
-          this.reserved[i] = 1
-          if (this.tiles[i].terrain === 'water') this.tiles[i].terrain = 'shallows'
-        }
-    }
+    this.placeFixtures()
 
     // Tree clusters and rocks (rocks favour hills).
     const clusters = 8 + Math.floor(rnd() * 4)
@@ -248,6 +293,7 @@ export class World {
   build(i, type) {
     const t = this.tiles[i]
     t.type = type
+    t.plot = null
     const def = STRUCTURES[type]
     t.hp = t.maxHp = def.hp || 0
     t.weakened = false
@@ -258,6 +304,8 @@ export class World {
   clear(i) {
     const t = this.tiles[i]
     t.type = 'grass'
+    t.hoard = false
+    t.plot = null
     t.hp = t.maxHp = 0
     this.dirty = true
   }

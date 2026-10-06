@@ -22,6 +22,14 @@ const COLORS = {
   catapult: [128, 92, 54],
   boulder: [128, 124, 116],
   shield: [178, 146, 62],
+  hoard: [122, 84, 46],
+  plaster: [222, 204, 168],
+  roof: [150, 72, 50],
+  soil: [118, 88, 56],
+  crop: [196, 176, 74],
+  sprout: [112, 150, 60],
+  awning: [182, 58, 48],
+  awningAlt: [236, 224, 196],
   rock: { side: [110, 108, 102], top: [150, 147, 140] },
   trunk: [92, 60, 32],
   leaf: [44, 98, 42],
@@ -227,6 +235,7 @@ export class Renderer {
     this.drawGround(world, game.time)
     if (ui.showGrid) this.drawGrid(world)
     this.drawSpawns(game)
+    if (ui.orders) this.drawOrders(game, ui.orders)
 
     // Painter's algorithm by tile: terrain, then structure, then the
     // units standing on that tile, nearest tiles last.
@@ -444,7 +453,7 @@ export class Renderer {
   }
 
   // Thin wall: a post with arms reaching toward connected neighbours.
-  thinWall(world, x, y, z, h, width, c, f) {
+  thinWall(world, x, y, z, h, width, c, f, hoard = false) {
     const hw = width / 2
     const cx = x + 0.5
     const cy = y + 0.5
@@ -456,6 +465,45 @@ export class Renderer {
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
     for (const p of parts) this.box(p[0], p[1], p[2], p[3], z, z + h, scale(c.side, f), scale(c.top, f), 0, false)
+    if (!hoard) return
+    // Wooden boards along both sides of the walkway.
+    const rails = []
+    const t = 0.06
+    // Centre post: boards only on sides with no wall joining.
+    const [c0, c1, c2, c3] = parts.find((p) => Math.abs(p[2] - p[0] - width) < 1e-6 && Math.abs(p[3] - p[1] - width) < 1e-6)
+    if (!this.connects(world, x, y, 0)) rails.push([c0, c1, c2, c1 + t])
+    if (!this.connects(world, x, y, 1)) rails.push([c2 - t, c1, c2, c3])
+    if (!this.connects(world, x, y, 2)) rails.push([c0, c3 - t, c2, c3])
+    if (!this.connects(world, x, y, 3)) rails.push([c0, c1, c0 + t, c3])
+    for (const [x0, y0, x1, y1] of parts) {
+      if (x0 === c0 && y0 === c1 && x1 === c2 && y1 === c3) continue
+      const alongX = x1 - x0 > y1 - y0 + 1e-6
+      const alongY = y1 - y0 > x1 - x0 + 1e-6
+      if (!alongY) {
+        rails.push([x0, y0, x1, y0 + t], [x0, y1 - t, x1, y1])
+      }
+      if (!alongX) {
+        rails.push([x0, y0, x0 + t, y1], [x1 - t, y0, x1, y1])
+      }
+    }
+    this.rails(rails, z + h)
+  }
+
+  rails(list, z) {
+    const cam = this.cam
+    list.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
+    for (const r of list) this.box(r[0], r[1], r[2], r[3], z, z + 0.3, COLORS.hoard, scale(COLORS.hoard, 1.25), 0, true)
+  }
+
+  // Rails around the edges named by the N/E/S/W bit mask.
+  edgeRails(x0, y0, x1, y1, z, edges) {
+    const t = 0.07
+    const list = []
+    if (edges & 1) list.push([x0, y0, x1, y0 + t])
+    if (edges & 2) list.push([x1 - t, y0, x1, y1])
+    if (edges & 4) list.push([x0, y1 - t, x1, y1])
+    if (edges & 8) list.push([x0, y0, x0 + t, y1])
+    this.rails(list, z)
   }
 
   drawTile(world, i, x, y, z, time) {
@@ -470,7 +518,7 @@ export class Renderer {
       }
       case 'wall': {
         const d = STRUCTURES.wall
-        this.thinWall(world, x, y, z, d.height, d.thin, COLORS.wall, f)
+        this.thinWall(world, x, y, z, d.height, d.thin, COLORS.wall, f, t.hoard)
         break
       }
       case 'thick': {
@@ -483,14 +531,16 @@ export class Renderer {
         // Battlements on sides that face open ground.
         let edges = 0
         for (let s = 0; s < 4; s++) if (!this.connects(world, x, y, s)) edges |= 1 << s
-        this.merlons(x, y, x + 1, y + 1, z + h, c, edges)
+        if (t.hoard) this.edgeRails(x, y, x + 1, y + 1, z + h, edges)
+        else this.merlons(x, y, x + 1, y + 1, z + h, c, edges)
         break
       }
       case 'tower': {
         const h = STRUCTURES.tower.height
         const c = COLORS.tower
         this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z, z + h, scale(c.side, f), scale(c.top, f))
-        this.merlons(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, c, 15)
+        if (t.hoard) this.edgeRails(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, 15)
+        else this.merlons(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, c, 15)
         break
       }
       case 'keep': {
@@ -520,6 +570,18 @@ export class Renderer {
         break
       case 'gate':
         this.drawGate(world, i, x, y, z, f)
+        break
+      case 'cottage':
+        this.drawCottage(x, y, z, f)
+        break
+      case 'farm':
+        this.drawFarm(x, y, z, f, t.v)
+        break
+      case 'market':
+        this.drawMarket(x, y, z, f)
+        break
+      case 'plot':
+        this.drawPlot(x, y, z, t.plot, time)
         break
       case 'trap': {
         this.ctx.beginPath()
@@ -634,6 +696,146 @@ export class Renderer {
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
     for (const p of parts) this.box(...p, 0, true)
+    if (world.tiles[i].hoard) {
+      if (alongX) this.edgeRails(x, y + 0.12, x + 1, y + 0.88, z + h, 5)
+      else this.edgeRails(x + 0.12, y, x + 0.88, y + 1, z + h, 10)
+    }
+  }
+
+  drawCottage(x, y, z, f) {
+    const { ctx, cam } = this
+    const x0 = x + 0.18
+    const x1 = x + 0.82
+    const y0 = y + 0.24
+    const y1 = y + 0.76
+    const h = z + 0.42
+    const ridge = z + 0.8
+    const cy = y + 0.5
+    this.ellipse(x + 0.5, y + 0.5, z, 0.45, 'rgba(0,0,0,0.18)')
+    this.box(x0, y0, x1, y1, z, h, scale(COLORS.plaster, f), scale(COLORS.plaster, f), 0, false)
+    // Gable roof along x: back slope, end gables, front slope.
+    const roof = (pts, shade) => {
+      this.poly(pts)
+      ctx.fillStyle = rgb(COLORS.roof, shade * f)
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(40,20,10,0.35)'
+      ctx.stroke()
+    }
+    const northSlope = [x0 - 0.04, y0 - 0.05, h, x1 + 0.04, y0 - 0.05, h, x1 + 0.04, cy, ridge, x0 - 0.04, cy, ridge]
+    const southSlope = [x0 - 0.04, cy, ridge, x1 + 0.04, cy, ridge, x1 + 0.04, y1 + 0.05, h, x0 - 0.04, y1 + 0.05, h]
+    const southFront = cam.faceVisible(0, 1)
+    roof(southFront ? northSlope : southSlope, 0.8)
+    for (const [gx, nx] of [[x0, -1], [x1, 1]]) {
+      if (!cam.faceVisible(nx, 0)) continue
+      this.poly([gx, y0, h, gx, y1, h, gx, cy, ridge])
+      ctx.fillStyle = rgb(COLORS.plaster, faceShade(nx, 0) * f)
+      ctx.fill()
+    }
+    roof(southFront ? southSlope : northSlope, 1)
+    // Chimney.
+    this.box(x1 - 0.16, cy - 0.22, x1 - 0.06, cy - 0.12, h, ridge + 0.08, [120, 100, 90], [90, 80, 72], 0, false)
+  }
+
+  drawFarm(x, y, z, f, v) {
+    const { ctx } = this
+    ctx.beginPath()
+    this.pathQuad(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + 0.01)
+    ctx.fillStyle = rgb(COLORS.soil, f)
+    ctx.fill()
+    const lw = Math.max(1.5, this.cam.k * 0.07)
+    const ripe = v > 0.5
+    for (let r = 0; r < 4; r++) {
+      const yy = y + 0.17 + r * 0.22
+      this.line(x + 0.12, yy, z + 0.03, x + 0.88, yy, z + 0.03, rgb(ripe ? COLORS.crop : COLORS.sprout, f), lw)
+      // A few stalks so the rows read in 3D.
+      for (const xx of [0.25, 0.5, 0.75])
+        this.line(x + xx, yy, z, x + xx, yy, z + 0.14, rgb(ripe ? COLORS.crop : COLORS.sprout, f * 0.9), lw * 0.6)
+    }
+  }
+
+  drawMarket(x, y, z, f) {
+    const { ctx } = this
+    this.ellipse(x + 0.5, y + 0.5, z, 0.48, 'rgba(0,0,0,0.18)')
+    this.box(x + 0.15, y + 0.3, x + 0.85, y + 0.7, z, z + 0.35, scale(COLORS.catapult, f), scale(COLORS.catapult, 1.15 * f), 0, true)
+    const lw = Math.max(1.5, this.cam.k * 0.05)
+    for (const [px, py] of [[0.12, 0.2], [0.88, 0.2], [0.12, 0.8], [0.88, 0.8]])
+      this.line(x + px, y + py, z, x + px, y + py, z + 0.85, '#4a3220', lw)
+    // Striped awning sloping toward the front.
+    for (let k = 0; k < 5; k++) {
+      const a = x + 0.08 + k * 0.168
+      const b = a + 0.168
+      this.poly([a, y + 0.14, z + 0.95, b, y + 0.14, z + 0.95, b, y + 0.86, z + 0.75, a, y + 0.86, z + 0.75])
+      ctx.fillStyle = rgb(k % 2 ? COLORS.awningAlt : COLORS.awning, f)
+      ctx.fill()
+    }
+    this.ball(x + 0.35, y + 0.5, z + 0.42, 0.08, rgb(COLORS.crop))
+    this.ball(x + 0.62, y + 0.45, z + 0.42, 0.07, '#a83a2a')
+  }
+
+  // A plot the village wants built: stakes, string and a ghost of the building.
+  drawPlot(x, y, z, kind, time) {
+    const { ctx } = this
+    const pulse = 0.55 + 0.25 * Math.sin(time * 3)
+    ctx.beginPath()
+    this.pathQuad(x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + 0.01)
+    ctx.fillStyle = `rgba(240,210,120,${0.12 + pulse * 0.1})`
+    ctx.fill()
+    ctx.setLineDash([4, 4])
+    ctx.strokeStyle = `rgba(250,225,150,${pulse})`
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    ctx.setLineDash([])
+    const lw = Math.max(1.2, this.cam.k * 0.04)
+    for (const [px, py] of [[0.08, 0.08], [0.92, 0.08], [0.92, 0.92], [0.08, 0.92]])
+      this.line(x + px, y + py, z, x + px, y + py, z + 0.25, '#e9d9b0', lw)
+    ctx.globalAlpha = 0.35
+    if (kind === 'cottage') this.drawCottage(x, y, z, 1)
+    else if (kind === 'farm') this.drawFarm(x, y, z, 1, 0.2)
+    else if (kind === 'market') this.drawMarket(x, y, z, 1)
+    ctx.globalAlpha = 1
+  }
+
+  // Swordsman orders: their zones, the selection, and the box being dragged.
+  drawOrders(game, orders) {
+    const { ctx } = this
+    const seen = new Set()
+    for (const s of game.swordsmen) {
+      const sel = orders.selected.has(s.id)
+      if (!s.zone || (!orders.active && !sel)) continue
+      const key = JSON.stringify(s.zone)
+      if (seen.has(key)) continue
+      seen.add(key)
+      const z = s.zone
+      ctx.beginPath()
+      this.pathQuad(z.x0, z.y0, z.x1 + 1, z.y1 + 1)
+      ctx.fillStyle = sel ? 'rgba(110,160,255,0.18)' : 'rgba(110,160,255,0.09)'
+      ctx.fill()
+      ctx.setLineDash([6, 5])
+      ctx.strokeStyle = 'rgba(150,190,255,0.85)'
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+    for (const s of game.swordsmen) {
+      if (!orders.selected.has(s.id)) continue
+      const { cam } = this
+      cam.P(s.x, s.y, s.z)
+      ctx.beginPath()
+      ctx.ellipse(cam.sx, cam.sy, 0.36 * cam.k, 0.36 * cam.k * cam.sinE, 0, 0, Math.PI * 2)
+      ctx.strokeStyle = '#f0c24b'
+      ctx.lineWidth = 2.5
+      ctx.stroke()
+    }
+    if (orders.box) {
+      const { x0, y0, x1, y1 } = orders.box
+      ctx.beginPath()
+      this.pathQuad(x0, y0, x1 + 1, y1 + 1)
+      ctx.fillStyle = orders.selected.size ? 'rgba(110,160,255,0.22)' : 'rgba(240,194,75,0.18)'
+      ctx.fill()
+      ctx.strokeStyle = orders.selected.size ? 'rgba(170,205,255,0.95)' : 'rgba(240,194,75,0.95)'
+      ctx.lineWidth = 2
+      ctx.stroke()
+    }
   }
 
   merlons(x0, y0, x1, y1, z, c, edges) {
@@ -821,7 +1023,8 @@ export class Renderer {
     const { world } = game
     const x = pv.i % world.w
     const y = (pv.i / world.w) | 0
-    const z = pv.type === 'archer' || pv.type === 'upgrade' || pv.type === 'demolish' ? world.surface(pv.i) + 0.02 : world.elev(pv.i) + 0.02
+    const onTop = ['archer', 'upgrade', 'demolish', 'hoard'].includes(pv.type)
+    const z = onTop ? world.surface(pv.i) + 0.02 : world.elev(pv.i) + 0.02
     ctx.beginPath()
     this.pathQuad(x, y, x + 1, y + 1, z)
     ctx.fillStyle = pv.ok ? 'rgba(120,230,120,0.35)' : 'rgba(240,80,60,0.35)'

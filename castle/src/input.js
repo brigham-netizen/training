@@ -44,6 +44,7 @@ export class Input {
     if (this.pointers.size === 2) {
       // Abandon any pending/one-finger action and start a pinch.
       if (this.mode === 'tower') this.h.preview(null)
+      if (this.mode === 'box') this.h.boxCancel()
       this.mode = 'pinch'
       this.pinch = this.pinchState()
       return
@@ -54,6 +55,10 @@ export class Input {
     const panButton = e.pointerType === 'mouse' && e.button !== 0
     if (tool === 'look' || panButton) {
       this.mode = 'pan'
+    } else if (this.h.boxTool(tool)) {
+      // Orders: tap to select or send, drag a box to select or assign a zone.
+      this.mode = 'box'
+      this.h.boxStart(this.cam.unproject(e.clientX, e.clientY))
     } else if (this.h.placeOnRelease(tool)) {
       this.mode = 'tower'
       this.lastTile = this.tileAt(e.clientX, e.clientY)
@@ -79,6 +84,9 @@ export class Input {
     switch (this.mode) {
       case 'pan':
         this.cam.panBy(dx, dy)
+        break
+      case 'box':
+        this.h.boxMove(this.cam.unproject(p.x, p.y))
         break
       case 'pending':
         if (Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_SLOP) {
@@ -122,6 +130,12 @@ export class Input {
       // Stay inert until every finger lifts so the remaining one doesn't paint.
       if (this.pointers.size === 0) this.mode = null
       else this.pinch = null
+      return
+    }
+    if (this.mode === 'box') {
+      if (cancelled) this.h.boxCancel()
+      else this.h.boxEnd(this.cam.unproject(p.x, p.y), Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_SLOP)
+      this.mode = null
       return
     }
     if (!cancelled) {

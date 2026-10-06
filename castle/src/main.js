@@ -4,7 +4,8 @@ import { Camera } from './camera.js'
 import { Renderer } from './render.js'
 import { Input } from './input.js'
 import { Audio } from './audio.js'
-import { STRUCTURES, ARCHER, SWORDSMAN, TOTAL_WAVES, waveComposition } from './config.js'
+import { Saves } from './saves.js'
+import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, TOTAL_WAVES, waveComposition } from './config.js'
 
 const ICONS = {
   look: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>',
@@ -25,6 +26,9 @@ const ICONS = {
   upgrade: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21h16M7 21V11h10v10M12 3v10M8 7l4-4 4 4"/></svg>',
   soundOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>',
   soundOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></svg>',
+  hoard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 21V13h18v8M3 13V7h3v6M9 13V7h3v6M15 13V7h3v6M21 13V7"/><path d="M2 7h20"/></svg>',
+  orders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V3M5 4h12l-3 4 3 4H5"/><path d="M14 16h7v5h-7z" stroke-dasharray="2 2"/></svg>',
+  settle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 11l9-7 9 7M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
@@ -40,6 +44,9 @@ const TOOL_LABELS = {
   gate: 'Gate',
   swordsman: 'Swordsman',
   upgrade: 'Upgrade',
+  hoard: 'Hoarding',
+  orders: 'Orders',
+  settle: 'Village',
   trap: 'Spikes',
   demolish: 'Remove',
 }
@@ -51,6 +58,10 @@ const TOOL_HINTS = {
   archer: 'Tap a wall, tower or the keep.',
   gate: 'Your troops walk through. Enemies must break it.',
   swordsman: 'Guards a spot and charges nearby enemies.',
+  hoard: 'Wooden shields on a stone wall, gate or tower. Archers behind it are much safer.',
+  orders: 'Tell swordsmen which area to cover.',
+  upgrade: 'Palisade to stone, stone to thick; repairs damage.',
+  settle: 'Build the houses and farms the village asks for.',
   moat: 'Enemies wade through slowly.',
   pikes: 'Hurts anyone who attacks it.',
   trap: 'Hurts anyone who walks over it.',
@@ -58,20 +69,22 @@ const TOOL_HINTS = {
 // Toolbar groups; multi-tool groups open a flyout.
 const GROUPS = [
   { id: 'look', tools: ['look'] },
-  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate'] },
-  { id: 'defend', tools: ['tower', 'archer', 'swordsman'] },
+  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate', 'hoard'] },
+  { id: 'defend', tools: ['tower', 'archer', 'swordsman', 'orders'] },
   { id: 'obstacles', tools: ['moat', 'pikes', 'trap'] },
-  { id: 'upgrade', tools: ['upgrade'] },
+  { id: 'improve', tools: ['settle', 'upgrade'] },
   { id: 'demolish', tools: ['demolish'] },
 ]
-const KEYS = ['look', 'palisade', 'wall', 'thick', 'gate', 'tower', 'archer', 'swordsman', 'upgrade', 'demolish']
+const KEYS = ['look', 'palisade', 'wall', 'thick', 'gate', 'tower', 'archer', 'swordsman', 'orders', 'settle']
 const PLACE_ON_RELEASE = new Set(['tower', 'archer', 'swordsman', 'gate'])
-const costOf = (id) => (id === 'archer' ? ARCHER.cost : id === 'swordsman' ? SWORDSMAN.cost : STRUCTURES[id]?.cost)
+const costOf = (id) =>
+  id === 'archer' ? ARCHER.cost : id === 'swordsman' ? SWORDSMAN.cost : id === 'hoard' ? HOARDING.cost : STRUCTURES[id]?.cost
 
 const $ = (id) => document.getElementById(id)
 
 const randomSeed = () => Math.floor(Math.random() * 1e9)
-const game = new Game(randomSeed())
+let game = new Game(randomSeed())
+const saves = new Saves()
 const camera = new Camera(game.world.w, game.world.h)
 const canvas = $('game')
 const renderer = new Renderer(canvas, camera)
@@ -84,7 +97,8 @@ window.addEventListener('pointerdown', () => audio.unlock(), { capture: true })
 const ui = {
   tool: 'wall',
   buildTool: 'wall', // last build tool, restored after each wave
-  groupChoice: { walls: 'wall', defend: 'tower', obstacles: 'moat' },
+  groupChoice: { walls: 'wall', defend: 'tower', obstacles: 'moat', improve: 'settle' },
+  orders: { selected: new Set(), box: null, start: null, active: false },
   preview: null,
   showGrid: true,
   speed: 1,
@@ -122,6 +136,24 @@ function lineTiles(a, b) {
   return out
 }
 
+function tileRect(a, b) {
+  const clampX = (v) => Math.max(0, Math.min(game.world.w - 1, Math.floor(v)))
+  const clampY = (v) => Math.max(0, Math.min(game.world.h - 1, Math.floor(v)))
+  return {
+    x0: clampX(Math.min(a.x, b.x)), x1: clampX(Math.max(a.x, b.x)),
+    y0: clampY(Math.min(a.y, b.y)), y1: clampY(Math.max(a.y, b.y)),
+  }
+}
+
+function giveOrders(zone, post) {
+  const ids = [...ui.orders.selected]
+  if (game.orderSwordsmen(ids, zone, post)) {
+    audio.play('recruit')
+    banner(zone ? `${ids.length} ${ids.length === 1 ? 'swordsman' : 'swordsmen'} covering that area` : 'Holding that spot', 1400)
+    ui.orders.selected = new Set()
+  }
+}
+
 let noGoldWarned = false
 function paint(i) {
   const tool = ui.tool
@@ -129,6 +161,10 @@ function paint(i) {
     game.demolish(i)
   } else if (tool === 'upgrade') {
     if (!game.place(i, 'upgrade') && game.upgradeInfo(i) && game.gold < game.upgradeInfo(i).cost) warnGold()
+  } else if (tool === 'settle' || tool === 'hoard') {
+    const t = game.world.tiles[i]
+    const cost = tool === 'hoard' ? HOARDING.cost : STRUCTURES[t.plot]?.cost
+    if (!game.place(i, tool) && cost && game.gold < cost) warnGold()
   } else if (STRUCTURES[tool]) {
     if (!game.place(i, tool) && game.world.canBuild(i, tool) && game.gold < costOf(tool)) warnGold()
   }
@@ -153,6 +189,34 @@ new Input(canvas, camera, {
     noGoldWarned = false
   },
   placeOnRelease: (tool) => PLACE_ON_RELEASE.has(tool),
+  boxTool: (tool) => tool === 'orders',
+  boxStart: (p) => {
+    ui.orders.start = p
+    ui.orders.box = tileRect(p, p)
+  },
+  boxMove: (p) => {
+    if (ui.orders.start) ui.orders.box = tileRect(ui.orders.start, p)
+  },
+  boxCancel: () => {
+    ui.orders.box = ui.orders.start = null
+  },
+  boxEnd: (p, tap) => {
+    const o = ui.orders
+    const rect = o.start ? tileRect(o.start, p) : null
+    o.box = o.start = null
+    if (tap) {
+      const near = game.swordsmen.filter((s) => Math.hypot(s.x - p.x, s.y - p.y) < 0.8)
+      if (near.length) o.selected = new Set(near.map((s) => s.id))
+      else if (o.selected.size) giveOrders(null, worldToTile(p.x, p.y))
+    } else if (rect) {
+      if (!o.selected.size) {
+        // Box-select everyone inside.
+        const inside = game.swordsmen.filter((s) => s.x >= rect.x0 && s.x <= rect.x1 + 1 && s.y >= rect.y0 && s.y <= rect.y1 + 1)
+        o.selected = new Set(inside.map((s) => s.id))
+      } else giveOrders(rect, null)
+    }
+    refreshHud(true)
+  },
   placeAt: (i) => {
     if (!game.place(i, ui.tool) && game.gold < costOf(ui.tool)) warnGold()
     noGoldWarned = false
@@ -220,6 +284,7 @@ function closeFlyout() {
 canvas.addEventListener('pointerdown', closeFlyout)
 
 function selectTool(id) {
+  if (id !== 'orders') ui.orders.selected = new Set()
   ui.tool = id
   if (id !== 'look' && id !== 'demolish') ui.buildTool = id
   for (const g of GROUPS) if (g.tools.length > 1 && g.tools.includes(id)) ui.groupChoice[g.id] = id
@@ -251,9 +316,19 @@ $('speed-btn').addEventListener('click', () => {
   ui.speed = ui.speed === 1 ? 2 : ui.speed === 2 ? 3 : 1
   refreshHud()
 })
-$('start-btn').addEventListener('click', () => {
-  if (game.phase === 'build') game.startWave()
-})
+$('start-btn').addEventListener('click', startWave)
+
+// Each wave starts from a saved checkpoint, so a lost wave can be retried.
+function startWave() {
+  if (game.phase !== 'build') return
+  autosave()
+  game.startWave()
+}
+
+function autosave() {
+  if (game.phase !== 'build') return
+  saves.saveProgress(game.serialize()).catch(() => {})
+}
 $('menu-btn').addEventListener('click', () => showMenu())
 
 function setView(mode) {
@@ -308,17 +383,38 @@ function refreshHud() {
     if (c.brute) parts.push(`${c.brute} brutes`)
     if (c.ram) parts.push(`${c.ram} rams`)
     const gates = game.activeSpawns(n).map((s) => s.name).join(', ')
-    info.innerHTML = `<b>Wave ${n}</b> from ${gates}<br>${parts.join(' · ')}`
+    if (c.bowman) parts.push(`${c.bowman} bowmen`)
+    if (c.catapult) parts.push(`${c.catapult} catapult${c.catapult > 1 ? 's' : ''}`)
+    const income = game.income()
+    info.innerHTML = `<b>Wave ${n}</b> from ${gates}<br>${parts.join(' · ')}${income ? `<br>Village: +${income} gold per wave` : ''}`
   }
+  ui.orders.active = ui.tool === 'orders'
   const hint = $('tool-hint')
-  const upgrading = ui.tool === 'upgrade'
-  hint.classList.toggle('hidden', !upgrading)
-  if (upgrading && !hint.dataset.set) {
-    hint.dataset.set = '1'
-    const step = (a, b) => STRUCTURES[b].cost - STRUCTURES[a].cost
-    hint.innerHTML = `<b>Upgrade</b>: tap or drag over walls<br>Palisade → stone ${step('palisade', 'wall')} · Stone → thick ${step('wall', 'thick')}<br>Damaged thick walls, towers, gates: repair`
-  }
+  const text = toolHint()
+  hint.classList.toggle('hidden', !text)
+  if (text && hint.innerHTML !== text) hint.innerHTML = text
   ui.showGrid = building || ui.tool !== 'look'
+}
+
+function toolHint() {
+  const step = (a, b) => STRUCTURES[b].cost - STRUCTURES[a].cost
+  switch (ui.tool) {
+    case 'upgrade':
+      return `<b>Upgrade</b>: tap or drag over walls<br>Palisade → stone ${step('palisade', 'wall')} · Stone → thick ${step('wall', 'thick')}<br>Damaged thick walls, towers, gates: repair`
+    case 'settle': {
+      const plots = game.world.tiles.filter((t) => t.type === 'plot').length
+      return `<b>Village</b>: tap a staked plot to build it<br>Cottage ${STRUCTURES.cottage.cost} (+${STRUCTURES.cottage.income}) · Farm ${STRUCTURES.farm.cost} (+${STRUCTURES.farm.income}) · Market ${STRUCTURES.market.cost} (+${STRUCTURES.market.income})<br>${plots ? `${plots} plot${plots > 1 ? 's' : ''} waiting` : 'New plots appear after each wave'}`
+    }
+    case 'hoard':
+      return `<b>Hoarding</b> (${HOARDING.cost}): tap stone walls, gates, towers<br>Archers behind it take ${Math.round(HOARDING.cover * 100)}% of arrow damage`
+    case 'orders': {
+      const n = ui.orders.selected.size
+      if (!n) return '<b>Orders</b>: tap a swordsman, or drag a box around several, to select'
+      return `<b>${n} selected</b>: drag over the area to cover,<br>or tap a spot to hold`
+    }
+    default:
+      return ''
+  }
 }
 
 let bannerTimer = 0
@@ -372,14 +468,42 @@ function showMenu() {
     <button id="music-toggle" class="${audio.musicOn ? 'on' : ''}">Music: ${audio.musicOn ? 'on' : 'off'}</button>
     <button id="sfx-toggle" class="${audio.sfxOn ? 'on' : ''}">Sound effects: ${audio.sfxOn ? 'on' : 'off'}</button>
   </div>`
-  modal('Hold the Keep', toggles + HELP + CREDITS, [
+  const savesRow = `<div class="toggles">
+    <button id="save-game">Save game</button>
+    <button id="load-game">Load save</button>
+    <button id="save-map">Save this map</button>
+    <button id="my-maps">My maps</button>
+  </div><p class="save-note" id="save-note">Saves are kept in ${saves.where}. The game also saves before every wave.</p>`
+  modal('Hold the Keep', toggles + savesRow + HELP + CREDITS, [
     { label: 'New map', run: () => restart(randomSeed()) },
     { label: 'Restart', run: () => restart() },
     { label: 'Resume', primary: true },
   ])
 }
 
-document.addEventListener('click', (e) => {
+const note = (text) => {
+  const el = $('save-note')
+  if (el) el.textContent = text
+}
+
+document.addEventListener('click', async (e) => {
+  const id = e.target.id
+  if (id === 'save-game') {
+    if (game.phase !== 'build') return note('You can save between waves.')
+    note('Saving…')
+    const ok = await saves.saveProgress(game.serialize()).catch(() => false)
+    return note(ok ? `Saved wave ${game.wave + 1} to ${saves.where}.` : 'Could not save. Try again in a moment.')
+  }
+  if (id === 'load-game') {
+    const data = await saves.loadProgress()
+    if (!data) return note('No saved game yet.')
+    closeModal()
+    loadGame(data)
+    return
+  }
+  if (id === 'save-map') return showSaveMap()
+  if (id === 'my-maps') return showMaps()
+  if (id.startsWith('play-map-') || id.startsWith('del-map-')) return mapAction(e.target)
   if (e.target.id === 'music-toggle') audio.toggleMusic()
   else if (e.target.id === 'sfx-toggle') audio.toggleSfx()
   else return
@@ -388,8 +512,87 @@ document.addEventListener('click', (e) => {
   refreshSoundBtn()
 })
 
-function restart(seed) {
-  game.reset(seed)
+function closeModal() {
+  $('modal').classList.add('hidden')
+  ui.paused = false
+}
+
+function loadGame(data) {
+  try {
+    game = Game.restore(data)
+  } catch {
+    banner('That save is from an older version and can\'t be loaded.')
+    return
+  }
+  window.htk.game = game
+  ui.orders.selected = new Set()
+  ui.tool = ui.buildTool = 'wall'
+  ui.speed = 1
+  setView('top')
+  audio.setMusic('build')
+  banner(`Welcome back<small>Wave ${game.wave + 1} of ${TOTAL_WAVES}</small>`)
+  refreshHud()
+}
+
+let mapsCache = []
+function showSaveMap() {
+  const count = mapsCache.length
+  modal('Save this map', `<p>Keep this landscape to play again later. Only the land is saved, not your castle.</p>
+    <label class="field">Name<input id="map-name" maxlength="32" value="Map ${count + 1}" /></label>`, [
+    { label: 'Cancel' },
+    {
+      label: 'Save map',
+      primary: true,
+      run: async () => {
+        const name = ($('map-name')?.value || '').trim() || `Map ${count + 1}`
+        const ok = await saves.saveMap(name, game.world.snapshotMap()).catch(() => false)
+        banner(ok ? `Saved “${name}”<small>Find it under My maps</small>` : 'Could not save the map. Try again in a moment.')
+      },
+    },
+  ])
+  // Read the name before the modal closes.
+  const input = $('map-name')
+  input?.addEventListener('keydown', (ev) => ev.key === 'Enter' && $('modal-actions').lastChild.click())
+}
+
+async function showMaps() {
+  mapsCache = await saves.listMaps()
+  const rows = mapsCache.length
+    ? mapsCache.map((m) => `<div class="map-row"><span><b>${escapeHtml(m.name)}</b><small>${new Date(m.savedAt).toLocaleDateString()}</small></span>
+        <button id="play-map-${m.id}" class="go">Play</button><button id="del-map-${m.id}">Delete</button></div>`).join('')
+    : '<p>No saved maps yet. When you find a landscape you like, open the menu and tap <b>Save this map</b>.</p>'
+  modal('My maps', `<div class="map-list">${rows}</div>`, [{ label: 'Close', primary: true }])
+}
+
+async function mapAction(btn) {
+  const play = btn.id.startsWith('play-map-')
+  const id = btn.id.replace(/^(play|del)-map-/, '')
+  const entry = mapsCache.find((m) => m.id === id)
+  if (!entry) return
+  if (play) {
+    closeModal()
+    restart(Math.floor(Math.random() * 1e9), entry.map)
+    banner(`Playing “${escapeHtml(entry.name)}”`)
+    return
+  }
+  // Two taps to delete.
+  if (btn.dataset.confirm !== '1') {
+    btn.dataset.confirm = '1'
+    btn.textContent = 'Tap again'
+    return
+  }
+  await saves.deleteMap(id).catch(() => {})
+  showMaps()
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+}
+
+// No arguments: same land again. A seed alone: a brand new landscape.
+function restart(seed, map) {
+  if (seed === undefined) game.reset()
+  else game.reset(seed, map || null)
   audio.setMusic('build')
   ui.tool = ui.buildTool = 'wall'
   ui.speed = 1
@@ -408,7 +611,9 @@ function handleEvents() {
       ui.tool = 'look'
       closeFlyout()
     } else if (ev.type === 'waveEnd') {
-      banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold. Strengthen your defenses.</small>`, 3200)
+      const village = ev.village ? ` and +${ev.village} from the village` : ''
+      banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold${village}. Strengthen your defenses.</small>`, 3400)
+      autosave()
       setView('top')
       audio.play('waveEnd')
       audio.setMusic('build')
@@ -426,7 +631,16 @@ function handleEvents() {
       audio.setMusic('build')
       modal('The keep has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>`, [
         { label: 'Look around' },
-        { label: 'Try again', primary: true, run: () => restart() },
+        { label: 'Start over', run: () => restart() },
+        {
+          label: 'Retry this wave',
+          primary: true,
+          run: async () => {
+            const data = await saves.loadProgress()
+            if (data) loadGame(data)
+            else restart()
+          },
+        },
       ])
     }
     refreshHud()
@@ -437,13 +651,14 @@ function handleEvents() {
 // ---- keyboard (desktop testing) -----------------------------------------------
 
 window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return
   const n = '1234567890'.indexOf(e.key)
   if (n >= 0) selectTool(KEYS[n])
   else if (e.key === 'v') setView(camera.mode === 'top' ? 'iso' : 'top')
   else if (e.key === 'r') camera.rotateBy(Math.PI / 2)
   else if (e.key === ' ' && game.phase === 'build') {
     e.preventDefault()
-    game.startWave()
+    startWave()
   }
 })
 
@@ -502,6 +717,17 @@ try {
     localStorage.setItem('htk-seen-help', '1')
     modal('Hold the Keep', HELP, [{ label: 'Start building', primary: true }])
   }
+
 } catch {
   // Storage blocked (private mode): skip the intro.
 }
+
+// Offer to pick up a saved castle where it was left.
+saves.loadProgress().then((data) => {
+  if (!data || (data.wave === 0 && !data.types.some((t) => t && t !== 'keep'))) return
+  if (!$('modal').classList.contains('hidden')) return
+  modal('Welcome back', `<p>You have a castle in progress at <b>wave ${data.wave + 1}</b> of ${TOTAL_WAVES}.</p>`, [
+    { label: 'New game' },
+    { label: 'Continue', primary: true, run: () => loadGame(data) },
+  ])
+})

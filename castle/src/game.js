@@ -1,7 +1,8 @@
 import { World, mulberry32 } from './world.js'
-import { computeFlow } from './pathing.js'
+import { computeFlow, computeRamFlow } from './pathing.js'
 import {
   START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
+  HOARDING, VILLAGE, ZONE_MARGIN,
   waveComposition, waveBonus,
 } from './config.js'
 
@@ -10,15 +11,19 @@ const THINK = 0.4 // seconds between unit decisions
 const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 
+const SAVE_VERSION = 1
+
 export class Game {
-  constructor(seed = 20261006) {
+  // `map` is a saved landscape (World.snapshotMap); otherwise `seed` generates one.
+  constructor(seed = 20261006, map = null) {
     this.seed = seed
-    this.reset()
+    this.reset(seed, map)
   }
 
-  reset(seed = this.seed) {
+  reset(seed = this.seed, map = this.map) {
     this.seed = seed
-    this.world = new World(seed)
+    this.map = map
+    this.world = new World(seed, map)
     this.gold = START_GOLD
     this.wave = 0 // waves completed
     this.phase = 'build' // build | attack | won | lost
@@ -35,13 +40,13 @@ export class Game {
     this.events = [] // drained by the UI
     this.sounds = [] // drained by the UI each frame
     this.rnd = mulberry32(seed ^ 0x9e3779b9)
-    this.flow = computeFlow(this.world)
-    this.world.dirty = false
+    this.repath()
 
     // The keep starts garrisoned, one archer per outer side.
     const k = this.world.keep
     for (const [dx, dy] of [[1, 0], [0, 2], [2, 2]].slice(0, KEEP.archers))
       this.addArcher(this.world.idx(k.x + dx, k.y + dy))
+    this.proposePlots()
   }
 
   emit(type, data = {}) {
@@ -79,6 +84,8 @@ export class Game {
     if (type === 'archer') return this.canPlaceArcher(i)
     if (type === 'swordsman') return this.canPlaceSwordsman(i)
     if (type === 'upgrade') return this.upgradeInfo(i) !== null && this.gold >= this.upgradeInfo(i).cost
+    if (type === 'hoard') return this.canHoard(i)
+    if (type === 'settle') return this.canSettle(i)
     if (!this.world.canBuild(i, type)) return false
     if (this.gold < STRUCTURES[type].cost) return false
     if (STRUCTURES[type].solid && (this.enemyOnTile(i) || this.swordsmanOnTile(i))) return false
@@ -89,6 +96,8 @@ export class Game {
     if (type === 'archer') return this.placeArcher(i)
     if (type === 'swordsman') return this.placeSwordsman(i)
     if (type === 'upgrade') return this.upgrade(i)
+    if (type === 'hoard') return this.hoard(i)
+    if (type === 'settle') return this.settle(i)
     if (!this.canPlace(i, type)) return false
     this.gold -= STRUCTURES[type].cost
     this.world.build(i, type)
@@ -142,17 +151,184 @@ export class Game {
     const health = t.maxHp ? t.hp / t.maxHp : 1
     // Free rearranging between waves; half value once the fighting starts.
     const rate = this.phase === 'build' ? 1 : 0.5
-    return Math.floor(def.cost * health * rate)
+    const value = def.cost + (t.hoard ? HOARDING.cost : 0)
+    return Math.floor(value * health * rate)
   }
 
   demolish(i) {
-    if (!STRUCTURES[this.world.tiles[i].type]) return false
+    const t = this.world.tiles[i]
+    if (t.type === 'plot') {
+      // Turn down the village's proposal; it will pick somewhere else.
+      this.world.clear(i)
+      return true
+    }
+    if (!STRUCTURES[t.type]) return false
     this.gold += this.refundFor(i)
     const stranded = this.archers.filter((a) => a.tile === i)
     this.world.clear(i)
     // Archers on a removed structure fall back to the keep.
     for (const a of stranded) this.rehouse(a)
     return true
+  }
+
+  // ---- hoardings ------------------------------------------------------------
+
+  canHoard(i) {
+    const t = this.world.tiles[i]
+    return this.phase !== 'won' && this.phase !== 'lost' && HOARDING.on.includes(t.type) && !t.hoard && this.gold >= HOARDING.cost
+  }
+
+  hoard(i) {
+    if (!this.canHoard(i)) return false
+    this.gold -= HOARDING.cost
+    this.world.tiles[i].hoard = true
+    this.sfx('build', ...this.center(i))
+    return true
+  }
+
+  // ---- village --------------------------------------------------------------
+
+  villageCount(type) {
+    return this.world.tiles.filter((t) => t.type === type).length
+  }
+
+  canSettle(i) {
+    const t = this.world.tiles[i]
+    return this.phase !== 'won' && this.phase !== 'lost' && t.type === 'plot' &&
+      this.gold >= STRUCTURES[t.plot].cost && !(STRUCTURES[t.plot].solid && this.enemyOnTile(i))
+  }
+
+  settle(i) {
+    if (!this.canSettle(i)) return false
+    const kind = this.world.tiles[i].plot
+    this.gold -= STRUCTURES[kind].cost
+    this.world.build(i, kind)
+    this.sfx('build', ...this.center(i))
+    return true
+  }
+
+  income() {
+    let sum = 0
+    for (const t of this.world.tiles) sum += STRUCTURES[t.type]?.income || 0
+    return sum
+  }
+
+  // How safe each empty tile feels to a villager. Judged only from your
+  // own works: walls around it, towers and ramparts nearby, distance from
+  // the keep and from the map's edge. It never looks at where attacks come from.
+  safetyMap() {
+    const { world } = this
+    const { w, h } = world
+    // Ground an outsider could walk to from any edge without breaking a wall.
+    const open = new Uint8Array(w * h)
+    const queue = []
+    for (let i = 0; i < w * h; i++) {
+      const x = i % w
+      const y = (i / w) | 0
+      if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && world.isWalkable(i)) {
+        open[i] = 1
+        queue.push(i)
+      }
+    }
+    for (let q = 0; q < queue.length; q++) {
+      const u = queue[q]
+      const ux = u % w
+      const uy = (u / w) | 0
+      for (const [dx, dy] of N4) {
+        const nx = ux + dx
+        const ny = uy + dy
+        if (!world.inBounds(nx, ny)) continue
+        const v = world.idx(nx, ny)
+        if (open[v] || !world.isWalkable(v)) continue
+        open[v] = 1
+        queue.push(v)
+      }
+    }
+    const k = world.keep
+    const score = new Float32Array(w * h).fill(-Infinity)
+    for (let i = 0; i < w * h; i++) {
+      if (!world.canBuild(i, 'wall') || this.tiles_villageBlocked(i)) continue
+      const x = i % w
+      const y = (i / w) | 0
+      let s = open[i] ? 0 : 30
+      // Watchful ramparts within a few tiles.
+      for (let yy = Math.max(0, y - 4); yy <= Math.min(h - 1, y + 4); yy++)
+        for (let xx = Math.max(0, x - 4); xx <= Math.min(w - 1, x + 4); xx++) {
+          const t = world.tiles[world.idx(xx, yy)].type
+          if (t === 'tower') s += 2.5
+          else if (STRUCTURES[t]?.rampart) s += 0.4
+        }
+      s -= Math.hypot(x - (k.x + 1), y - (k.y + 1)) * 0.8
+      const edge = Math.min(x, y, w - 1 - x, h - 1 - y)
+      if (edge < 3) s -= (3 - edge) * 4
+      if (world.tiles[i].terrain === 'hill') s -= 1 // villagers like flat ground
+      score[i] = s
+    }
+    return score
+  }
+
+  // Villagers don't build hard against walls or block the keep's doorstep.
+  tiles_villageBlocked(i) {
+    const { world } = this
+    const x = i % world.w
+    const y = (i / world.w) | 0
+    for (const [dx, dy] of N4) {
+      const nx = x + dx
+      const ny = y + dy
+      if (!world.inBounds(nx, ny)) continue
+      const t = world.tiles[world.idx(nx, ny)].type
+      if (t === 'keep' || (STRUCTURES[t]?.solid && !STRUCTURES[t]?.village)) return true
+    }
+    return false
+  }
+
+  // Between waves the village asks for new buildings where it feels safest.
+  proposePlots() {
+    const { world } = this
+    const plots = world.tiles.filter((t) => t.type === 'plot').length
+    if (plots >= VILLAGE.maxPlots) return
+    const score = this.safetyMap()
+    const near = (i, types) => {
+      const x = i % world.w
+      const y = (i / world.w) | 0
+      let n = 0
+      for (const [dx, dy] of [...N4, [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        if (!world.inBounds(x + dx, y + dy)) continue
+        const t = world.tiles[world.idx(x + dx, y + dy)]
+        if (types.includes(t.type) || types.includes(t.plot)) n++
+      }
+      return n
+    }
+    const best = (bonus) => {
+      let pick = -1
+      let top = -Infinity
+      for (let i = 0; i < score.length; i++) {
+        if (score[i] === -Infinity || world.tiles[i].type !== 'grass') continue
+        const s = score[i] + bonus(i) + this.rnd() * 0.5
+        if (s > top) {
+          top = s
+          pick = i
+        }
+      }
+      return pick
+    }
+    const propose = (kind, bonus) => {
+      const i = best(bonus)
+      if (i < 0) return
+      world.tiles[i].type = 'plot'
+      world.tiles[i].plot = kind
+    }
+    const cottages = this.villageCount('cottage')
+    const want = []
+    if (cottages >= VILLAGE.marketAfter && !this.villageCount('market') &&
+      !world.tiles.some((t) => t.plot === 'market')) want.push('market')
+    want.push('cottage')
+    if (cottages > 0) want.push('farm')
+    for (const kind of want.slice(0, VILLAGE.maxPlots - plots)) {
+      // Houses cluster together; farms sit beside houses.
+      if (kind === 'farm') propose(kind, (i) => near(i, ['cottage', 'farm']) * 6)
+      else propose(kind, (i) => near(i, ['cottage', 'market']) * 3)
+    }
   }
 
   // ---- archers --------------------------------------------------------------
@@ -368,6 +544,7 @@ export class Game {
       maxHp: SWORDSMAN.hp,
       r: SWORDSMAN.r,
       path: [],
+      zone: null, // {x0, y0, x1, y1} in tiles when given orders
       target: null,
       think: 0,
       heading: Math.PI / 2,
@@ -376,6 +553,41 @@ export class Game {
       flash: 0,
     })
     this.sfx('recruit', x, y)
+    return true
+  }
+
+  covers(s, e) {
+    const z = s.zone
+    if (!z) {
+      const [px, py] = this.center(s.post)
+      return Math.hypot(e.x - px, e.y - py) <= SWORDSMAN.guard
+    }
+    const m = ZONE_MARGIN
+    return e.x >= z.x0 - m && e.x <= z.x1 + 1 + m && e.y >= z.y0 - m && e.y <= z.y1 + 1 + m
+  }
+
+  // Give a group of swordsmen orders: cover a zone (tiles, inclusive), or
+  // with no zone, stand guard at `post`. Posts spread across the zone.
+  orderSwordsmen(ids, zone, post = null) {
+    const { world } = this
+    const group = this.swordsmen.filter((s) => ids.includes(s.id))
+    if (!group.length) return false
+    let spots = []
+    if (zone) {
+      for (let y = zone.y0; y <= zone.y1; y++)
+        for (let x = zone.x0; x <= zone.x1; x++) {
+          const i = world.idx(x, y)
+          if (world.inBounds(x, y) && world.isWalkable(i)) spots.push(i)
+        }
+      // Spread them out evenly over the zone.
+      spots.sort((a, b) => (a % world.w) - (b % world.w) || a - b)
+    } else if (post !== null && world.isWalkable(post)) spots = [post]
+    if (!spots.length) return false
+    group.forEach((s, k) => {
+      s.zone = zone
+      s.post = spots[Math.floor(((k + 0.5) / group.length) * spots.length)]
+      s.think = 0
+    })
     return true
   }
 
@@ -419,10 +631,10 @@ export class Game {
       s.think = THINK
       s.target = null
       if (this.phase === 'attack') {
-        // Charge the closest enemy that has come within guard range of the post.
+        // Charge the closest enemy inside their zone (or near their post).
         let best = Infinity
         for (const e of this.enemies) {
-          if (e.dead || Math.hypot(e.x - px, e.y - py) > SWORDSMAN.guard) continue
+          if (e.dead || !this.covers(s, e)) continue
           const d = Math.hypot(e.x - s.x, e.y - s.y)
           if (d < best) {
             best = d
@@ -590,6 +802,7 @@ export class Game {
 
   repath() {
     this.flow = computeFlow(this.world)
+    this.ramFlow = computeRamFlow(this.world)
     this.world.dirty = false
   }
 
@@ -604,11 +817,13 @@ export class Game {
       return
     }
     const bonus = waveBonus(this.wave)
-    this.gold += bonus
+    const village = this.income()
+    this.gold += bonus + village
     // Masons patch up the keep between waves; walls are on you.
     this.world.keep.hp = this.world.keep.maxHp
     this.phase = 'build'
-    this.emit('waveEnd', { wave: this.wave, bonus })
+    this.proposePlots()
+    this.emit('waveEnd', { wave: this.wave, bonus, village })
   }
 
   blockedAt(x, y, r, troop = false) {
@@ -727,7 +942,7 @@ export class Game {
       }
     }
 
-    let target = flow.next[ci]
+    let target = (e.type === 'ram' ? this.ramFlow : flow).next[ci]
     if (target < 0) {
       // Off the flow field (should be rare): head straight for the keep.
       const k = world.keep
@@ -756,6 +971,10 @@ export class Game {
     e.heading = Math.atan2(dy, dx)
     e.walk += dt * speed * 6
     this.tryMove(e, (dx / len) * step, (dy / len) * step)
+    // Marching boots ruin crops.
+    const under = world.idxAt(e.x, e.y)
+    const trample = STRUCTURES[world.tiles[under].type]?.trample
+    if (trample) this.damageStructure(under, trample * dt)
   }
 
   damageStructure(i, amount) {
@@ -820,6 +1039,12 @@ export class Game {
     return best
   }
 
+  // Share of arrow damage that gets through to a unit.
+  coverFor(u) {
+    if (u.kind !== 'archer') return 1
+    return this.world.tiles[u.tile]?.hoard ? HOARDING.cover : COVER
+  }
+
   shoot(x, y, z, target, dmg, hostile) {
     const dist = Math.hypot(target.x - x, target.y - y)
     this.projectiles.push({
@@ -874,19 +1099,71 @@ export class Game {
         this.damageStructure(p.tile, p.dmg)
         // Archers on or next to the impact get knocked about.
         for (const a of this.archers) if (Math.hypot(a.x - p.tx, a.y - p.ty) < 0.9) {
-          a.hp -= p.splash
+          a.hp -= p.splash * (this.world.tiles[a.tile].hoard ? HOARDING.splash : 1)
           a.flash = 0.15
         }
         this.effects.push({ type: 'dust', x: p.tx, y: p.ty, z: p.tz, t: 0, life: 0.7, size: 0.8 })
         this.sfx('impact', p.tx, p.ty)
       } else if (!p.target.dead) {
         if (p.hostile) {
-          p.target.hp -= p.dmg * (p.target.kind === 'archer' ? COVER : 1)
+          p.target.hp -= p.dmg * this.coverFor(p.target)
           p.target.flash = 0.12
         } else this.hurt(p.target, p.dmg)
         this.sfx('hit', p.tx, p.ty)
       }
     }
     this.projectiles = this.projectiles.filter((p) => !p.done)
+  }
+
+  // ---- saving ---------------------------------------------------------------
+
+  // Snapshot for a progress save (only taken between waves).
+  serialize() {
+    const { world } = this
+    return {
+      v: SAVE_VERSION,
+      seed: this.seed,
+      map: world.snapshotMap(),
+      wave: this.wave,
+      gold: this.gold,
+      types: world.tiles.map((t) => (t.type === 'tree' || t.type === 'rock' ? '' : t.type === 'grass' ? '' : t.type)),
+      hp: world.tiles.map((t) => Math.round(t.hp || 0)),
+      hoard: world.tiles.flatMap((t, i) => (t.hoard ? [i] : [])),
+      plots: world.tiles.flatMap((t, i) => (t.type === 'plot' ? [[i, t.plot]] : [])),
+      archers: this.archers.map((a) => a.post),
+      swordsmen: this.swordsmen.map((s) => ({ post: s.post, zone: s.zone })),
+      savedAt: Date.now(),
+    }
+  }
+
+  static restore(data) {
+    if (!data || data.v !== SAVE_VERSION) throw new Error('unsupported save')
+    const g = new Game(data.seed, data.map)
+    const { world } = g
+    g.archers = []
+    world.tiles.forEach((t, i) => {
+      const type = data.types[i]
+      if (type && type !== 'keep' && type !== 'plot') {
+        world.build(i, type)
+        t.hp = Math.min(t.maxHp, data.hp[i] || t.maxHp)
+      } else if (type !== 'keep' && t.type === 'plot') world.clear(i)
+    })
+    for (const i of data.hoard) world.tiles[i].hoard = true
+    for (const [i, kind] of data.plots) {
+      world.tiles[i].type = 'plot'
+      world.tiles[i].plot = kind
+    }
+    for (const post of data.archers) g.addArcher(post)
+    g.gold = 0
+    for (const s of data.swordsmen) {
+      g.gold = SWORDSMAN.cost
+      if (g.placeSwordsman(s.post)) g.swordsmen[g.swordsmen.length - 1].zone = s.zone
+    }
+    g.gold = data.gold
+    g.wave = data.wave
+    g.sounds.length = 0
+    world.dirty = true
+    g.repath()
+    return g
   }
 }

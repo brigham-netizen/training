@@ -517,3 +517,70 @@ button {
   font-size: 12px;
   opacity: 0.8;
 }
+
+/* ---- stage 4: saves and maps ---- */
+.save-note {
+  font-size: 12px !important;
+  margin: -2px 0 10px;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.field input {
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  background: #120f0b;
+  color: var(--ink);
+  font-size: 16px; /* 16px stops iOS zooming on focus */
+  user-select: text;
+  -webkit-user-select: text;
+}
+.field input:focus {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+.map-list {
+  display: grid;
+  gap: 8px;
+}
+.map-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #241f17;
+  border: 1px solid var(--panel-edge);
+}
+.map-row span {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.map-row b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-row small {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.map-row button {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #2c261c;
+  border: 1px solid var(--panel-edge);
+  font-weight: 700;
+}
+.map-row button.go {
+  background: linear-gradient(var(--accent-hi), var(--accent));
+  border-color: #f08a6a;
+}

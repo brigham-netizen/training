@@ -17,13 +17,30 @@ npm run build    # dist/ plus dist/hold-the-keep.html (single self-contained fil
 | Palisade | 1 | Cheap wooden wall. Archers can't stand on it. |
 | Stone wall | 2 | Thin wall; archers walk along connected stone. |
 | Thick wall | 5 | Full-block wall, very tough, holds 2 archers, +1 range. |
-| Gate | 15 | Your swordsmen walk through; enemies must break it. Archers walk over it. |
+| Gate | 15 | Your swordsmen walk through; archers walk over it. Weaker than stone, so attackers (rams most of all) go for gates first. |
+| Hoarding | 3 | Wooden shields on a stone wall, gate or tower. Archers there take 20% of arrow damage (50% without) and half boulder splash. |
 | Tower | 60 | Tall and tough, comes with an archer, holds 3, +1.5 range. |
 | Archer | 20 | Place on any wall, tower or the keep. Walks the ramparts to reach attackers. Takes half damage from arrows behind battlements. |
 | Swordsman | 25 | Guards a spot on open ground; charges enemies within 4 tiles. Enemies stop to fight them. |
 | Moat | 3 | Enemies wade through at about a third of their speed. Flat ground only. |
 | Pikes | 3 | Blocks the way and hurts anyone attacking it. |
 | Spikes | 20 | Floor trap that hurts anyone walking over it. |
+
+**Orders**: tap a swordsman (or drag a box around several) to select, then
+drag over the area they should cover, or tap a spot to hold. They charge
+anything that enters their zone and return to it afterwards.
+
+**Village**: between waves the village stakes out plots for a cottage
+(30 gold, +10 per wave), farm (15, +6) or, after three cottages, a market
+(60, +25). You don't pick the spot: it chooses the safest-feeling ground
+judged only from your walls, towers and keep (never from where attacks come).
+Build plots with the Village tool, or remove ones you don't want. Enemies
+trample farms they walk over.
+
+**Saves**: the game saves before every wave (so a lost wave can be retried)
+and from the menu. "Save this map" keeps a landscape you like under My maps.
+On claude.ai saves go to your private storage on the page and follow you
+across devices; elsewhere they stay in the browser.
 
 **Upgrade** turns a palisade into stone (1) and stone into thick wall (3), keeping
 archers in place, and repairs damaged top-tier structures for the cost of the damage.
@@ -63,4 +80,5 @@ the menu rolls another.
 - `src/camera.js`: one camera that animates between top-down and isometric
 - `src/render.js`: canvas renderer (painter's-order boxes, billboards)
 - `src/audio.js`: synthesized sound effects and music crossfading
+- `src/saves.js`: progress and map saves (artifact db, or localStorage)
 - `src/input.js`, `src/main.js`: touch input, HUD, game loop
