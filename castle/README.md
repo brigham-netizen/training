@@ -87,7 +87,11 @@ the menu rolls another.
   go around a gap if one exists and breach the weakest wall if not
 - `src/game.js`: simulation (waves, enemies, archers, arrows), no DOM
 - `src/camera.js`: one camera that animates between top-down and isometric
-- `src/render.js`: canvas renderer (painter's-order boxes, billboards)
+- `src/render.js`: classic canvas renderer (painter's-order boxes, baked
+  textured ground with soft shadows); also draws the UI overlay in 3D mode
+- `src/render3d.js`: 3D preview renderer (three.js): lit, shadowed low-poly
+  models; its orthographic camera matches `camera.js`, so input is shared.
+  Toggle with Graphics in the menu.
 - `src/audio.js`: synthesized sound effects and music crossfading
 - `src/saves.js`: progress and map saves (artifact db, or localStorage)
 - `src/input.js`, `src/main.js`: touch input, HUD, game loop

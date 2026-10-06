@@ -2,6 +2,7 @@ import './styles.css'
 import { Game } from './game.js'
 import { Camera } from './camera.js'
 import { Renderer } from './render.js'
+import { Renderer3D } from './render3d.js'
 import { Input } from './input.js'
 import { Audio, BUILD_TRACKS } from './audio.js'
 import { Saves } from './saves.js'
@@ -90,9 +91,37 @@ const saves = new Saves()
 const camera = new Camera(game.world.w, game.world.h)
 const canvas = $('game')
 const renderer = new Renderer(canvas, camera)
+const canvas3d = $('game3d')
+let renderer3d = null
+// 'classic' (canvas drawing) or '3d' (WebGL preview).
+let gfx = 'classic'
+try {
+  if (localStorage.getItem('htk-gfx') === '3d') gfx = '3d'
+} catch {
+  // ignore
+}
+
+function setGfx(mode) {
+  if (mode === '3d' && !renderer3d) {
+    try {
+      renderer3d = new Renderer3D(canvas3d)
+      renderer3d.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1)
+    } catch {
+      banner('3D isn\'t available on this device<small>Staying with the classic look</small>')
+      mode = 'classic'
+    }
+  }
+  gfx = mode
+  canvas3d.classList.toggle('hidden', gfx !== '3d')
+  try {
+    localStorage.setItem('htk-gfx', gfx)
+  } catch {
+    // ignore
+  }
+}
 const audio = new Audio()
 // Handle for automated screenshot tests.
-window.htk = { game, audio, camera }
+window.htk = { game, audio, camera, setGfx: (m) => setGfx(m) }
 // Browsers only start audio from a user gesture, and they disagree on
 // which events count, so try on all of them.
 for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'])
@@ -533,6 +562,7 @@ function showMenu() {
     <button id="sfx-toggle" class="${audio.sfxOn ? 'on' : ''}">Sound effects: ${audio.sfxOn ? 'on' : 'off'}</button>
     <button id="build-track">Build music: ${BUILD_TRACKS[audio.buildTrack].label}</button>
     <button id="test-sound">Test sound</button>
+    <button id="gfx-toggle" class="${gfx === '3d' ? 'on' : ''}">Graphics: ${gfx === '3d' ? '3D (preview)' : 'Classic'}</button>
   </div><p class="save-note" id="sound-note"></p>`
   const savesRow = `<div class="toggles">
     <button id="save-game">Save game</button>
@@ -565,6 +595,12 @@ document.addEventListener('click', async (e) => {
     if (!data) return note('No saved game yet.')
     closeModal()
     loadGame(data)
+    return
+  }
+  if (id === 'gfx-toggle') {
+    setGfx(gfx === '3d' ? 'classic' : '3d')
+    e.target.classList.toggle('on', gfx === '3d')
+    e.target.textContent = `Graphics: ${gfx === '3d' ? '3D (preview)' : 'Classic'}`
     return
   }
   if (id === 'build-track') {
@@ -763,6 +799,7 @@ window.addEventListener('keydown', (e) => {
 
 function resize() {
   renderer.resize()
+  renderer3d?.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1)
   const fit = camera.fit()
   if (!resize.done) {
     // Start zoomed in enough to build with a fingertip, centred on the keep.
@@ -773,6 +810,7 @@ function resize() {
 }
 window.addEventListener('resize', resize)
 resize()
+if (gfx === '3d') setGfx('3d')
 refreshHud()
 
 const STEP = 1 / 60
@@ -803,7 +841,10 @@ function frame(now) {
     hudTimer = 0
     refreshHud()
   }
-  renderer.render(game, ui)
+  if (gfx === '3d' && renderer3d) {
+    renderer3d.render(game, camera)
+    renderer.renderOverlay(game, ui)
+  } else renderer.render(game, ui)
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)

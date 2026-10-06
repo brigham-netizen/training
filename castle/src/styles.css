@@ -584,3 +584,13 @@ button {
   background: linear-gradient(var(--accent-hi), var(--accent));
   border-color: #f08a6a;
 }
+
+/* 3D renderer sits under the 2D canvas, which then only draws overlays. */
+canvas#game3d {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}

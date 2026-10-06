@@ -292,6 +292,22 @@ export class Renderer {
     this.drawFloaters(game)
   }
 
+  // Overlay drawn on top of the 3D renderer: everything flat or UI-like
+  // that the 3D scene doesn't draw itself.
+  renderOverlay(game, ui) {
+    const { ctx, cam } = this
+    const { world } = game
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    ctx.clearRect(0, 0, cam.vw, cam.vh)
+    if (ui.showGrid) this.drawGrid(world)
+    if (ui.orders) this.drawOrders(game, ui.orders)
+    for (const fx of game.effects) this.drawEffect(fx)
+    if (ui.preview) this.drawPreview(game, ui.preview)
+    this.drawBars(game)
+    this.drawPlotTags(game)
+    this.drawFloaters(game)
+  }
+
   groundColor(t) {
     const v = Math.floor(t.v * 4)
     switch (t.terrain) {
@@ -309,51 +325,30 @@ export class Renderer {
   drawGround(world, time) {
     const { ctx } = this
     const { w, h } = world
-    this.poly([0, 0, 0, w, 0, 0, w, h, 0, 0, h, 0])
-    ctx.fillStyle = rgb(COLORS.grass[0])
-    ctx.fill()
-
-    // Batch flat tiles by colour.
-    const buckets = new Map()
-    for (let i = 0; i < world.tiles.length; i++) {
-      const t = world.tiles[i]
-      if (t.terrain === 'hill') continue
-      const c = t.type === 'moat' ? COLORS.moatEdge : this.groundColor(t)
-      if (c === COLORS.grass[0]) continue
-      if (!buckets.has(c)) buckets.set(c, [])
-      buckets.get(c).push(i)
+    // The ground is baked once into a world-space texture (terrain detail,
+    // soft shadows and contact shading), then drawn with the camera's
+    // ground-plane transform each frame.
+    const sig = world.tiles.map((t) => t.terrain[0] + t.type + (t.rock ? 'r' : '')).join(',')
+    if (sig !== this.groundSig) {
+      this.groundSig = sig
+      this.bakeGround(world)
     }
-    for (const [c, list] of buckets) {
-      ctx.beginPath()
-      for (const i of list) {
-        const x = i % w
-        const y = (i / w) | 0
-        this.pathQuad(x, y, x + 1, y + 1)
-      }
-      ctx.fillStyle = rgb(c)
-      ctx.fill()
-    }
-
-    // Moats: dark water inside an earth bank.
-    ctx.beginPath()
-    for (let i = 0; i < world.tiles.length; i++) {
-      if (world.tiles[i].type !== 'moat') continue
-      const x = i % w
-      const y = (i / w) | 0
-      // Water runs to the edge where the neighbour is moat or water too.
-      const open = (dx, dy) => {
-        if (!world.inBounds(x + dx, y + dy)) return false
-        const n = world.tiles[world.idx(x + dx, y + dy)]
-        return n.type === 'moat' || n.terrain === 'water' || n.terrain === 'shallows'
-      }
-      const m = 0.14
-      this.pathQuad(open(-1, 0) ? x : x + m, open(0, -1) ? y : y + m, open(1, 0) ? x + 1 : x + 1 - m, open(0, 1) ? y + 1 : y + 1 - m)
-    }
-    ctx.fillStyle = rgb(COLORS.moat)
-    ctx.fill()
+    const { cam } = this
+    const k = cam.k
+    const a = cam.cosT * k
+    const b = cam.sinT * cam.sinE * k
+    const c = -cam.sinT * k
+    const d = cam.cosT * cam.sinE * k
+    const e = cam.vw / 2 - (cam.fx * a + cam.fy * c)
+    const f = cam.vh / 2 - (cam.fx * b + cam.fy * d)
+    const dpr = this.dpr
+    ctx.save()
+    ctx.setTransform(dpr * a, dpr * b, dpr * c, dpr * d, dpr * e, dpr * f)
+    ctx.imageSmoothingEnabled = true
+    ctx.drawImage(this.groundCanvas, 0, 0, w, h)
+    ctx.restore()
 
     // Ripples on water and reeds in marsh.
-    const k = this.cam.k
     ctx.beginPath()
     for (let i = 0; i < world.tiles.length; i++) {
       const t = world.tiles[i]
@@ -382,6 +377,157 @@ export class Renderer {
         this.line(px, py, 0, px + 0.03, py, 0.3, rgb(COLORS.reed), Math.max(1, k * 0.035))
       }
     }
+  }
+
+  // Footprints (world-unit rects) and heights of things that cast shadows.
+  shadowCasters(world) {
+    const out = []
+    const k = world.keep
+    for (let i = 0; i < world.tiles.length; i++) {
+      const t = world.tiles[i]
+      const x = i % world.w
+      const y = (i / world.w) | 0
+      const r = (x0, y0, x1, y1, h) => out.push([x + x0, y + y0, x + x1, y + y1, h])
+      switch (t.type) {
+        case 'palisade':
+        case 'wall': {
+          const d = STRUCTURES[t.type]
+          const hw = d.thin / 2
+          r(0.5 - hw, 0.5 - hw, 0.5 + hw, 0.5 + hw, d.height)
+          if (this.connects(world, x, y, 0)) r(0.5 - hw, 0, 0.5 + hw, 0.5, d.height)
+          if (this.connects(world, x, y, 1)) r(0.5, 0.5 - hw, 1, 0.5 + hw, d.height)
+          if (this.connects(world, x, y, 2)) r(0.5 - hw, 0.5, 0.5 + hw, 1, d.height)
+          if (this.connects(world, x, y, 3)) r(0, 0.5 - hw, 0.5, 0.5 + hw, d.height)
+          break
+        }
+        case 'thick':
+        case 'gate':
+          r(0, 0, 1, 1, STRUCTURES[t.type].height)
+          break
+        case 'tower':
+          r(0.04, 0.04, 0.96, 0.96, STRUCTURES.tower.height)
+          break
+        case 'keep':
+          if (x === k.x && y === k.y) out.push([x, y, x + 3, y + 3, KEEP.height])
+          break
+        case 'tree':
+          r(0.25, 0.25, 0.75, 0.75, 1.3)
+          break
+        case 'rock':
+          r(0.15, 0.2, 0.85, 0.85, 0.5)
+          break
+        case 'cottage':
+          r(0.18, 0.24, 0.82, 0.76, 0.8)
+          break
+        case 'market':
+          r(0.12, 0.2, 0.88, 0.8, 0.9)
+          break
+        case 'pikes':
+          r(0.1, 0.3, 0.9, 0.7, 0.45)
+          break
+      }
+    }
+    return out
+  }
+
+  bakeGround(world) {
+    const S = 24 // texture pixels per tile
+    const { w, h } = world
+    const cv = (this.groundCanvas ||= document.createElement('canvas'))
+    cv.width = w * S
+    cv.height = h * S
+    const g = cv.getContext('2d')
+    // Deterministic per-tile noise so the texture doesn't shimmer on rebake.
+    let seed = 1
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647
+      return seed / 2147483647
+    }
+    for (let i = 0; i < world.tiles.length; i++) {
+      const t = world.tiles[i]
+      const x = (i % w) * S
+      const y = ((i / w) | 0) * S
+      const base = t.type === 'moat' ? COLORS.moatEdge : t.terrain === 'hill' ? COLORS.hillTop[0] : this.groundColor(t)
+      g.fillStyle = rgb(base)
+      g.fillRect(x, y, S, S)
+      seed = i * 7919 + 13
+      if (t.terrain === 'water' || t.terrain === 'shallows') {
+        // Depth gradient and a few glints.
+        for (let n = 0; n < 3; n++) {
+          g.fillStyle = rgb(base, 1.08 + rnd() * 0.1, 0.5)
+          g.fillRect(x + rnd() * S, y + rnd() * S, 4 + rnd() * 6, 1)
+        }
+        continue
+      }
+      // Speckles of lighter and darker earth.
+      for (let n = 0; n < 16; n++) {
+        g.fillStyle = rgb(base, 0.8 + rnd() * 0.38)
+        const sz = 1 + rnd() * 2
+        g.fillRect(x + rnd() * S, y + rnd() * S, sz, sz)
+      }
+      if (t.terrain === 'grass' && t.type !== 'moat') {
+        // Little tufts of grass.
+        g.strokeStyle = rgb(base, 1.22)
+        g.lineWidth = 1
+        g.beginPath()
+        for (let n = 0; n < 5; n++) {
+          const px = x + rnd() * S
+          const py = y + rnd() * S
+          g.moveTo(px, py)
+          g.lineTo(px - 1 + rnd() * 2, py - 3 - rnd() * 2)
+        }
+        g.stroke()
+      } else if (t.terrain === 'marsh') {
+        for (let n = 0; n < 2; n++) {
+          g.fillStyle = 'rgba(40,60,50,0.35)'
+          g.beginPath()
+          g.ellipse(x + rnd() * S, y + rnd() * S, 2 + rnd() * 4, 1.5 + rnd() * 2, 0, 0, Math.PI * 2)
+          g.fill()
+        }
+      }
+    }
+    // Moats: dark water inside an earth bank.
+    g.fillStyle = rgb(COLORS.moat)
+    for (let i = 0; i < world.tiles.length; i++) {
+      if (world.tiles[i].type !== 'moat') continue
+      const x = i % w
+      const y = (i / w) | 0
+      const open = (dx, dy) => {
+        if (!world.inBounds(x + dx, y + dy)) return false
+        const n = world.tiles[world.idx(x + dx, y + dy)]
+        return n.type === 'moat' || n.terrain === 'water' || n.terrain === 'shallows'
+      }
+      const m = 0.14
+      const x0 = open(-1, 0) ? x : x + m
+      const y0 = open(0, -1) ? y : y + m
+      const x1 = open(1, 0) ? x + 1 : x + 1 - m
+      const y1 = open(0, 1) ? y + 1 : y + 1 - m
+      g.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S)
+    }
+
+    // Shadows cast away from the sun, plus a little contact darkening, drawn
+    // into their own layer and softened by stacking offset copies.
+    const sh = (this.shadowCanvas ||= document.createElement('canvas'))
+    sh.width = cv.width
+    sh.height = cv.height
+    const s = sh.getContext('2d')
+    s.clearRect(0, 0, sh.width, sh.height)
+    s.fillStyle = '#000'
+    const ox = -SUN[0] * 0.45
+    const oy = -SUN[1] * 0.45
+    for (const [x0, y0, x1, y1, hgt] of this.shadowCasters(world)) {
+      for (let f = 0; f <= 1.001; f += 0.2) {
+        const dx = ox * hgt * f
+        const dy = oy * hgt * f
+        s.fillRect((x0 + dx) * S, (y0 + dy) * S, (x1 - x0) * S, (y1 - y0) * S)
+      }
+      // Contact shading hugging the footprint.
+      s.fillRect((x0 - 0.08) * S, (y0 - 0.08) * S, (x1 - x0 + 0.16) * S, (y1 - y0 + 0.16) * S)
+    }
+    g.save()
+    g.globalAlpha = 0.045
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) g.drawImage(sh, dx * 2, dy * 2)
+    g.restore()
   }
 
   drawGrid(world) {
