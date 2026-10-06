@@ -1,9 +1,8 @@
-import { GRID_W, GRID_H, STRUCTURES, KEEP } from './config.js'
+import { GRID_W, GRID_H, STRUCTURES, KEEP, TERRAIN } from './config.js'
 
-// Tile types:
-//   grass, trap        -> walkable
-//   wall, tower, keep  -> solid, can be attacked
-//   tree, rock         -> impassable scenery
+// Each tile has a terrain (grass, hill, marsh, shallows, water) and an
+// occupant `type`: 'grass' means empty, otherwise scenery (tree, rock),
+// a player structure (see STRUCTURES) or the keep.
 
 export function mulberry32(seed) {
   let a = seed >>> 0
@@ -22,8 +21,7 @@ export class World {
     this.h = GRID_H
     this.tiles = []
     this.reserved = new Uint8Array(this.w * this.h)
-    this.towers = new Set()
-    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, cd: 0, x: 0, y: 0 }
+    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, x: 0, y: 0 }
     this.spawns = []
     this.dirty = true // path costs changed
     this.generate(seed)
@@ -41,17 +39,46 @@ export class World {
     return this.idx(x, y)
   }
 
-  isWalkable(i) {
-    const t = this.tiles[i].type
-    return t === 'grass' || t === 'trap'
+  isBlocked(i) {
+    const t = this.tiles[i]
+    return t.type === 'tree' || t.type === 'rock' || TERRAIN[t.terrain].blocked === true
   }
   isSolid(i) {
-    const t = this.tiles[i].type
-    return t === 'wall' || t === 'tower' || t === 'keep'
+    const t = this.tiles[i]
+    return t.type === 'keep' || STRUCTURES[t.type]?.solid === true
   }
-  isBlocked(i) {
-    const t = this.tiles[i].type
-    return t === 'tree' || t === 'rock'
+  isWalkable(i) {
+    return !this.isBlocked(i) && !this.isSolid(i)
+  }
+  // Speed multiplier for anyone walking this tile.
+  slow(i) {
+    const t = this.tiles[i]
+    const s = TERRAIN[t.terrain].slow ?? 1
+    return t.type === 'moat' ? Math.min(s, STRUCTURES.moat.slow) : s
+  }
+  elev(i) {
+    return TERRAIN[this.tiles[i].terrain].elev || 0
+  }
+  isRampart(i) {
+    const t = this.tiles[i]
+    return t.type === 'keep' || STRUCTURES[t.type]?.rampart === true
+  }
+  slots(i) {
+    const t = this.tiles[i]
+    if (t.type === 'keep') return KEEP.slots
+    return STRUCTURES[t.type]?.slots || 0
+  }
+  // Extra archer range from standing here (height of wall plus hill).
+  perch(i) {
+    const t = this.tiles[i]
+    const s = t.type === 'keep' ? KEEP.perch : STRUCTURES[t.type]?.perch || 0
+    return s + (TERRAIN[t.terrain].perch || 0)
+  }
+  // Top surface height (where an archer stands).
+  surface(i) {
+    const t = this.tiles[i]
+    const h = t.type === 'keep' ? KEEP.height : STRUCTURES[t.type]?.height || 0
+    return this.elev(i) + h
   }
 
   generate(seed) {
@@ -66,18 +93,16 @@ export class World {
     const rnd = mulberry32(seed)
     const { w, h } = this
     this.tiles = []
-    for (let i = 0; i < w * h; i++) this.tiles.push({ type: 'grass', hp: 0, maxHp: 0, v: rnd(), cd: 0 })
+    for (let i = 0; i < w * h; i++)
+      this.tiles.push({ type: 'grass', terrain: 'grass', hp: 0, maxHp: 0, v: rnd(), weakened: false })
     this.reserved.fill(0)
-    this.towers.clear()
 
     const kx = Math.floor(w / 2) - 1
     const ky = Math.floor(h / 2) - 1
-    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, cd: 0, x: kx, y: ky }
-    for (let y = ky; y < ky + KEEP.size; y++)
-      for (let x = kx; x < kx + KEEP.size; x++) this.tiles[this.idx(x, y)].type = 'keep'
+    const cx = kx + 1
+    const cy = ky + 1
+    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, x: kx, y: ky }
 
-    const cy = Math.floor(h / 2)
-    const cx = Math.floor(w / 2)
     // Order matters: waves unlock gates in this order.
     this.spawns = [
       { x: 0, y: cy, name: 'west' },
@@ -85,26 +110,98 @@ export class World {
       { x: cx, y: 0, name: 'north' },
       { x: cx - 1, y: h - 1, name: 'south' },
     ]
-    for (const s of this.spawns) {
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dx = -1; dx <= 1; dx++)
-          if (this.inBounds(s.x + dx, s.y + dy)) this.reserved[this.idx(s.x + dx, s.y + dy)] = 1
+    const nearSpawn = (x, y, d) => this.spawns.some((s) => Math.abs(x - s.x) + Math.abs(y - s.y) < d)
+    const nearKeep = (x, y, dx, dy) => Math.abs(x - cx) < dx && Math.abs(y - cy) < dy
+    const set = (x, y, terrain) => {
+      if (this.inBounds(x, y)) this.tiles[this.idx(x, y)].terrain = terrain
+    }
+    const terrainAt = (x, y) => (this.inBounds(x, y) ? this.tiles[this.idx(x, y)].terrain : null)
+    const blob = (r, fn) => {
+      const bx = Math.floor(rnd() * w)
+      const by = Math.floor(rnd() * h)
+      for (let y = by - 4; y <= by + 4; y++)
+        for (let x = bx - 4; x <= bx + 4; x++) {
+          if (!this.inBounds(x, y)) continue
+          const d = Math.hypot(x - bx, y - by) + rnd() * 0.9
+          if (d < r) fn(x, y, d)
+        }
     }
 
-    // Scatter tree clusters and rocks away from the keep and spawns.
-    const clear = (x, y) => {
-      if (Math.abs(x - cx) < 6 && Math.abs(y - cy) < 5) return false
-      for (const s of this.spawns) if (Math.abs(x - s.x) + Math.abs(y - s.y) < 4) return false
-      return true
+    // Hills first so water can cut through them.
+    const hills = 3 + Math.floor(rnd() * 3)
+    for (let k = 0; k < hills; k++)
+      blob(1.6 + rnd() * 1.6, (x, y) => {
+        if (!nearKeep(x, y, 3, 3)) set(x, y, 'hill')
+      })
+
+    // A river with two fords, on one side of the keep.
+    if (rnd() < 0.8) {
+      const vertical = rnd() < 0.6
+      const len = vertical ? h : w
+      let pos = vertical
+        ? rnd() < 0.5 ? 5 + Math.floor(rnd() * 3) : w - 8 + Math.floor(rnd() * 3)
+        : rnd() < 0.5 ? 2 + Math.floor(rnd() * 2) : h - 4 - Math.floor(rnd() * 2)
+      const lo = vertical ? 3 : 1
+      const hi = vertical ? w - 5 : h - 3
+      const fordA = Math.floor(len * (0.15 + rnd() * 0.25))
+      const fordB = Math.floor(len * (0.6 + rnd() * 0.25))
+      for (let t = 0; t < len; t++) {
+        if (rnd() < 0.3) pos = Math.max(lo, Math.min(hi, pos + (rnd() < 0.5 ? -1 : 1)))
+        const ford = Math.abs(t - fordA) <= 1 || Math.abs(t - fordB) <= 1
+        for (const off of [0, 1]) {
+          const x = vertical ? pos + off : t
+          const y = vertical ? t : pos + off
+          if (nearKeep(x, y, 6, 5)) continue
+          set(x, y, ford ? 'shallows' : 'water')
+        }
+      }
     }
-    const clusters = 9 + Math.floor(rnd() * 4)
+
+    // Lakes ringed by shallows, and marsh.
+    const lakes = Math.floor(rnd() * 3)
+    for (let k = 0; k < lakes; k++) {
+      const r = 1.3 + rnd() * 1.2
+      blob(r + 1, (x, y, d) => {
+        if (nearKeep(x, y, 6, 5)) return
+        set(x, y, d < r ? 'water' : 'shallows')
+      })
+    }
+    const marshes = 1 + Math.floor(rnd() * 3)
+    for (let k = 0; k < marshes; k++)
+      blob(1.5 + rnd() * 1.5, (x, y) => {
+        if (!nearKeep(x, y, 4, 3) && terrainAt(x, y) === 'grass') set(x, y, 'marsh')
+      })
+
+    // Keep and spawn areas are always flat, dry ground.
+    for (let y = ky; y < ky + KEEP.size; y++)
+      for (let x = kx; x < kx + KEEP.size; x++) {
+        const t = this.tiles[this.idx(x, y)]
+        t.type = 'keep'
+        t.terrain = 'grass'
+      }
+    for (const s of this.spawns) {
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!this.inBounds(s.x + dx, s.y + dy)) continue
+          const i = this.idx(s.x + dx, s.y + dy)
+          this.reserved[i] = 1
+          if (this.tiles[i].terrain === 'water') this.tiles[i].terrain = 'shallows'
+        }
+    }
+
+    // Tree clusters and rocks (rocks favour hills).
+    const clusters = 8 + Math.floor(rnd() * 4)
     for (let c = 0; c < clusters; c++) {
       let x = Math.floor(rnd() * w)
       let y = Math.floor(rnd() * h)
       const size = 3 + Math.floor(rnd() * 6)
-      const kind = rnd() < 0.75 ? 'tree' : 'rock'
+      const onHill = terrainAt(x, y) === 'hill'
+      const kind = rnd() < (onHill ? 0.45 : 0.85) ? 'tree' : 'rock'
       for (let k = 0; k < size; k++) {
-        if (this.inBounds(x, y) && clear(x, y)) this.tiles[this.idx(x, y)].type = kind
+        if (this.inBounds(x, y) && !nearKeep(x, y, 6, 5) && !nearSpawn(x, y, 4)) {
+          const t = this.tiles[this.idx(x, y)]
+          if (t.terrain === 'grass' || t.terrain === 'hill' || (kind === 'tree' && t.terrain === 'marsh')) t.type = kind
+        }
         x += Math.floor(rnd() * 3) - 1
         y += Math.floor(rnd() * 3) - 1
       }
@@ -134,8 +231,18 @@ export class World {
     return this.spawns.every((s) => seen[this.idx(s.x, s.y)])
   }
 
-  canBuild(i) {
-    return this.tiles[i].type === 'grass' && !this.reserved[i]
+  // Why a structure can't go here, or null if it can.
+  buildProblem(i, type) {
+    const t = this.tiles[i]
+    if (this.reserved[i]) return 'reserved'
+    if (t.type !== 'grass') return 'occupied'
+    const terrain = TERRAIN[t.terrain]
+    if (terrain.blocked || terrain.noBuild) return 'terrain'
+    if (STRUCTURES[type]?.flatOnly && t.terrain !== 'grass') return 'terrain'
+    return null
+  }
+  canBuild(i, type = 'wall') {
+    return this.buildProblem(i, type) === null
   }
 
   build(i, type) {
@@ -143,16 +250,13 @@ export class World {
     t.type = type
     const def = STRUCTURES[type]
     t.hp = t.maxHp = def.hp || 0
-    t.cd = 0
     t.weakened = false
-    if (type === 'tower') this.towers.add(i)
     this.dirty = true
   }
 
-  // Remove a player structure, returning it to grass.
+  // Remove a player structure, returning it to empty ground.
   clear(i) {
     const t = this.tiles[i]
-    if (t.type === 'tower') this.towers.delete(i)
     t.type = 'grass'
     t.hp = t.maxHp = 0
     this.dirty = true

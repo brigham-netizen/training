@@ -3,7 +3,7 @@ import { Game } from './game.js'
 import { Camera } from './camera.js'
 import { Renderer } from './render.js'
 import { Input } from './input.js'
-import { STRUCTURES, TOTAL_WAVES, waveComposition } from './config.js'
+import { STRUCTURES, ARCHER, TOTAL_WAVES, waveComposition } from './config.js'
 
 const ICONS = {
   look: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>',
@@ -14,26 +14,60 @@ const ICONS = {
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
   rotate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>',
   cube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2l9 5v10l-9 5-9-5V7zM12 12l9-5M12 12L3 7M12 12v10"/></svg>',
+  palisade: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 21V8l2-3 2 3v13M10 21V8l2-3 2 3v13M16 21V8l2-3 2 3v13M2 15h20"/></svg>',
+  thick: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 21V7h3V4h3v3h3V4h2v3h3V4h3v3h3v14z"/><path d="M2 12h20M2 16.5h20M8 12v4.5M16 12v4.5M12 16.5V21"/></svg>',
+  archer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3c6 3 6 15 0 18M7 3v18M3 12h17M17 9l3 3-3 3"/></svg>',
+  moat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>',
+  pikes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 20L9 4M9 20L3 4M13 20l6-16M19 20L13 4M1 14h22"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
-const TOOLS = [
-  { id: 'look', label: 'Look', key: '1' },
-  { id: 'wall', label: 'Wall', key: '2' },
-  { id: 'tower', label: 'Tower', key: '3' },
-  { id: 'trap', label: 'Spikes', key: '4' },
-  { id: 'demolish', label: 'Remove', key: '5' },
+const TOOL_LABELS = {
+  look: 'Look',
+  palisade: 'Palisade',
+  wall: 'Stone wall',
+  thick: 'Thick wall',
+  tower: 'Tower',
+  archer: 'Archer',
+  moat: 'Moat',
+  pikes: 'Pikes',
+  trap: 'Spikes',
+  demolish: 'Remove',
+}
+const TOOL_HINTS = {
+  palisade: 'Cheap wood. Archers can\'t stand on it.',
+  wall: 'Archers walk along connected stone.',
+  thick: 'Very tough, holds 2 archers.',
+  tower: 'Comes with an archer. Height adds range.',
+  archer: 'Tap a wall, tower or the keep.',
+  moat: 'Enemies wade through slowly.',
+  pikes: 'Hurts anyone who attacks it.',
+  trap: 'Hurts anyone who walks over it.',
+}
+// Toolbar groups; multi-tool groups open a flyout.
+const GROUPS = [
+  { id: 'look', tools: ['look'] },
+  { id: 'walls', tools: ['palisade', 'wall', 'thick'] },
+  { id: 'defend', tools: ['tower', 'archer'] },
+  { id: 'obstacles', tools: ['moat', 'pikes', 'trap'] },
+  { id: 'demolish', tools: ['demolish'] },
 ]
+const KEYS = ['look', 'palisade', 'wall', 'thick', 'tower', 'archer', 'moat', 'pikes', 'trap', 'demolish']
+const PLACE_ON_RELEASE = new Set(['tower', 'archer'])
+const costOf = (id) => (id === 'archer' ? ARCHER.cost : STRUCTURES[id]?.cost)
 
 const $ = (id) => document.getElementById(id)
 
-const game = new Game()
+const randomSeed = () => Math.floor(Math.random() * 1e9)
+const game = new Game(randomSeed())
 const camera = new Camera(game.world.w, game.world.h)
 const canvas = $('game')
 const renderer = new Renderer(canvas, camera)
 
 const ui = {
   tool: 'wall',
+  buildTool: 'wall', // last build tool, restored after each wave
+  groupChoice: { walls: 'wall', defend: 'tower', obstacles: 'moat' },
   preview: null,
   showGrid: true,
   speed: 1,
@@ -76,8 +110,8 @@ function paint(i) {
   const tool = ui.tool
   if (tool === 'demolish') {
     game.demolish(i)
-  } else if (tool === 'wall' || tool === 'trap') {
-    if (!game.place(i, tool) && game.world.canBuild(i) && game.gold < STRUCTURES[tool].cost) warnGold()
+  } else if (STRUCTURES[tool]) {
+    if (!game.place(i, tool) && game.world.canBuild(i, tool) && game.gold < costOf(tool)) warnGold()
   }
   refreshHud()
 }
@@ -99,8 +133,9 @@ new Input(canvas, camera, {
   strokeEnd: () => {
     noGoldWarned = false
   },
-  placeTower: (i) => {
-    if (!game.place(i, 'tower') && game.gold < STRUCTURES.tower.cost) warnGold()
+  placeOnRelease: (tool) => PLACE_ON_RELEASE.has(tool),
+  placeAt: (i) => {
+    if (!game.place(i, ui.tool) && game.gold < costOf(ui.tool)) warnGold()
     noGoldWarned = false
     refreshHud()
   },
@@ -117,20 +152,58 @@ new Input(canvas, camera, {
 // ---- HUD ----------------------------------------------------------------------
 
 const toolbar = $('toolbar')
-for (const t of TOOLS) {
+const flyout = $('flyout')
+const toolFace = (id) => {
+  const cost = costOf(id)
+  return `${ICONS[id]}<span>${cost ? `<span class="cost">${cost}</span>` : TOOL_LABELS[id]}</span>`
+}
+for (const g of GROUPS) {
   const b = document.createElement('button')
-  b.className = 'tool'
-  b.dataset.tool = t.id
-  const cost = STRUCTURES[t.id]?.cost
-  b.innerHTML = `${ICONS[t.id]}<span>${cost ? `<span class="cost">${cost}</span>` : t.label}</span>`
-  b.setAttribute('aria-label', t.label)
-  b.title = `${t.label} (${t.key})`
-  b.addEventListener('click', () => selectTool(t.id))
+  b.className = g.tools.length > 1 ? 'tool group' : 'tool'
+  b.dataset.group = g.id
+  b.addEventListener('click', () => {
+    const current = ui.groupChoice[g.id] || g.tools[0]
+    if (g.tools.length > 1 && ui.tool === current && !flyout.classList.contains('hidden')) closeFlyout()
+    else {
+      selectTool(current)
+      if (g.tools.length > 1) openFlyout(g, b)
+      else closeFlyout()
+    }
+  })
   toolbar.appendChild(b)
 }
 
+function openFlyout(g, anchor) {
+  flyout.innerHTML = ''
+  for (const id of g.tools) {
+    const b = document.createElement('button')
+    b.className = 'tool wide' + (id === ui.tool ? ' active' : '')
+    if (costOf(id) > game.gold) b.classList.add('poor')
+    b.innerHTML = `${ICONS[id]}<span class="tl"><b>${TOOL_LABELS[id]}</b><span class="cost">${costOf(id)}</span><small>${TOOL_HINTS[id]}</small></span>`
+    b.addEventListener('click', () => {
+      ui.groupChoice[g.id] = id
+      selectTool(id)
+      closeFlyout()
+    })
+    flyout.appendChild(b)
+  }
+  const r = anchor.getBoundingClientRect()
+  flyout.style.left = `${r.right + 8}px`
+  flyout.classList.remove('hidden')
+  // Align with the button, but keep the whole flyout on screen.
+  const h = flyout.offsetHeight
+  flyout.style.top = `${Math.max(8, Math.min(window.innerHeight - h - 8, r.top + r.height / 2 - h / 2))}px`
+}
+
+function closeFlyout() {
+  flyout.classList.add('hidden')
+}
+canvas.addEventListener('pointerdown', closeFlyout)
+
 function selectTool(id) {
   ui.tool = id
+  if (id !== 'look' && id !== 'demolish') ui.buildTool = id
+  for (const g of GROUPS) if (g.tools.length > 1 && g.tools.includes(id)) ui.groupChoice[g.id] = id
   ui.preview = null
   refreshHud()
 }
@@ -164,10 +237,18 @@ function refreshHud() {
   fill.style.background =
     frac > 0.5 ? 'linear-gradient(#7fdc63,#4c9c3a)' : frac > 0.25 ? 'linear-gradient(#f0d060,#b8922a)' : 'linear-gradient(#ef6a4c,#a8301c)'
 
+  $('archers').textContent = game.archers.length
   for (const b of toolbar.children) {
-    const id = b.dataset.tool
-    b.classList.toggle('active', id === ui.tool)
-    const cost = STRUCTURES[id]?.cost
+    const g = GROUPS.find((g) => g.id === b.dataset.group)
+    const id = ui.groupChoice[g.id] || g.tools[0]
+    if (b.dataset.face !== id) {
+      b.dataset.face = id
+      b.innerHTML = toolFace(id)
+      b.title = TOOL_LABELS[id]
+      b.setAttribute('aria-label', TOOL_LABELS[id])
+    }
+    b.classList.toggle('active', g.tools.includes(ui.tool))
+    const cost = costOf(id)
     b.classList.toggle('poor', !!cost && game.gold < cost)
   }
 
@@ -231,9 +312,10 @@ function modal(title, bodyHtml, actions) {
 const HELP = `
   <p>Raiders march on your keep from the red banners. Build a castle that holds.</p>
   <ul>
-    <li><b>Wall</b>: drag to paint walls. Enemies walk around them if they can, and break through the weakest point if they can't.</li>
-    <li><b>Tower</b>: drag to aim, release to place. Archers shoot anything in the dashed range.</li>
-    <li><b>Spikes</b>: hurt everything that walks over them. Funnel enemies across them.</li>
+    <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can, and break through the weakest point if they can't.</li>
+    <li><b>Towers and archers</b>: drag to aim, release to place. Archers stand on walls, towers and the keep, and walk along connected stone to reach attackers. Height adds range: towers most, then thick walls and hills.</li>
+    <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
+    <li><b>Terrain</b>: rivers and lakes block the way except at fords. Marsh and fords slow enemies down, and you can't build on them.</li>
     <li><b>Remove</b>: full refund between waves, half during an attack.</li>
   </ul>
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
@@ -241,14 +323,15 @@ const HELP = `
 
 function showMenu() {
   modal('Hold the Keep', HELP, [
-    { label: 'Restart', run: restart },
+    { label: 'New map', run: () => restart(randomSeed()) },
+    { label: 'Restart', run: () => restart() },
     { label: 'Resume', primary: true },
   ])
 }
 
-function restart() {
-  game.reset()
-  ui.tool = 'wall'
+function restart(seed) {
+  game.reset(seed)
+  ui.tool = ui.buildTool = 'wall'
   ui.speed = 1
   setView('top')
   refreshHud()
@@ -260,21 +343,22 @@ function handleEvents() {
       banner(`Wave ${ev.wave} incoming!<small>from the ${ev.spawns.join(' & ')}</small>`)
       // Show off the castle while it's under siege.
       setView('iso')
-      if (ui.tool !== 'look') ui.tool = 'look'
+      ui.tool = 'look'
+      closeFlyout()
     } else if (ev.type === 'waveEnd') {
       banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold. Strengthen your defenses.</small>`, 3200)
       setView('top')
-      ui.tool = 'wall'
+      ui.tool = ui.buildTool
       ui.speed = 1
     } else if (ev.type === 'won') {
       modal('Victory!', `<p>Your keep stood against all <b>${TOTAL_WAVES}</b> waves.</p>`, [
         { label: 'Keep looking' },
-        { label: 'Play again', primary: true, run: restart },
+        { label: 'New map', primary: true, run: () => restart(randomSeed()) },
       ])
     } else if (ev.type === 'lost') {
       modal('The keep has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>`, [
         { label: 'Look around' },
-        { label: 'Try again', primary: true, run: restart },
+        { label: 'Try again', primary: true, run: () => restart() },
       ])
     }
     refreshHud()
@@ -285,8 +369,8 @@ function handleEvents() {
 // ---- keyboard (desktop testing) -----------------------------------------------
 
 window.addEventListener('keydown', (e) => {
-  const t = TOOLS.find((t) => t.key === e.key)
-  if (t) selectTool(t.id)
+  const n = '1234567890'.indexOf(e.key)
+  if (n >= 0) selectTool(KEYS[n])
   else if (e.key === 'v') setView(camera.mode === 'top' ? 'iso' : 'top')
   else if (e.key === 'r') camera.rotateBy(Math.PI / 2)
   else if (e.key === ' ' && game.phase === 'build') {

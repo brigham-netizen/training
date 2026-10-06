@@ -1,7 +1,7 @@
 // Touch + mouse input.
 //   Look tool:   one finger pans.
-//   Build tools: one finger paints (walls/spikes/demolish) or positions a
-//                tower that is placed on release.
+//   Build tools: one finger paints (walls, moats, demolish...) or, for
+//                towers and archers, aims and places on release.
 //   Two fingers: pinch zoom + pan, twist rotates (3D view only).
 // A build stroke only commits after a short move or a tap, so starting a
 // pinch never drops a stray wall.
@@ -12,7 +12,7 @@ export class Input {
   constructor(canvas, camera, handlers) {
     this.canvas = canvas
     this.cam = camera
-    this.h = handlers // { tool(), paint(i), placeTower(i), preview(i|null), worldToTile(x,y) }
+    this.h = handlers // see main.js for the handler set
     this.pointers = new Map()
     this.mode = null // 'pan' | 'paint' | 'tower' | 'pinch' | 'pending'
     this.lastTile = -1
@@ -54,7 +54,7 @@ export class Input {
     const panButton = e.pointerType === 'mouse' && e.button !== 0
     if (tool === 'look' || panButton) {
       this.mode = 'pan'
-    } else if (tool === 'tower') {
+    } else if (this.h.placeOnRelease(tool)) {
       this.mode = 'tower'
       this.lastTile = this.tileAt(e.clientX, e.clientY)
       this.h.preview(this.lastTile)
@@ -126,7 +126,7 @@ export class Input {
     }
     if (!cancelled) {
       if (this.mode === 'pending') this.paintTo(this.tileAt(p.x, p.y))
-      if (this.mode === 'tower' && this.lastTile >= 0) this.h.placeTower(this.lastTile)
+      if (this.mode === 'tower' && this.lastTile >= 0) this.h.placeAt(this.lastTile)
     }
     if (this.mode === 'tower') this.h.preview(null)
     this.h.strokeEnd?.()

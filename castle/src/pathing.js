@@ -49,10 +49,12 @@ class MinHeap {
   }
 }
 
-function enterCost(world, i) {
-  const t = world.tiles[i]
-  if (t.type === 'wall' || t.type === 'tower') return Math.max(0, t.hp) * SIEGE_COST_PER_HP
-  return 0
+// Cost of stepping into tile i: slow ground takes longer to cross, and
+// structures cost time to break in proportion to their remaining HP.
+function stepCost(world, i, step) {
+  if (world.tiles[i].type === 'keep') return step
+  if (world.isSolid(i)) return step + Math.max(0, world.tiles[i].hp) * SIEGE_COST_PER_HP
+  return step / world.slow(i)
 }
 
 // A diagonal step may not squeeze between two corners.
@@ -80,7 +82,6 @@ export function computeFlow(world) {
     if (d > dist[u]) continue
     const ux = u % w
     const uy = (u / w) | 0
-    const uCost = enterCost(world, u)
     for (const [dx, dy, step] of DIRS) {
       // Reverse search: consider stepping from neighbor v into u.
       const vx = ux - dx
@@ -89,7 +90,7 @@ export function computeFlow(world) {
       const v = world.idx(vx, vy)
       if (world.isBlocked(v) || world.tiles[v].type === 'keep') continue
       if (!diagonalOk(world, vx, vy, dx, dy)) continue
-      const nd = d + step + uCost
+      const nd = d + stepCost(world, u, step)
       if (nd < dist[v]) {
         dist[v] = nd
         heap.push(v, nd)
@@ -108,7 +109,7 @@ export function computeFlow(world) {
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
       const j = world.idx(nx, ny)
       if (world.isBlocked(j) || !diagonalOk(world, x, y, dx, dy)) continue
-      const c = dist[j] + step + enterCost(world, j)
+      const c = dist[j] + stepCost(world, j, step)
       if (c < best) {
         best = c
         next[i] = j

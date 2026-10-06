@@ -1,11 +1,14 @@
 import { World, mulberry32 } from './world.js'
 import { computeFlow } from './pathing.js'
 import {
-  START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARROW_SPEED,
+  START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, ARROW_SPEED,
   waveComposition, waveBonus,
 } from './config.js'
 
 const SPAWN_INTERVAL = 0.75
+const ARCHER_THINK = 0.5
+const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
+const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 
 export class Game {
   constructor(seed = 20261006) {
@@ -13,12 +16,14 @@ export class Game {
     this.reset()
   }
 
-  reset() {
-    this.world = new World(this.seed)
+  reset(seed = this.seed) {
+    this.seed = seed
+    this.world = new World(seed)
     this.gold = START_GOLD
     this.wave = 0 // waves completed
     this.phase = 'build' // build | attack | won | lost
     this.enemies = []
+    this.archers = []
     this.projectiles = []
     this.floaters = []
     this.spawnQueue = []
@@ -26,9 +31,14 @@ export class Game {
     this.time = 0
     this.nextId = 1
     this.events = [] // drained by the UI
-    this.rnd = mulberry32(this.seed ^ 0x9e3779b9)
+    this.rnd = mulberry32(seed ^ 0x9e3779b9)
     this.flow = computeFlow(this.world)
     this.world.dirty = false
+
+    // The keep starts garrisoned, one archer per outer side.
+    const k = this.world.keep
+    for (const [dx, dy] of [[1, 0], [0, 2], [2, 2]].slice(0, KEEP.archers))
+      this.addArcher(this.world.idx(k.x + dx, k.y + dy))
   }
 
   emit(type, data = {}) {
@@ -55,16 +65,19 @@ export class Game {
 
   canPlace(i, type) {
     if (this.phase === 'won' || this.phase === 'lost') return false
-    if (!this.world.canBuild(i)) return false
+    if (type === 'archer') return this.canPlaceArcher(i)
+    if (!this.world.canBuild(i, type)) return false
     if (this.gold < STRUCTURES[type].cost) return false
-    if (type !== 'trap' && this.enemyOnTile(i)) return false
+    if (STRUCTURES[type].solid && this.enemyOnTile(i)) return false
     return true
   }
 
   place(i, type) {
+    if (type === 'archer') return this.placeArcher(i)
     if (!this.canPlace(i, type)) return false
     this.gold -= STRUCTURES[type].cost
     this.world.build(i, type)
+    for (let k = 0; k < (STRUCTURES[type].freeArchers || 0); k++) this.addArcher(i)
     return true
   }
 
@@ -81,8 +94,183 @@ export class Game {
   demolish(i) {
     if (!STRUCTURES[this.world.tiles[i].type]) return false
     this.gold += this.refundFor(i)
+    const stranded = this.archers.filter((a) => a.tile === i)
     this.world.clear(i)
+    // Archers on a removed structure fall back to the keep.
+    for (const a of stranded) this.rehouse(a)
     return true
+  }
+
+  // ---- archers --------------------------------------------------------------
+
+  // Archers standing on or heading to tile i.
+  occupancy(i, except = null) {
+    let n = 0
+    for (const a of this.archers) {
+      if (a === except) continue
+      const dest = a.path.length ? a.path[a.path.length - 1] : a.tile
+      if (dest === i) n++
+    }
+    return n
+  }
+
+  hasRoom(i, except = null) {
+    return this.world.isRampart(i) && this.occupancy(i, except) < this.world.slots(i)
+  }
+
+  canPlaceArcher(i) {
+    return this.phase !== 'won' && this.phase !== 'lost' && this.gold >= ARCHER.cost && this.hasRoom(i)
+  }
+
+  placeArcher(i) {
+    if (!this.canPlaceArcher(i)) return false
+    this.gold -= ARCHER.cost
+    this.addArcher(i)
+    return true
+  }
+
+  addArcher(i) {
+    if (!this.hasRoom(i)) return null
+    const { world } = this
+    const a = {
+      id: this.nextId++,
+      tile: i,
+      post: i,
+      path: [],
+      // Small personal offset so archers sharing a tower don't overlap.
+      ox: (this.rnd() - 0.5) * 0.3,
+      oy: (this.rnd() - 0.5) * 0.3,
+      x: (i % world.w) + 0.5,
+      y: ((i / world.w) | 0) + 0.5,
+      z: world.surface(i),
+      cd: 0,
+      think: this.rnd() * ARCHER_THINK,
+      heading: Math.PI / 2,
+    }
+    a.x += a.ox
+    a.y += a.oy
+    this.archers.push(a)
+    return a
+  }
+
+  // Send an archer whose post is gone to a free spot in the keep.
+  rehouse(a) {
+    const { world } = this
+    const k = world.keep
+    for (let y = k.y; y < k.y + KEEP.size; y++)
+      for (let x = k.x; x < k.x + KEEP.size; x++) {
+        const i = world.idx(x, y)
+        if (this.hasRoom(i, a)) {
+          a.tile = a.post = i
+          a.path = []
+          a.x = x + 0.5 + a.ox
+          a.y = y + 0.5 + a.oy
+          a.z = world.surface(i)
+          return
+        }
+      }
+    // Nowhere to go: pay them off.
+    this.archers = this.archers.filter((b) => b !== a)
+    this.gold += ARCHER.cost
+  }
+
+  range(i) {
+    return ARCHER.range + this.world.perch(i)
+  }
+
+  enemyInRange(i) {
+    const { world } = this
+    const x = (i % world.w) + 0.5
+    const y = ((i / world.w) | 0) + 0.5
+    const r2 = this.range(i) ** 2
+    return this.enemies.some((e) => !e.dead && (e.x - x) ** 2 + (e.y - y) ** 2 <= r2)
+  }
+
+  // Breadth-first search along connected ramparts. Returns the path to the
+  // first tile satisfying `goal`, excluding the start.
+  rampartPath(a, goal) {
+    const { world } = this
+    const prev = new Map([[a.tile, -1]])
+    const queue = [a.tile]
+    for (let q = 0; q < queue.length && q < ARCHER_SEARCH; q++) {
+      const u = queue[q]
+      if (u !== a.tile && goal(u)) {
+        const path = []
+        for (let v = u; v !== a.tile; v = prev.get(v)) path.push(v)
+        return path.reverse()
+      }
+      const ux = u % world.w
+      const uy = (u / world.w) | 0
+      for (const [dx, dy] of N4) {
+        const nx = ux + dx
+        const ny = uy + dy
+        if (!world.inBounds(nx, ny)) continue
+        const v = world.idx(nx, ny)
+        if (prev.has(v) || !world.isRampart(v)) continue
+        prev.set(v, u)
+        queue.push(v)
+      }
+    }
+    return null
+  }
+
+  updateArcher(a, dt) {
+    const { world } = this
+    if (!world.isRampart(a.tile)) {
+      a.dead = true // the wall came down under them
+      return
+    }
+    a.cd -= dt
+    a.think -= dt
+
+    if (a.path.length) {
+      const next = a.path[0]
+      if (!world.isRampart(next)) {
+        a.path = []
+      } else {
+        const tx = (next % world.w) + 0.5 + a.ox
+        const ty = ((next / world.w) | 0) + 0.5 + a.oy
+        const dx = tx - a.x
+        const dy = ty - a.y
+        const d = Math.hypot(dx, dy)
+        const step = ARCHER.speed * dt
+        a.heading = Math.atan2(dy, dx)
+        if (d <= step) {
+          a.x = tx
+          a.y = ty
+          a.tile = a.path.shift()
+        } else {
+          a.x += (dx / d) * step
+          a.y += (dy / d) * step
+        }
+        // Step up or down onto the next surface as they cross the seam.
+        const surf = world.surface(d < 0.5 ? next : a.tile)
+        a.z += (surf - a.z) * Math.min(1, dt * 10)
+        return
+      }
+    }
+    a.z += (world.surface(a.tile) - a.z) * Math.min(1, dt * 10)
+
+    const target = this.pickTarget(a.x, a.y, this.range(a.tile))
+    if (target) {
+      a.heading = Math.atan2(target.y - a.y, target.x - a.x)
+      if (a.cd <= 0) {
+        a.cd = 1 / ARCHER.fireRate
+        this.shoot(a.x, a.y, a.z + 0.5, target, ARCHER.damage)
+      }
+      return
+    }
+    if (a.think > 0) return
+    a.think = ARCHER_THINK
+    if (this.phase === 'attack') {
+      // Nothing to shoot: walk the walls to the nearest spot that has a target.
+      const path = this.rampartPath(a, (i) => this.hasRoom(i, a) && this.enemyInRange(i))
+      if (path) a.path = path
+    } else if (a.tile !== a.post) {
+      const path = this.rampartPath(a, (i) => i === a.post)
+      if (path) a.path = path
+      else a.post = a.tile // post was cut off; stay here
+    }
   }
 
   // ---- waves --------------------------------------------------------------
@@ -121,6 +309,7 @@ export class Game {
       type,
       x: spawn.x + 0.5 + (this.rnd() - 0.5) * 0.4,
       y: spawn.y + 0.5 + (this.rnd() - 0.5) * 0.4,
+      z: 0,
       hp,
       maxHp: hp,
       speed: def.speed * (0.9 + this.rnd() * 0.2),
@@ -143,6 +332,9 @@ export class Game {
     for (const f of this.floaters) f.t += dt
     this.floaters = this.floaters.filter((f) => f.t < 1.2)
     if (this.world.dirty) this.repath()
+
+    for (const a of this.archers) this.updateArcher(a, dt)
+    this.archers = this.archers.filter((a) => !a.dead)
     if (this.phase !== 'attack') return
 
     this.waveTime += dt
@@ -152,13 +344,12 @@ export class Game {
     for (const e of this.enemies) this.updateEnemy(e, dt)
     this.separate()
     this.updateTraps(dt)
-    this.updateShooters(dt)
     this.updateProjectiles(dt)
 
     for (const e of this.enemies) {
       if (e.dead) {
         this.gold += e.gold
-        this.floaters.push({ x: e.x, y: e.y, text: `+${e.gold}`, t: 0 })
+        this.floaters.push({ x: e.x, y: e.y, z: e.z, text: `+${e.gold}`, t: 0 })
       }
     }
     this.enemies = this.enemies.filter((e) => !e.dead)
@@ -200,10 +391,7 @@ export class Game {
     const y0 = Math.floor(y - r)
     const y1 = Math.floor(y + r)
     for (let ty = y0; ty <= y1; ty++)
-      for (let tx = x0; tx <= x1; tx++) {
-        const i = world.idx(tx, ty)
-        if (world.isSolid(i) || world.isBlocked(i)) return true
-      }
+      for (let tx = x0; tx <= x1; tx++) if (!world.isWalkable(world.idx(tx, ty))) return true
     return false
   }
 
@@ -218,6 +406,7 @@ export class Game {
     const { world, flow } = this
     e.flash = Math.max(0, e.flash - dt)
     const ci = world.idxAt(e.x, e.y)
+    e.z += (world.elev(ci) - e.z) * Math.min(1, dt * 8)
     let target = flow.next[ci]
     if (target < 0) {
       // Off the flow field (should be rare): head straight for the keep.
@@ -233,6 +422,8 @@ export class Game {
         e.attacking = true
         e.heading = Math.atan2(ty - e.y, tx - e.x)
         e.walk += dt * 6
+        const thorns = STRUCTURES[world.tiles[target].type]?.thorns
+        if (thorns) this.hurt(e, thorns * dt, false)
         world.damage(target, e.dps * e.siege * dt)
         return
       }
@@ -241,9 +432,10 @@ export class Game {
     const dx = tx - e.x
     const dy = ty - e.y
     const len = Math.hypot(dx, dy) || 1
-    const step = e.speed * dt
+    const speed = e.speed * world.slow(ci)
+    const step = speed * dt
     e.heading = Math.atan2(dy, dx)
-    e.walk += dt * e.speed * 6
+    e.walk += dt * speed * 6
     this.tryMove(e, (dx / len) * step, (dy / len) * step)
   }
 
@@ -298,36 +490,18 @@ export class Game {
     return best
   }
 
-  updateShooters(dt) {
-    const { world } = this
-    const shooters = [...world.towers].map((i) => ({
-      state: world.tiles[i],
-      x: (i % world.w) + 0.5,
-      y: ((i / world.w) | 0) + 0.5,
-      z: STRUCTURES.tower.height + 0.3,
-      def: STRUCTURES.tower,
-    }))
-    const k = world.keep
-    shooters.push({ state: k, x: k.x + 1.5, y: k.y + 1.5, z: KEEP.height + 0.4, def: KEEP })
-
-    for (const s of shooters) {
-      s.state.cd -= dt
-      if (s.state.cd > 0) continue
-      const e = this.pickTarget(s.x, s.y, s.def.range)
-      if (!e) continue
-      s.state.cd = 1 / s.def.fireRate
-      const dist = Math.hypot(e.x - s.x, e.y - s.y)
-      this.projectiles.push({
-        sx: s.x, sy: s.y, sz: s.z,
-        tx: e.x, ty: e.y,
-        x: s.x, y: s.y, z: s.z,
-        px: s.x, py: s.y, pz: s.z,
-        target: e,
-        t: 0,
-        dur: Math.max(0.15, dist / ARROW_SPEED),
-        dmg: s.def.damage,
-      })
-    }
+  shoot(x, y, z, e, dmg) {
+    const dist = Math.hypot(e.x - x, e.y - y)
+    this.projectiles.push({
+      sx: x, sy: y, sz: z,
+      tx: e.x, ty: e.y, tz: e.z + 0.4,
+      x, y, z,
+      px: x, py: y, pz: z,
+      target: e,
+      t: 0,
+      dur: Math.max(0.15, dist / ARROW_SPEED),
+      dmg,
+    })
   }
 
   updateProjectiles(dt) {
@@ -335,6 +509,7 @@ export class Game {
       if (!p.target.dead) {
         p.tx = p.target.x
         p.ty = p.target.y
+        p.tz = p.target.z + 0.4
       }
       p.t = Math.min(1, p.t + dt / p.dur)
       p.px = p.x
@@ -343,7 +518,7 @@ export class Game {
       p.x = p.sx + (p.tx - p.sx) * p.t
       p.y = p.sy + (p.ty - p.sy) * p.t
       const arc = Math.min(1.5, p.dur * 2)
-      p.z = p.sz + (0.4 - p.sz) * p.t + Math.sin(p.t * Math.PI) * arc
+      p.z = p.sz + (p.tz - p.sz) * p.t + Math.sin(p.t * Math.PI) * arc
       if (p.t >= 1) {
         if (!p.target.dead) this.hurt(p.target, p.dmg)
         p.done = true
