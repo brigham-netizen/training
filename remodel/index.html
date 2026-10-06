@@ -109,7 +109,7 @@ button, input, select { font: inherit; color: inherit; }
 .group-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 16px 6px; }
 .group-head .num { color: var(--ink-2); font-size: 14px; }
 
-.row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 132px 120px 28px; gap: 12px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--rule); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 160px 110px 28px; gap: 12px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--rule); }
 .row.colhead { border-top: 0; padding-block: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
 .row.colhead > :nth-child(n+2) { text-align: right; }
 .row.has-qty { background: linear-gradient(90deg, var(--pencil-soft), transparent 60%); }
@@ -224,7 +224,454 @@ button, input, select { font: inherit; color: inherit; }
 // ─── COST DATA ────────────────────────────────────────────────────────────────
 // Each source: typical installed range [low, high] per unit, or null where the source has no data.
 // "localized: true" sources already price for Idaho Falls ZIP codes and are not scaled by the factor.
-const DATA = /*DATA*/{}/*END*/;
+const DATA = /*DATA*/{
+ "asOf": "October 2026",
+ "note": "Homewyse figures exclude permits, sales tax and general-contractor markup (add 13–22% if a GC runs the job). Homewyse's panel page prices a 100A panel, so it is left out of the 200A panel line.",
+ "locationFactor": {
+  "value": 0.92,
+  "basis": "0.92, from the Craftsman 2025 National Renovation & Insurance Repair Estimator area modification factor for Idaho Falls (−8%). Earlier Craftsman books put it at −9%.",
+  "url": "https://craftsman-book.com/media/static/previews/2025_NRI_book_preview.pdf"
+ },
+ "sources": [
+  {
+   "name": "Homewyse",
+   "localized": true,
+   "home": "https://www.homewyse.com/",
+   "summary": "ZIP-adjusted estimates run for Idaho Falls (83401–83404), September 2026 data.",
+   "items": {
+    "roof_asphalt": {
+     "low": 500,
+     "high": 754,
+     "url": "https://www.homewyse.com/services/cost_to_install_asphalt_shingle_roof.html",
+     "note": "2,000 sq ft job with tear-off and disposal, converted to per square."
+    },
+    "siding_vinyl": {
+     "low": 7.63,
+     "high": 12.93,
+     "url": "https://www.homewyse.com/services/cost_to_install_vinyl_siding.html",
+     "note": "Includes removing old siding."
+    },
+    "ext_paint": {
+     "low": 1.9,
+     "high": 3.77,
+     "url": "https://www.homewyse.com/services/cost_to_paint_house_exterior.html"
+    },
+    "windows": {
+     "low": 570,
+     "high": 865,
+     "url": "https://www.homewyse.com/services/cost_to_install_vinyl_windows.html",
+     "note": "10-window job, low-E vinyl, removal included."
+    },
+    "garage_door": {
+     "low": 1321,
+     "high": 2106,
+     "url": "https://www.homewyse.com/services/cost_to_install_insulated_garage_door.html",
+     "note": "Insulated steel; door size not stated, so a 16×7 may run higher."
+    },
+    "entry_door": {
+     "low": 1117,
+     "high": 1679,
+     "url": "https://www.homewyse.com/services/cost_to_install_exterior_door.html",
+     "note": "Prices a fiberglass door; no prehung steel page exists."
+    },
+    "concrete": {
+     "low": 19.02,
+     "high": 22.89,
+     "url": "https://www.homewyse.com/services/cost_to_install_concrete_driveway.html",
+     "note": "New pour $8.37–$10.03 plus slab removal $10.65–$12.86."
+    },
+    "fence": {
+     "low": 26.66,
+     "high": 69.74,
+     "url": "https://www.homewyse.com/services/cost_to_install_wood_privacy_fence.html",
+     "note": "Low end is 6 ft wood ($26.66–$42.82), high end is 6 ft vinyl ($50.20–$69.74)."
+    },
+    "sprinkler": {
+     "low": 933,
+     "high": 1740,
+     "url": "https://www.homewyse.com/services/cost_to_install_sprinkler_system.html",
+     "note": "Priced per sq ft of lawn; assumes about 1,000 sq ft per zone."
+    },
+    "int_paint": {
+     "low": 3.97,
+     "high": 7.64,
+     "url": "https://www.homewyse.com/services/cost_to_paint_home.html",
+     "note": "Walls and ceilings, 2 coats, with prep."
+    },
+    "lvp": {
+     "low": 8.75,
+     "high": 13.03,
+     "url": "https://www.homewyse.com/costs/cost_of_luxury_vinyl_tiles.html",
+     "note": "Luxury vinyl tile estimator; no LVP-specific page."
+    },
+    "carpet": {
+     "low": 5.32,
+     "high": 7.72,
+     "url": "https://www.homewyse.com/services/cost_to_install_carpet.html",
+     "note": "Basic pad included; old carpet removal not included."
+    },
+    "drywall": {
+     "low": 2.27,
+     "high": 2.69,
+     "url": "https://www.homewyse.com/services/cost_to_install_drywall.html"
+    },
+    "basement_finish": null,
+    "int_doors": {
+     "low": 396,
+     "high": 597,
+     "url": "https://www.homewyse.com/services/cost_to_install_prehung_door.html",
+     "note": "Hollow-core prehung, includes removal of old door and frame."
+    },
+    "cabinets": {
+     "low": 389,
+     "high": 584,
+     "url": "https://www.homewyse.com/services/cost_to_install_kitchen_cabinets.html",
+     "note": "Priced per cabinet; assumes about one cabinet per linear foot."
+    },
+    "countertops": {
+     "low": 130.91,
+     "high": 170.25,
+     "url": "https://www.homewyse.com/services/cost_to_install_quartz_countertop.html",
+     "note": "Includes fabrication and a sink cutout."
+    },
+    "appliances": {
+     "low": 4014,
+     "high": 8054,
+     "url": "https://www.homewyse.com/services/cost_to_install_refrigerator.html",
+     "note": "Sum of four single-appliance pages; likely overstates install labor."
+    },
+    "bath_full": {
+     "low": 12278,
+     "high": 15782,
+     "url": "https://www.homewyse.com/project_costs/cost_of_typical_bathroom_remodel.html",
+     "note": "'Typical bathroom remodel' at 5×8, full tear-out with tub and tile."
+    },
+    "bath_refresh": {
+     "low": 1901,
+     "high": 2982,
+     "url": "https://www.homewyse.com/services/cost_to_install_bathroom_vanity.html",
+     "note": "Vanity + toilet + faucet, each with removal."
+    },
+    "furnace": {
+     "low": 3336,
+     "high": 3966,
+     "url": "https://www.homewyse.com/services/cost_to_install_gas_furnace.html",
+     "note": "96% AFUE on existing ducts."
+    },
+    "ac": {
+     "low": 7750,
+     "high": 9199,
+     "url": "https://www.homewyse.com/services/cost_to_install_air_conditioning.html",
+     "note": "Prices a 3-ton heat pump condenser; a plain AC swap may cost less."
+    },
+    "water_heater": {
+     "low": 1664,
+     "high": 1930,
+     "url": "https://www.homewyse.com/services/cost_to_replace_hot_water_heater.html",
+     "note": "Prices a 40 gal gas tank; 50 gal runs a bit more."
+    },
+    "panel": null,
+    "radon": null
+   }
+  },
+  {
+   "name": "Angi / HomeAdvisor",
+   "localized": false,
+   "home": "https://www.angi.com/",
+   "summary": "National typical ranges from 2025–2026 cost guides, scaled by the Idaho Falls factor.",
+   "items": {
+    "roof_asphalt": {
+     "low": 400,
+     "high": 1200,
+     "url": "https://www.homeadvisor.com/cost/roofing/asphalt-shingles-install-replace/",
+     "note": "$4–$12/sq ft installed. Tear-off may add $1–$5/sq ft."
+    },
+    "siding_vinyl": {
+     "low": 3,
+     "high": 12,
+     "url": "https://www.homeadvisor.com/cost/siding/vinyl-siding-installation/",
+     "note": "Includes old siding removal where applicable."
+    },
+    "ext_paint": {
+     "low": 1.5,
+     "high": 4,
+     "url": "https://www.homeadvisor.com/cost/painting/paint-a-home-exterior/",
+     "note": "Per sq ft of paintable wall area."
+    },
+    "windows": {
+     "low": 200,
+     "high": 800,
+     "url": "https://www.angi.com/articles/vinyl-windows-installation-cost.htm",
+     "note": "Vinyl, installed, per window."
+    },
+    "garage_door": {
+     "low": 1500,
+     "high": 3900,
+     "url": "https://www.angi.com/articles/insulated-garage-door-cost.htm",
+     "note": "16×7 double-insulated steel, from Angi city pages."
+    },
+    "entry_door": {
+     "low": 547,
+     "high": 2375,
+     "url": "https://www.homeadvisor.com/cost/doors-and-windows/exterior-door/",
+     "note": "Exterior door installed, all materials."
+    },
+    "concrete": {
+     "low": 8,
+     "high": 14,
+     "url": "https://www.homeadvisor.com/cost/garages/install-a-concrete-driveway/",
+     "note": "New pour $6–$8 plus $2–$6 demolition and haul-off."
+    },
+    "fence": {
+     "low": 25,
+     "high": 60,
+     "url": "https://www.angi.com/articles/vinyl-fence-cost.htm",
+     "note": "Wood and vinyl 6 ft privacy combined."
+    },
+    "sprinkler": {
+     "low": 500,
+     "high": 1000,
+     "url": "https://www.angi.com/articles/how-much-does-it-cost-install-sprinkler-system.htm"
+    },
+    "int_paint": {
+     "low": 2,
+     "high": 6,
+     "url": "https://www.angi.com/articles/how-much-does-it-cost-paint-interior-house.htm",
+     "note": "From $4,000–$12,000 for a 2,000 sq ft home."
+    },
+    "lvp": {
+     "low": 6,
+     "high": 20,
+     "url": "https://www.homeadvisor.com/cost/flooring/install-vinyl-or-linoleum-flooring/",
+     "note": "Material $3–$10 plus labor $3–$10."
+    },
+    "carpet": {
+     "low": 3,
+     "high": 11,
+     "url": "https://www.homeadvisor.com/cost/flooring/install-carpeting/",
+     "note": "Includes pad. Removing old carpet adds $1–$5/sq ft."
+    },
+    "drywall": {
+     "low": 1.5,
+     "high": 3.5,
+     "url": "https://www.homeadvisor.com/cost/walls-and-ceilings/drywall-installation-hanging/"
+    },
+    "basement_finish": {
+     "low": 7,
+     "high": 23,
+     "url": "https://www.angi.com/articles/how-much-does-it-cost-finish-basement.htm",
+     "note": "National typical reads like a basic finish; Angi city pages run $10–$65."
+    },
+    "int_doors": {
+     "low": 362,
+     "high": 1241,
+     "url": "https://www.angi.com/articles/how-much-does-it-cost-install-interior-door.htm"
+    },
+    "cabinets": {
+     "low": 200,
+     "high": 650,
+     "url": "https://www.angi.com/articles/wood-kitchen-cabinets-types-costs-and-installation.htm",
+     "note": "Semi-custom; install labor ($100–$300/LF) may be extra."
+    },
+    "countertops": {
+     "low": 70,
+     "high": 100,
+     "url": "https://www.angi.com/articles/how-much-do-quartz-countertops-cost.htm",
+     "note": "Install labor of $10–$30/sq ft may be extra."
+    },
+    "appliances": null,
+    "bath_full": {
+     "low": 6651,
+     "high": 17660,
+     "url": "https://www.homeadvisor.com/cost/bathrooms/remodel-a-bathroom/",
+     "note": "Typical bathroom remodel, all sizes. Angi's small full bath averages $4,500–$6,000."
+    },
+    "bath_refresh": {
+     "low": 600,
+     "high": 3000,
+     "url": "https://www.angi.com/articles/how-much-should-bathroom-vanity-install-labor-cost.htm",
+     "note": "Vanity plus toilet, installed; fixtures not priced separately."
+    },
+    "furnace": {
+     "low": 3800,
+     "high": 10000,
+     "url": "https://www.angi.com/articles/common-gas-furnace-prices.htm"
+    },
+    "ac": {
+     "low": 3887,
+     "high": 8073,
+     "url": "https://www.homeadvisor.com/cost/heating-and-cooling/install-an-ac-unit/"
+    },
+    "water_heater": {
+     "low": 800,
+     "high": 2500,
+     "url": "https://www.angi.com/articles/how-much-does-water-heater-installation-cost.htm"
+    },
+    "panel": {
+     "low": 1300,
+     "high": 2000,
+     "url": "https://www.angi.com/articles/ask-angie-what-does-it-cost-upgrade-200-amps.htm",
+     "note": "Service drop or meter upgrades cost more."
+    },
+    "radon": {
+     "low": 805,
+     "high": 1326,
+     "url": "https://www.angi.com/articles/how-much-does-it-cost-remove-radon-gas.htm"
+    }
+   }
+  },
+  {
+   "name": "Fixr",
+   "localized": false,
+   "home": "https://www.fixr.com/",
+   "summary": "National typical ranges from 2025–2026 cost guides, scaled by the Idaho Falls factor.",
+   "items": {
+    "roof_asphalt": {
+     "low": 400,
+     "high": 800,
+     "url": "https://www.fixr.com/costs/asphalt-roof-shingles-installation",
+     "note": "Architectural shingles at $4–$8/sq ft, converted to per square."
+    },
+    "siding_vinyl": {
+     "low": 3,
+     "high": 12,
+     "url": "https://www.fixr.com/costs/vinyl-siding",
+     "note": "Spans all grades; standard grade alone is $4–$7."
+    },
+    "ext_paint": {
+     "low": 2.84,
+     "high": 5.28,
+     "url": "https://www.fixr.com/costs/paint-house-exterior"
+    },
+    "windows": {
+     "low": 350,
+     "high": 800,
+     "url": "https://www.fixr.com/costs/window-replacement",
+     "note": "Vinyl window, per window replaced."
+    },
+    "garage_door": {
+     "low": 1175,
+     "high": 4075,
+     "url": "https://www.fixr.com/costs/install-garage-door",
+     "note": "16×7 steel door price plus double-door labor."
+    },
+    "entry_door": {
+     "low": 600,
+     "high": 1800,
+     "url": "https://www.fixr.com/costs/install-security-entry-door",
+     "note": "Basic 32×80 steel door, installed."
+    },
+    "concrete": {
+     "low": 5,
+     "high": 24,
+     "url": "https://www.fixr.com/costs/concrete-driveway-paving",
+     "note": "Includes $1–$4/sq ft to remove the old slab."
+    },
+    "fence": {
+     "low": 21,
+     "high": 50,
+     "url": "https://www.fixr.com/costs/privacy-fence"
+    },
+    "sprinkler": {
+     "low": 650,
+     "high": 1000,
+     "url": "https://www.fixr.com/costs/sprinkler-system",
+     "note": "Multi-zone systems scale at about this much per zone."
+    },
+    "int_paint": {
+     "low": 5.75,
+     "high": 10.7,
+     "url": "https://www.fixr.com/costs/paint-house",
+     "note": "Per sq ft of floor area, including prime and prep."
+    },
+    "lvp": {
+     "low": 5,
+     "high": 12,
+     "url": "https://www.fixr.com/costs/luxury-vinyl-plank-flooring",
+     "note": "'Most people pay' range."
+    },
+    "carpet": {
+     "low": 1.36,
+     "high": 13.58,
+     "url": "https://www.fixr.com/costs/carpet-installation",
+     "note": "Very wide national range; no narrower typical band published."
+    },
+    "drywall": {
+     "low": 1.5,
+     "high": 3.5,
+     "url": "https://www.fixr.com/costs/drywall-installation"
+    },
+    "basement_finish": {
+     "low": 30,
+     "high": 90,
+     "url": "https://www.fixr.com/costs/basement-remodeling"
+    },
+    "int_doors": {
+     "low": 365,
+     "high": 679,
+     "url": "https://www.fixr.com/costs/install-interior-door",
+     "note": "Prehung lauan door, installed."
+    },
+    "cabinets": {
+     "low": 150,
+     "high": 650,
+     "url": "https://www.fixr.com/costs/cabinets-installation",
+     "note": "Semi-custom; may exclude $50–$200/LF install labor."
+    },
+    "countertops": {
+     "low": 75,
+     "high": 125,
+     "url": "https://www.fixr.com/costs/install-quartz-countertop",
+     "note": "Mid-grade quartz installed."
+    },
+    "appliances": {
+     "low": 2500,
+     "high": 7000,
+     "url": "https://www.fixr.com/costs/kitchen-remodeling"
+    },
+    "bath_full": {
+     "low": 2800,
+     "high": 16000,
+     "url": "https://www.fixr.com/costs/bathroom-remodeling",
+     "note": "5×8 range spans minor to full scope."
+    },
+    "bath_refresh": {
+     "low": 1875,
+     "high": 5825,
+     "url": "https://www.fixr.com/costs/bathroom-remodeling",
+     "note": "Sum of vanity, toilet, faucet and showerhead components."
+    },
+    "furnace": {
+     "low": 4000,
+     "high": 8000,
+     "url": "https://www.fixr.com/costs/natural-gas-furnace"
+    },
+    "ac": {
+     "low": 4630,
+     "high": 8423,
+     "url": "https://www.fixr.com/costs/3-ton-air-conditioner",
+     "note": "Page last updated Jan 2024."
+    },
+    "water_heater": {
+     "low": 900,
+     "high": 2500,
+     "url": "https://www.fixr.com/costs/50-gallon-water-heater"
+    },
+    "panel": {
+     "low": 1800,
+     "high": 4500,
+     "url": "https://www.fixr.com/costs/install-electrical-circuit-panel-upgrade"
+    },
+    "radon": {
+     "low": 500,
+     "high": 2500,
+     "url": "https://www.fixr.com/costs/radon-testing",
+     "note": "Active suction system."
+    }
+   }
+  }
+ ]
+}/*END*/;
 
 // ─── SCOPE ITEMS ─────────────────────────────────────────────────────────────
 const CATEGORIES = [
