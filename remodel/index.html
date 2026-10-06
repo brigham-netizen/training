@@ -49,6 +49,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); }
 .wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 28px; }
@@ -82,19 +83,56 @@ button, input, select { font: inherit; color: inherit; }
 .check { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; padding-block: 6px; }
 .check input { width: 16px; height: 16px; accent-color: var(--steel); }
 
-/* home cards */
-.homes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-.home { text-align: left; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; cursor: pointer; display: grid; gap: 6px; position: relative; min-width: 0; }
-.home[aria-pressed="true"] { border-color: var(--steel); box-shadow: inset 0 0 0 1px var(--steel); }
-.home .name { font-family: var(--display); font-size: 20px; font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
-.home .meta { font-size: 13px; color: var(--ink-3); }
-.home .total { font-family: var(--mono); font-size: 26px; font-weight: 500; letter-spacing: -.01em; }
-.home .range { font-size: 13px; color: var(--ink-2); }
-.home .bar { height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; }
-.home .bar i { display: block; height: 100%; background: var(--pencil); border-radius: 3px; transition: width .25s; }
-.home .tag { position: absolute; top: 12px; right: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); }
-.add-home { border: 1px dashed var(--rule-2); background: transparent; border-radius: 6px; padding: 14px; cursor: pointer; color: var(--ink-2); min-height: 120px; }
+/* market panel */
+.market { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: grid; }
+.market-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 12px 20px; padding: 16px; }
+.market-title { display: grid; gap: 2px; min-width: 0; }
+.market-title h2 { font-size: 28px; }
+.lockstate { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.lockchip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; padding: 4px 10px; border-radius: 99px; }
+.lockchip.on { background: var(--ok-soft); color: var(--ok); }
+.lockchip.off { background: var(--warn-soft); color: var(--warn); }
+.btn { border: 1px solid var(--rule-2); background: var(--sheet); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-weight: 500; }
+.btn:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.assume { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin: 0; border-top: 1px solid var(--rule); }
+.assume > div { padding: 12px 16px; display: grid; gap: 2px; min-width: 0; }
+.assume > div + div { border-left: 1px solid var(--rule); }
+.assume dt { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
+.assume dd { margin: 0; font-weight: 500; }
+.assume dd .small { font-weight: 400; }
+.market .controls { border: 0; border-top: 1px solid var(--rule); border-radius: 0; background: var(--warn-soft); }
+.market .controls p { flex-basis: 100%; }
+.edit-warn { font-size: 13px; font-weight: 500; color: var(--warn); }
+@media (max-width: 560px) { .assume > div + div { border-left: 0; border-top: 1px solid var(--rule); } }
+
+/* homes list */
+.homes-wrap { display: grid; gap: 10px; }
+.homes-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; }
+.home-list { display: grid; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.home-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 80px 64px minmax(160px, 1.4fr) 80px; gap: 14px; align-items: center; text-align: left; width: 100%; padding: 12px 16px; border: 0; border-top: 1px solid var(--rule); background: transparent; cursor: pointer; }
+.home-row:first-child { border-top: 0; }
+.home-row.colhead { cursor: default; padding-block: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
+.home-row:not(.colhead):hover { background: var(--paper); }
+.home-row[aria-pressed="true"] { background: var(--steel-soft); box-shadow: inset 3px 0 0 var(--steel); }
+.home-row .r { text-align: right; }
+.home-row .name { font-weight: 600; overflow-wrap: anywhere; }
+.home-row .meta { display: block; font-size: 12px; color: var(--ink-3); }
+.home-row .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); border: 1px solid var(--rule-2); border-radius: 3px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; font-weight: 500; }
+.home-row .cost { display: grid; gap: 4px; }
+.home-row .cost .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.home-row .total { font-family: var(--mono); font-size: 17px; font-weight: 500; }
+.home-row .range { font-size: 11px; color: var(--ink-3); }
+.home-row .bar { height: 5px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+.home-row .bar i { display: block; height: 100%; background: var(--pencil); border-radius: 3px; transition: width .25s; }
+.add-home { justify-self: start; border: 1px dashed var(--rule-2); background: transparent; border-radius: 5px; padding: 8px 14px; cursor: pointer; color: var(--ink-2); }
 .add-home:hover { color: var(--ink); border-color: var(--ink-3); }
+@media (max-width: 720px) {
+  .home-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name psf" "cost cost"; row-gap: 6px; }
+  .home-row.colhead { display: none; }
+  .home-row .h-name { grid-area: name; } .home-row .h-cost { grid-area: cost; } .home-row .h-psf { grid-area: psf; }
+  .home-row .h-sqft, .home-row .h-items { display: none; }
+}
 
 /* active home editor */
 .editor { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
@@ -141,6 +179,7 @@ button, input, select { font: inherit; color: inherit; }
 .local-entry { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; background: var(--steel-soft); border-radius: 5px; }
 .local-entry label { font-weight: 500; }
 .local-entry .field { width: 110px; text-align: right; }
+.local-entry .field:disabled { background: transparent; color: var(--ink-2); }
 
 /* spread meter */
 .spread { position: relative; height: 18px; margin-top: 2px; }
@@ -174,28 +213,47 @@ button, input, select { font: inherit; color: inherit; }
   <header class="head">
     <div class="eyebrow">Lift Off Realty · Buyer tools</div>
     <h1>Remodel Cost Comparison</h1>
-    <p class="lede">Price the same scope of work on up to three homes with the same assumptions. Each line blends published cost data from three sources, adjusted to the Idaho Falls market, so you can compare homes on equal terms.</p>
+    <p class="lede">Every home in a market is priced with the same locked numbers, so a buyer can look anywhere in the area and compare homes on equal terms. Enter what each house needs; the market sets what it costs. Each rate blends published cost data from three sources, adjusted to local prices.</p>
   </header>
 
-  <section class="controls" aria-label="Assumptions">
-    <div class="ctl">
-      <span>Finish level</span>
-      <div class="seg" role="group" aria-label="Finish level" id="level">
-        <button type="button" data-level="low">Budget</button>
-        <button type="button" data-level="mid">Mid-range</button>
-        <button type="button" data-level="high">Upper</button>
+  <section class="market" aria-labelledby="mName">
+    <div class="market-head">
+      <div class="market-title">
+        <span class="eyebrow">Market</span>
+        <h2 id="mName"></h2>
+        <p class="small muted" id="mCoverage"></p>
       </div>
+      <div class="lockstate" id="lockState"></div>
     </div>
-    <div class="ctl">
-      <span>Idaho Falls factor</span>
-      <input class="field num" id="factor" type="number" step="0.01" min="0.5" max="1.5" inputmode="decimal" aria-describedby="factor-help">
+    <dl class="assume" id="assume"></dl>
+    <div class="controls" id="controls" hidden>
+      <div class="ctl">
+        <span>Finish level</span>
+        <div class="seg" role="group" aria-label="Finish level" id="level">
+          <button type="button" data-level="low">Budget</button>
+          <button type="button" data-level="mid">Mid-range</button>
+          <button type="button" data-level="high">Upper</button>
+        </div>
+      </div>
+      <div class="ctl">
+        <span>Location factor</span>
+        <input class="field num" id="factor" type="number" step="0.01" min="0.5" max="1.5" inputmode="decimal" aria-describedby="factor-help">
+      </div>
+      <label class="check" for="useLocal"><input type="checkbox" id="useLocal"> Include agent bids in the average</label>
+      <label class="check" for="localDouble"><input type="checkbox" id="localDouble"> Count agent bids twice</label>
+      <p class="small muted" id="factor-help">The factor scales national-average sources to local labor and material costs. Sources that already price by ZIP code are not scaled. Agent bids can be entered on any line while assumptions are unlocked.</p>
+      <p class="edit-warn" id="editWarn"></p>
     </div>
-    <label class="check" for="useLocal"><input type="checkbox" id="useLocal"> Include agent bids in the average</label>
-    <label class="check" for="localDouble"><input type="checkbox" id="localDouble"> Count agent bids twice</label>
-    <p class="small muted" id="factor-help" style="flex-basis:100%">The factor scales national-average sources to local labor and material costs. Sources that already price by ZIP code are not scaled.</p>
   </section>
 
-  <section aria-label="Homes being compared" class="homes" id="homes"></section>
+  <section class="homes-wrap" aria-labelledby="homesTitle">
+    <div class="homes-head">
+      <h2 id="homesTitle">Homes in this market</h2>
+      <span class="small muted" id="homesMeta"></span>
+    </div>
+    <div class="home-list" id="homes"></div>
+    <button type="button" class="add-home" id="addHome">+ Add a home</button>
+  </section>
 
   <section class="editor" id="editor" aria-label="Scope of work"></section>
 
@@ -207,6 +265,7 @@ button, input, select { font: inherit; color: inherit; }
         <li>Budget uses the low end of each range, Upper uses the high end, and Mid-range uses the midpoint.</li>
         <li>National sources are multiplied by the Idaho Falls factor. Sources that already price by ZIP code are used as published.</li>
         <li>The blended rate is the plain average of every source with data. Agent bids join that average when included.</li>
+        <li>The finish level, location factor and agent bids belong to the market, not to a home, so every home in the market is priced the same way. They stay locked until someone unlocks them on purpose.</li>
         <li>The chip on each line shows how closely the sources agree. Wide spread means the item needs a real bid.</li>
       </ul>
     </div>
@@ -217,7 +276,7 @@ button, input, select { font: inherit; color: inherit; }
     </div>
   </section>
 
-  <p class="footnote">These are planning estimates for comparing homes, not bids. Actual costs depend on the house's condition, access, permits, material choices and contractor availability. Get written bids before you rely on any number here. Agent bids you enter are saved only in this browser.</p>
+  <p class="footnote">These are planning estimates for comparing homes, not bids. Actual costs depend on the house's condition, access, permits, material choices and contractor availability. Get written bids before you rely on any number here. Homes and agent bids are saved only in this browser for now.</p>
 </div>
 
 <script>
@@ -717,15 +776,19 @@ const EXAMPLE_HOMES = [
 ];
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
-const STORE_KEY = "lor-remodel-v1";
+const STORE_KEY = "lor-remodel-v2";
+// A market owns every pricing assumption. Homes in the market only carry quantities,
+// so every home in the market is priced with identical numbers.
+const DEFAULT_MARKETS = [
+  { id: "idf", name: "Idaho Falls area", coverage: "Idaho Falls, Ammon, Iona, Ucon, Shelley, Rigby",
+    level: "mid", factor: null, useLocal: true, localDouble: false, local: {}, lockedAt: null },
+];
 const DEFAULT_STATE = {
-  level: "mid",
-  factor: null,          // null → use DATA.locationFactor.value
-  useLocal: true,
-  localDouble: false,
-  local: {},             // itemId → agent $/unit
-  homes: EXAMPLE_HOMES,
+  markets: DEFAULT_MARKETS,
+  market: "idf",
+  homes: EXAMPLE_HOMES.map(h => ({ ...h, market: "idf" })),
   active: "ex1",
+  editing: false,
   open: {},
 };
 let state = load();
@@ -733,21 +796,32 @@ let state = load();
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return Object.assign({}, structuredClone(DEFAULT_STATE), JSON.parse(raw), { open: {} });
+    if (raw) return Object.assign({}, structuredClone(DEFAULT_STATE), JSON.parse(raw), { open: {}, editing: false });
+    // Carry over homes and agent bids saved by the earlier, market-less version.
+    const old = localStorage.getItem("lor-remodel-v1");
+    if (old) {
+      const o = JSON.parse(old), st = structuredClone(DEFAULT_STATE), m = st.markets[0];
+      for (const k of ["level", "factor", "useLocal", "localDouble", "local"]) if (o[k] !== undefined) m[k] = o[k];
+      if (Array.isArray(o.homes) && o.homes.length) { st.homes = o.homes.map(h => ({ ...h, market: m.id })); st.active = o.active; }
+      return st;
+    }
   } catch (e) {}
   return structuredClone(DEFAULT_STATE);
 }
 function save() {
-  try { const { open, ...rest } = state; localStorage.setItem(STORE_KEY, JSON.stringify(rest)); } catch (e) {}
+  try { const { open, editing, ...rest } = state; localStorage.setItem(STORE_KEY, JSON.stringify(rest)); } catch (e) {}
 }
+const mk = () => state.markets.find(m => m.id === state.market) || state.markets[0];
+const marketHomes = () => state.homes.filter(h => h.market === mk().id);
+const locked = () => !state.editing;
 
 // ─── MATH ────────────────────────────────────────────────────────────────────
 const SRC_COLORS = ["var(--steel)", "var(--ok)", "var(--warn)"];
-function factor() { return state.factor ?? DATA.locationFactor?.value ?? 1; }
+function factor() { return mk().factor ?? DATA.locationFactor?.value ?? 1; }
 function pick(r, level) { return level === "low" ? r[0] : level === "high" ? r[1] : (r[0] + r[1]) / 2; }
 
 // Per-source unit values for an item, at the current level, after the location factor.
-function sourceValues(item, level = state.level) {
+function sourceValues(item, level = mk().level) {
   return DATA.sources.map((s, i) => {
     const r = s.items[item.id];
     if (!r) return { source: s, idx: i, value: null };
@@ -756,13 +830,13 @@ function sourceValues(item, level = state.level) {
   });
 }
 function localValue(item) {
-  const v = Number(state.local[item.id]);
-  return state.local[item.id] !== undefined && state.local[item.id] !== "" && v > 0 ? v : null;
+  const v = Number(mk().local[item.id]);
+  return mk().local[item.id] !== undefined && mk().local[item.id] !== "" && v > 0 ? v : null;
 }
-function blended(item, level = state.level) {
+function blended(item, level = mk().level) {
   const vals = sourceValues(item, level).filter(v => v.value != null).map(v => v.value);
   const loc = localValue(item);
-  if (state.useLocal && loc != null) { vals.push(loc); if (state.localDouble) vals.push(loc); }
+  if (mk().useLocal && loc != null) { vals.push(loc); if (mk().localDouble) vals.push(loc); }
   if (!vals.length) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
@@ -776,7 +850,7 @@ function agreement(item) {
   if (spread <= 0.6) return { cls: "warn", label: "Some spread", spread };
   return { cls: "bad", label: "Wide spread", spread };
 }
-function homeTotal(home, level = state.level) {
+function homeTotal(home, level = mk().level) {
   let t = 0;
   for (const item of ITEMS) {
     const q = Number(home.qty[item.id]) || 0;
@@ -793,26 +867,30 @@ const usd2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD"
 function money(v) { return v == null ? "—" : usd0.format(v); }
 function rate(v) { return v == null ? "—" : v < 100 ? usd2.format(v) : usd0.format(v); }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-const activeHome = () => state.homes.find(h => h.id === state.active) || state.homes[0];
+const activeHome = () => marketHomes().find(h => h.id === state.active) || marketHomes()[0];
 
 // ─── RENDER: HOMES ───────────────────────────────────────────────────────────
+const LEVEL_NAME = { low: "Budget", mid: "Mid-range", high: "Upper" };
 function renderHomes() {
-  const totals = state.homes.map(h => homeTotal(h));
+  const homes = marketHomes();
+  const totals = homes.map(h => homeTotal(h));
   const max = Math.max(1, ...totals);
-  const el = document.getElementById("homes");
-  el.innerHTML = state.homes.map((h, i) => {
-    const t = totals[i], lo = homeTotal(h, "low"), hi = homeTotal(h, "high");
-    const count = ITEMS.filter(it => Number(h.qty[it.id]) > 0).length;
-    const psf = h.sqft ? t / h.sqft : null;
-    return `<button type="button" class="home" data-home="${h.id}" aria-pressed="${h.id === state.active}">
-      ${h.example ? '<span class="tag">Example</span>' : ""}
-      <span class="name">${esc(h.name || "Untitled home")}</span>
-      <span class="meta">${esc(h.address || "No address")} · ${h.sqft ? Number(h.sqft).toLocaleString() + " sq ft" : "sq ft not set"}</span>
-      <span class="total" data-total="${h.id}">${money(t)}</span>
-      <span class="bar"><i style="width:${(t / max) * 100}%"></i></span>
-      <span class="range"><span class="num">${money(lo)} – ${money(hi)}</span> budget to upper · ${count} item${count === 1 ? "" : "s"}${psf ? ` · <span class="num">${usd0.format(psf)}</span>/sq ft` : ""}</span>
-    </button>`;
-  }).join("") + (state.homes.length < 3 ? `<button type="button" class="add-home" id="addHome">+ Add a home to compare</button>` : "");
+  document.getElementById("homesTitle").textContent = `Homes in ${mk().name}`;
+  document.getElementById("homesMeta").textContent = `${homes.length} home${homes.length === 1 ? "" : "s"} · all priced at ${LEVEL_NAME[mk().level]}, factor ${factor().toFixed(2)}`;
+  document.getElementById("homes").innerHTML =
+    `<div class="home-row colhead" aria-hidden="true"><span>Home</span><span class="r">Sq ft</span><span class="r">Items</span><span>Remodel estimate</span><span class="r">Per sq ft</span></div>` +
+    homes.map((h, i) => {
+      const t = totals[i], lo = homeTotal(h, "low"), hi = homeTotal(h, "high");
+      const count = ITEMS.filter(it => Number(h.qty[it.id]) > 0).length;
+      const psf = h.sqft ? t / h.sqft : null;
+      return `<button type="button" class="home-row" data-home="${h.id}" aria-pressed="${h.id === activeHome()?.id}">
+        <span class="h-name"><span class="name">${esc(h.name || "Untitled home")}</span>${h.example ? '<span class="tag">Example</span>' : ""}<span class="meta">${esc(h.address || "No address")}</span></span>
+        <span class="h-sqft r num">${h.sqft ? Number(h.sqft).toLocaleString() : "—"}</span>
+        <span class="h-items r num">${count}</span>
+        <span class="h-cost cost"><span class="top"><span class="total">${money(t)}</span><span class="range num">${money(lo)} – ${money(hi)}</span></span><span class="bar"><i style="width:${(t / max) * 100}%"></i></span></span>
+        <span class="h-psf r num">${psf ? usd0.format(psf) : "—"}</span>
+      </button>`;
+    }).join("");
 }
 
 // ─── RENDER: SCOPE EDITOR ────────────────────────────────────────────────────
@@ -826,8 +904,7 @@ function renderEditor() {
       <label class="ctl grow" for="hName"><span>Home</span><input class="field" id="hName" value="${esc(h.name)}" placeholder="e.g. 123 Main St"></label>
       <label class="ctl grow" for="hAddr"><span>Area or address</span><input class="field" id="hAddr" value="${esc(h.address)}" placeholder="City, ZIP"></label>
       <label class="ctl" for="hSqft"><span>Finished sq ft</span><input class="field num" id="hSqft" type="number" min="0" inputmode="numeric" value="${h.sqft ?? ""}"></label>
-      <button type="button" class="linkbtn" id="copyScope">Copy scope to other homes</button>
-      ${state.homes.length > 1 ? `<button type="button" class="linkbtn danger" id="removeHome">Remove this home</button>` : ""}
+      ${marketHomes().length > 1 ? `<button type="button" class="linkbtn danger" id="removeHome">Remove this home</button>` : ""}
     </div>
     ${CATEGORIES.map(cat => {
       const items = ITEMS.filter(i => i.cat === cat.id);
@@ -872,7 +949,7 @@ function detailHtml(item) {
   return `
     ${meter}
     <div class="src-table-wrap"><table class="src-table">
-      <thead><tr><th>Source</th><th class="r">Published range</th><th class="r">Adjusted range</th><th class="r">Used (${{ low: "budget", mid: "mid", high: "upper" }[state.level]})</th><th>Notes</th></tr></thead>
+      <thead><tr><th>Source</th><th class="r">Published range</th><th class="r">Adjusted range</th><th class="r">Used (${{ low: "budget", mid: "mid", high: "upper" }[mk().level]})</th><th>Notes</th></tr></thead>
       <tbody>
         ${vals.map(v => v.value == null
           ? `<tr><td>${esc(v.source.name)}</td><td class="r muted" colspan="3">No published figure</td><td class="note"></td></tr>`
@@ -881,14 +958,14 @@ function detailHtml(item) {
                <td class="r num">${v.source.localized ? "local, not scaled" : `${rate(v.low)} – ${rate(v.high)}`}</td>
                <td class="r num">${rate(v.value)}</td>
                <td class="note">${esc(v.raw.note || "")}</td></tr>`).join("")}
-        <tr><td>Agent / local bid</td><td class="r muted" colspan="2">${loc != null ? (state.useLocal ? "included in average" : "entered, not included") : "none entered"}</td><td class="r num">${loc != null ? rate(loc) : "—"}</td><td></td></tr>
+        <tr><td>Agent / local bid</td><td class="r muted" colspan="2">${loc != null ? (mk().useLocal ? "included in average" : "entered, not included") : "none entered"}</td><td class="r num">${loc != null ? rate(loc) : "—"}</td><td></td></tr>
         <tr class="blend"><td>Blended rate</td><td></td><td></td><td class="r num">${rate(b)}</td><td></td></tr>
       </tbody>
     </table></div>
     <div class="local-entry">
       <label for="l-${item.id}">What are you seeing locally?</label>
-      <input class="field num" id="l-${item.id}" data-local="${item.id}" type="number" min="0" step="any" inputmode="decimal" value="${state.local[item.id] ?? ""}" placeholder="$ / ${item.unit}">
-      <span class="small muted">$ per ${item.unit}, from a recent bid or invoice. Applies to every home.</span>
+      <input class="field num" id="l-${item.id}" data-local="${item.id}" type="number" min="0" step="any" inputmode="decimal" value="${mk().local[item.id] ?? ""}" placeholder="$ / ${item.unit}" ${locked() ? "disabled" : ""}>
+      <span class="small muted">${locked() ? `Market assumptions are locked. Unlock them to add or change a bid for ${esc(mk().name)}.` : `$ per ${item.unit}, from a recent bid or invoice. Applies to every home in ${esc(mk().name)}.`}</span>
     </div>`;
 }
 
@@ -905,7 +982,7 @@ function updateNumbers() {
     if (!r) continue;
     r.textContent = b == null ? "—" : `${rate(b)} / ${item.unit}`;
     const ag = agreement(item);
-    const usingLocal = state.useLocal && localValue(item) != null;
+    const usingLocal = mk().useLocal && localValue(item) != null;
     document.querySelector(`[data-chip="${item.id}"]`).innerHTML =
       `<span class="chip ${ag.cls}" title="${ag.spread != null ? `Source midpoints differ by ${Math.round(ag.spread * 100)}%` : ""}">${ag.label}</span>${usingLocal ? ' <span class="chip local">+ agent bid</span>' : ""}`;
     document.querySelector(`[data-line="${item.id}"]`).textContent = q ? money(line) : "—";
@@ -924,15 +1001,30 @@ function renderDetail(id) {
   if (d && state.open[id]) d.innerHTML = detailHtml(item);
 }
 
+const lockIcon = open => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5.5" width="8" height="5.5" rx="1" fill="currentColor"/><path d="${open ? "M4 5.5V3.8a2 2 0 0 1 3.9-.6" : "M4 5.5V3.8a2 2 0 0 1 4 0v1.7"}" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`;
 function renderControls() {
-  document.querySelectorAll("#level button").forEach(b => b.setAttribute("aria-pressed", b.dataset.level === state.level));
+  const m = mk();
+  const bids = ITEMS.filter(i => localValue(i) != null).length;
+  document.getElementById("mName").textContent = m.name;
+  document.getElementById("mCoverage").textContent = m.coverage;
+  document.getElementById("lockState").innerHTML = locked()
+    ? `<span class="lockchip on">${lockIcon(false)} Assumptions locked</span><button type="button" class="btn" id="unlock">Unlock to edit</button>`
+    : `<span class="lockchip off">${lockIcon(true)} Editing assumptions</span><button type="button" class="btn primary" id="lock">Lock assumptions</button>`;
+  document.getElementById("assume").innerHTML = `
+    <div><dt>Finish level</dt><dd>${LEVEL_NAME[m.level]}</dd></div>
+    <div><dt>Location factor</dt><dd class="num">${factor().toFixed(2)} <span class="small muted">${m.factor == null ? "Craftsman 2025" : "custom"}</span></dd></div>
+    <div><dt>Agent bids</dt><dd>${bids} line${bids === 1 ? "" : "s"} <span class="small muted">${bids ? (m.useLocal ? (m.localDouble ? "counted twice" : "in the average") : "not in the average") : ""}</span></dd></div>
+    <div><dt>Locked</dt><dd>${m.lockedAt ? new Date(m.lockedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Published defaults"}</dd></div>`;
+  document.getElementById("controls").hidden = locked();
+  document.getElementById("editWarn").textContent = `Changes here reprice all ${marketHomes().length} homes in ${m.name}.`;
+  document.querySelectorAll("#level button").forEach(b => b.setAttribute("aria-pressed", b.dataset.level === m.level));
   document.getElementById("factor").value = factor().toFixed(2);
-  document.getElementById("useLocal").checked = state.useLocal;
-  document.getElementById("localDouble").checked = state.localDouble;
-  document.getElementById("localDouble").disabled = !state.useLocal;
+  document.getElementById("useLocal").checked = m.useLocal;
+  document.getElementById("localDouble").checked = m.localDouble;
+  document.getElementById("localDouble").disabled = !m.useLocal;
   document.getElementById("source-list").innerHTML = DATA.sources.map((s, i) =>
     `<li><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${SRC_COLORS[i]};margin-right:6px"></i><a href="${esc(s.home)}" target="_blank" rel="noopener">${esc(s.name)}</a>: ${esc(s.summary)}</li>`).join("") +
-    `<li>Idaho Falls factor: ${esc(DATA.locationFactor?.basis || "")}</li>`;
+    `<li>Location factor: ${esc(DATA.locationFactor?.basis || "")}</li>`;
   document.getElementById("data-note").textContent = DATA.asOf ? `Data collected ${DATA.asOf}. ${DATA.note || ""}` : "";
 }
 
@@ -941,14 +1033,17 @@ function renderAll() { renderControls(); renderEditor(); }
 // ─── EVENTS ──────────────────────────────────────────────────────────────────
 document.addEventListener("click", e => {
   const lv = e.target.closest("#level button");
-  if (lv) { state.level = lv.dataset.level; save(); renderControls(); refreshOpenDetails(); updateNumbers(); return; }
+  if (lv && !locked()) { mk().level = lv.dataset.level; save(); renderControls(); refreshOpenDetails(); updateNumbers(); return; }
+  if (e.target.closest("#unlock")) { state.editing = true; renderControls(); refreshOpenDetails(); return; }
+  if (e.target.closest("#lock")) { state.editing = false; mk().lockedAt = Date.now(); save(); renderControls(); refreshOpenDetails(); return; }
   const home = e.target.closest("[data-home]");
   if (home) { state.active = home.dataset.home; save(); renderEditor(); return; }
   if (e.target.closest("#addHome")) {
     const id = "h" + Date.now().toString(36);
-    state.homes.push({ id, name: "", address: "", sqft: null, qty: {} });
+    state.homes.push({ id, market: mk().id, name: "", address: "", sqft: null, qty: {} });
     state.active = id; save(); renderEditor();
     document.getElementById("hName").focus();
+    document.getElementById("editor").scrollIntoView({ block: "start", behavior: "smooth" });
     return;
   }
   if (e.target.closest("#removeHome")) {
@@ -956,15 +1051,7 @@ document.addEventListener("click", e => {
     const btn = e.target.closest("#removeHome");
     if (btn.dataset.confirm !== "1") { btn.dataset.confirm = "1"; btn.textContent = "Click again to remove " + (h.name || "this home"); return; }
     state.homes = state.homes.filter(x => x.id !== h.id);
-    state.active = state.homes[0].id; save(); renderEditor(); return;
-  }
-  if (e.target.closest("#copyScope")) {
-    const h = activeHome();
-    state.homes.forEach(o => { if (o.id !== h.id) o.qty = { ...h.qty }; });
-    save(); updateNumbers();
-    const btn = e.target.closest("#copyScope"); btn.textContent = "Scope copied";
-    setTimeout(() => { if (btn.isConnected) btn.textContent = "Copy scope to other homes"; }, 1600);
-    return;
+    state.active = marketHomes()[0].id; save(); renderEditor(); return;
   }
   const ex = e.target.closest("[data-expand]");
   if (ex) {
@@ -988,7 +1075,8 @@ document.addEventListener("input", e => {
     save(); updateNumbers(); return;
   }
   if (t.dataset.local) {
-    if (t.value === "") delete state.local[t.dataset.local]; else state.local[t.dataset.local] = Number(t.value);
+    if (locked()) return;
+    if (t.value === "") delete mk().local[t.dataset.local]; else mk().local[t.dataset.local] = Number(t.value);
     save(); updateNumbers();
     // rebuild the detail table but keep focus in the local input
     const id = t.dataset.local, pos = t.selectionStart;
@@ -1002,13 +1090,13 @@ document.addEventListener("input", e => {
   if (t.id === "hSqft") { h.sqft = t.value === "" ? null : Number(t.value); save(); renderHomes(); return; }
   if (t.id === "factor") {
     const v = Number(t.value);
-    if (v >= 0.5 && v <= 1.5) { state.factor = v; save(); refreshOpenDetails(); updateNumbers(); }
+    if (v >= 0.5 && v <= 1.5) { mk().factor = v; save(); refreshOpenDetails(); updateNumbers(); }
     return;
   }
 });
 document.addEventListener("change", e => {
-  if (e.target.id === "useLocal") { state.useLocal = e.target.checked; save(); renderControls(); refreshOpenDetails(); updateNumbers(); }
-  if (e.target.id === "localDouble") { state.localDouble = e.target.checked; save(); refreshOpenDetails(); updateNumbers(); }
+  if (e.target.id === "useLocal") { mk().useLocal = e.target.checked; save(); renderControls(); refreshOpenDetails(); updateNumbers(); }
+  if (e.target.id === "localDouble") { mk().localDouble = e.target.checked; save(); refreshOpenDetails(); updateNumbers(); }
 });
 
 renderAll();
