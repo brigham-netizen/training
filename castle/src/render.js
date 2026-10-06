@@ -1,4 +1,5 @@
 import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN } from './config.js'
+import { stoneTexture, flagstoneTexture, woodTexture, TEXTURE_PX, TEXTURE_LUM } from './textures.js'
 
 const COLORS = {
   grass: [[76, 114, 53], [80, 119, 56], [73, 109, 51], [83, 123, 58]],
@@ -66,6 +67,8 @@ function scale(c, f) {
   return [c[0] * f, c[1] * f, c[2] * f]
 }
 
+const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
+
 function faceShade(nx, ny) {
   return 0.62 + 0.3 * Math.max(0, nx * SUN[0] + ny * SUN[1])
 }
@@ -112,28 +115,100 @@ export class Renderer {
   }
 
   // Axis-aligned box. `skip` is a 4-bit mask (N,E,S,W) of hidden sides.
-  box(x0, y0, x1, y1, z0, z1, side, top, skip = 0, outline = true) {
+  // `tex` ('stone' or 'wood') maps a texture onto the faces instead of a
+  // flat colour, shaded to match the colour it replaces.
+  box(x0, y0, x1, y1, z0, z1, side, top, skip = 0, outline = true, tex = null) {
     const { ctx, cam } = this
     const cx = [x0, x1, x1, x0]
     const cy = [y0, y0, y1, y1]
+    const texLum = tex ? TEXTURE_LUM[tex] : 0
     if (cam.cosE > 0.01) {
       for (let s = 0; s < 4; s++) {
         if (skip & (1 << s)) continue
         const [nx, ny, a, b] = SIDES[s]
         if (!cam.faceVisible(nx, ny)) continue
         this.poly([cx[a], cy[a], z0, cx[b], cy[b], z0, cx[b], cy[b], z1, cx[a], cy[a], z1])
-        ctx.fillStyle = rgb(side, faceShade(nx, ny))
-        ctx.fill()
+        if (tex) this.texFace(cx[a], cy[a], cx[b], cy[b], tex, (faceShade(nx, ny) * lum(side)) / texLum)
+        else {
+          ctx.fillStyle = rgb(side, faceShade(nx, ny))
+          ctx.fill()
+        }
       }
     }
     this.poly([x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1])
-    ctx.fillStyle = rgb(top)
-    ctx.fill()
+    if (tex) this.texTop(z1, tex === 'wood' ? 'wood' : 'flag', lum(top) / TEXTURE_LUM[tex === 'wood' ? 'wood' : 'flag'])
+    else {
+      ctx.fillStyle = rgb(top)
+      ctx.fill()
+    }
     if (outline) {
       ctx.strokeStyle = 'rgba(30,24,16,0.35)'
       ctx.lineWidth = 1
       ctx.stroke()
     }
+  }
+
+  pattern(name) {
+    this.patterns ||= {}
+    if (!this.patterns[name]) {
+      const src = name === 'stone' ? stoneTexture() : name === 'flag' ? flagstoneTexture() : woodTexture()
+      this.patterns[name] = this.ctx.createPattern(src, 'repeat')
+    }
+    return this.patterns[name]
+  }
+
+  // Fill the current path (a vertical face from a to b) with a texture laid
+  // in the face's own plane: u runs along the wall, v down from the top.
+  // u starts at the wall's world position so courses continue across tiles.
+  texFace(ax, ay, bx, by, tex, factor) {
+    const { ctx, cam } = this
+    const len = Math.hypot(bx - ax, by - ay)
+    if (len < 1e-6) return
+    cam.P(ax, ay, 0)
+    const ox = cam.sx
+    const oy = cam.sy
+    cam.P(bx, by, 0)
+    const ux = (cam.sx - ox) / len
+    const uy = (cam.sy - oy) / len
+    cam.P(ax, ay, -1)
+    const vx = cam.sx - ox
+    const vy = cam.sy - oy
+    const u0 = (ax * (bx - ax) + ay * (by - ay)) / len
+    const k = this.dpr / TEXTURE_PX
+    ctx.save()
+    ctx.setTransform(ux * k, uy * k, vx * k, vy * k, this.dpr * (ox - ux * u0), this.dpr * (oy - uy * u0))
+    ctx.fillStyle = this.pattern(tex)
+    ctx.fill()
+    ctx.restore()
+    this.shadeFill(factor)
+  }
+
+  // Fill the current path (a horizontal face at height z) with a texture in
+  // world x/y, using the camera's ground transform lifted to that height.
+  texTop(z, tex, factor) {
+    const { ctx, cam } = this
+    const kk = cam.k
+    const a = cam.cosT * kk
+    const b = cam.sinT * cam.sinE * kk
+    const c = -cam.sinT * kk
+    const d = cam.cosT * cam.sinE * kk
+    const e = cam.vw / 2 - (cam.fx * a + cam.fy * c)
+    const f = cam.vh / 2 - (cam.fx * b + cam.fy * d) - z * cam.cosE * kk
+    const s = this.dpr / TEXTURE_PX
+    ctx.save()
+    ctx.setTransform(a * s, b * s, c * s, d * s, this.dpr * e, this.dpr * f)
+    ctx.fillStyle = this.pattern(tex)
+    ctx.fill()
+    ctx.restore()
+    this.shadeFill(factor)
+  }
+
+  // Darken the current path so a texture matches the face's lighting.
+  shadeFill(factor) {
+    const a = Math.max(0, Math.min(0.85, 1 - factor))
+    if (a < 0.01) return
+    this.ctx.fillStyle = `rgba(16,12,8,${a.toFixed(3)})`
+    this.ctx.fill()
   }
 
   // Box rotated by `angle` around its center (used for the battering ram).
@@ -233,7 +308,8 @@ export class Renderer {
     ctx.fillRect(0, 0, cam.vw, cam.vh)
 
     this.drawGround(world, game.time)
-    if (ui.showGrid) this.drawGrid(world)
+    // Grid lines only help in the top-down view; hide them once the camera tilts.
+    if (ui.showGrid && this.cam.sinE > 0.97) this.drawGrid(world)
     this.drawSpawns(game)
     if (ui.orders) this.drawOrders(game, ui.orders)
 
@@ -299,7 +375,8 @@ export class Renderer {
     const { world } = game
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     ctx.clearRect(0, 0, cam.vw, cam.vh)
-    if (ui.showGrid) this.drawGrid(world)
+    // Grid lines only help in the top-down view; hide them once the camera tilts.
+    if (ui.showGrid && this.cam.sinE > 0.97) this.drawGrid(world)
     if (ui.orders) this.drawOrders(game, ui.orders)
     for (const fx of game.effects) this.drawEffect(fx)
     if (ui.preview) this.drawPreview(game, ui.preview)
@@ -605,7 +682,7 @@ export class Renderer {
   }
 
   // Thin wall: a post with arms reaching toward connected neighbours.
-  thinWall(world, x, y, z, h, width, c, f, hoard = false) {
+  thinWall(world, x, y, z, h, width, c, f, hoard = false, tex = null) {
     const hw = width / 2
     const cx = x + 0.5
     const cy = y + 0.5
@@ -617,7 +694,7 @@ export class Renderer {
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
     const foot = this.footZ ?? z
-    for (const p of parts) this.box(p[0], p[1], p[2], p[3], foot, z + h, scale(c.side, f), scale(c.top, f), 0, false)
+    for (const p of parts) this.box(p[0], p[1], p[2], p[3], foot, z + h, scale(c.side, f), scale(c.top, f), 0, false, tex)
     if (!hoard) return
     // Wooden boards along both sides of the walkway.
     const rails = []
@@ -666,20 +743,20 @@ export class Renderer {
     switch (t.type) {
       case 'palisade': {
         const d = STRUCTURES.palisade
-        this.thinWall(world, x, y, z, d.height, d.thin, COLORS.palisade, f)
+        this.thinWall(world, x, y, z, d.height, d.thin, COLORS.palisade, f, false, 'wood')
         break
       }
       case 'wall': {
         const d = STRUCTURES.wall
-        this.thinWall(world, x, y, z, d.height, d.thin, COLORS.wall, f, t.hoard)
+        this.thinWall(world, x, y, z, d.height, d.thin, COLORS.wall, f, t.hoard, 'stone')
         break
       }
       case 'thick': {
         const h = STRUCTURES.thick.height
         const c = COLORS.thick
-        this.box(x, y, x + 1, y + 1, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f), this.hiddenSides(world, x, y, h), false)
+        this.box(x, y, x + 1, y + 1, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f), this.hiddenSides(world, x, y, h), false, 'stone')
         this.poly([x + 0.24, y + 0.24, z + h, x + 0.76, y + 0.24, z + h, x + 0.76, y + 0.76, z + h, x + 0.24, y + 0.76, z + h])
-        this.ctx.fillStyle = rgb(c.walk, f)
+        this.ctx.fillStyle = 'rgba(0,0,0,0.1)'
         this.ctx.fill()
         // Battlements on sides that face open ground.
         let edges = 0
@@ -691,7 +768,7 @@ export class Renderer {
       case 'tower': {
         const h = STRUCTURES.tower.height
         const c = COLORS.tower
-        this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f))
+        this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f), 0, true, 'stone')
         if (t.hoard) this.edgeRails(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, 15)
         else this.merlons(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, c, 15)
         break
@@ -700,14 +777,14 @@ export class Renderer {
         const k = world.keep
         const h = KEEP.height
         const c = COLORS.keep
-        this.box(x, y, x + 1, y + 1, z, z + h, c.side, c.top, this.hiddenSides(world, x, y, h), false)
+        this.box(x, y, x + 1, y + 1, z, z + h, c.side, c.top, this.hiddenSides(world, x, y, h), false, 'stone')
         // Each tile draws its share of the inner roof so painter order holds.
         const rx0 = Math.max(x, k.x + 0.4)
         const ry0 = Math.max(y, k.y + 0.4)
         const rx1 = Math.min(x + 1, k.x + 2.6)
         const ry1 = Math.min(y + 1, k.y + 2.6)
         this.poly([rx0, ry0, z + h, rx1, ry0, z + h, rx1, ry1, z + h, rx0, ry1, z + h])
-        this.ctx.fillStyle = rgb(c.top, 0.86)
+        this.ctx.fillStyle = 'rgba(0,0,0,0.12)'
         this.ctx.fill()
         let edges = 0
         if (y === k.y) edges |= 1
@@ -849,7 +926,7 @@ export class Renderer {
     }
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
-    for (const p of parts) this.box(...p, 0, true)
+    for (const p of parts) this.box(...p, 0, true, p[6] === side ? 'stone' : null)
     if (world.tiles[i].hoard) {
       if (alongX) this.edgeRails(x, y + 0.12, x + 1, y + 0.88, z + h, 5)
       else this.edgeRails(x + 0.12, y, x + 0.88, y + 1, z + h, 10)

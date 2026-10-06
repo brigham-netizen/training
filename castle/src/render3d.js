@@ -8,6 +8,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { STRUCTURES, KEEP } from './config.js'
+import { stoneTexture, woodTexture, TEXTURE_LUM } from './textures.js'
 
 const C = {
   grass: [0x58823c, 0x5d8a40, 0x537c39, 0x618f44],
@@ -53,6 +54,37 @@ const C = {
 }
 
 const UP = new THREE.Vector3(0, 1, 0)
+// World-space UVs for a merged, non-indexed geometry: each triangle is
+// projected onto the plane it faces most, one texture repeat per tile, with
+// v running up walls so masonry courses stay level and line up across tiles.
+function worldUVs(g) {
+  const p = g.attributes.position.array
+  const n = g.attributes.normal.array
+  const uv = new Float32Array((p.length / 3) * 2)
+  for (let t = 0; t < p.length; t += 9) {
+    const nx = Math.abs(n[t] + n[t + 3] + n[t + 6])
+    const ny = Math.abs(n[t + 1] + n[t + 4] + n[t + 7])
+    const nz = Math.abs(n[t + 2] + n[t + 5] + n[t + 8])
+    for (let v = 0; v < 9; v += 3) {
+      const X = p[t + v]
+      const Y = p[t + v + 1]
+      const Z = p[t + v + 2]
+      const o = ((t + v) / 3) * 2
+      if (ny >= nx && ny >= nz) {
+        uv[o] = X
+        uv[o + 1] = Z
+      } else if (nx >= nz) {
+        uv[o] = Z
+        uv[o + 1] = Y
+      } else {
+        uv[o] = X
+        uv[o + 1] = Y
+      }
+    }
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+}
+
 const WALLISH = new Set(['palisade', 'wall', 'thick', 'gate', 'tower', 'keep'])
 
 export class Renderer3D {
@@ -197,6 +229,7 @@ export class Renderer3D {
       const merged = mergeGeometries(list, false)
       for (const g of list) g.dispose()
       if (!merged) continue
+      if (materials[key].map) worldUVs(merged)
       const mesh = new THREE.Mesh(merged, materials[key])
       mesh.castShadow = shadows && !materials[key].transparent
       mesh.receiveShadow = true
@@ -262,12 +295,36 @@ export class Renderer3D {
 
   // ---- structures and scenery -------------------------------------------------
 
+  // A material whose colour is carried by a procedural texture. The tint is
+  // brightened so the textured average matches the flat colour it replaces.
+  texMat(key, hex, tex) {
+    if (!this.mats[key]) {
+      const src = tex === 'wood' ? woodTexture() : stoneTexture()
+      this.texCache ||= {}
+      if (!this.texCache[tex]) {
+        const t = new THREE.CanvasTexture(src)
+        t.wrapS = t.wrapT = THREE.RepeatWrapping
+        t.colorSpace = THREE.SRGBColorSpace
+        t.anisotropy = 4
+        const b = new THREE.CanvasTexture(src)
+        b.wrapS = b.wrapT = THREE.RepeatWrapping
+        this.texCache[tex] = { map: t, bump: b }
+      }
+      const { map, bump } = this.texCache[tex]
+      const color = new THREE.Color(hex)
+      const lift = 255 / TEXTURE_LUM[tex]
+      color.setRGB(Math.min(1, color.r * lift), Math.min(1, color.g * lift), Math.min(1, color.b * lift))
+      this.mats[key] = new THREE.MeshStandardMaterial({ color, map, bumpMap: bump, bumpScale: 1.5, roughness: 0.92, metalness: 0 })
+    }
+    return this.mats[key]
+  }
+
   materials() {
     return {
-      stone: this.mat('stone', C.stone),
-      stoneDark: this.mat('stoneDark', C.stoneDark),
-      keep: this.mat('keep', C.keep),
-      wood: this.mat('wood', C.wood),
+      stone: this.texMat('stone', C.stone, 'stone'),
+      stoneDark: this.texMat('stoneDark', C.stoneDark, 'stone'),
+      keep: this.texMat('keep', C.keep, 'stone'),
+      wood: this.texMat('wood', C.wood, 'wood'),
       woodLight: this.mat('woodLight', C.woodLight),
       door: this.mat('door', C.door),
       roof: this.mat('roof', C.roof),
@@ -330,7 +387,7 @@ export class Renderer3D {
           this.gate(world, x, y, z, foot, t.hoard)
           break
         case 'tower':
-          this.tower(x, y, z, foot, t.hoard)
+          this.tower(world, x, y, z, foot, t.hoard)
           break
         case 'pikes':
           this.pikes(world, x, y, foot)
@@ -487,10 +544,32 @@ export class Renderer3D {
   }
 
   // Round tower with a ring of merlons (or a wooden hoarding ring).
-  tower(x, y, z, foot, hoard) {
+  tower(world, x, y, z, foot, hoard) {
     const cx = x + 0.5
     const cy = y + 0.5
     const top = z + STRUCTURES.tower.height
+    // Carry each connecting wall right into the tower so the curtain meets
+    // the drum without a gap at the tile edge.
+    for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      if (!this.connects(world, x, y, dx, dy)) continue
+      const n = world.idx(x + dx, y + dy)
+      const type = world.tiles[n].type
+      if (type === 'tower' || type === 'keep') continue
+      const hgt = Math.min(world.elev(n) + STRUCTURES[type].height, top)
+      if (type === 'palisade') {
+        for (const f of [0.3, 0.45]) {
+          this.cyl('wood', cx + dx * f, cy + dy * f, z, z + 0.75, 0.06, 6)
+          this.cone('woodLight', cx + dx * f, cy + dy * f, z + 0.75, 0.16, 0.06, 6)
+        }
+        continue
+      }
+      const hw = type === 'thick' ? 0.5 : type === 'gate' ? 0.4 : STRUCTURES.wall.thin / 2
+      const x0 = dx ? (dx > 0 ? cx : x) : cx - hw
+      const x1 = dx ? (dx > 0 ? x + 1 : cx) : cx + hw
+      const y0 = dy ? (dy > 0 ? cy : y) : cy - hw
+      const y1 = dy ? (dy > 0 ? y + 1 : cy) : cy + hw
+      this.box('stone', x0, y0, foot, x1, y1, hgt)
+    }
     this.cyl('stone', cx, cy, foot, top, 0.47, 14, 0.44)
     this.cyl('stoneDark', cx, cy, top - 0.12, top, 0.48, 14)
     if (hoard) {
