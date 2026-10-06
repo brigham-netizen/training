@@ -19,6 +19,9 @@ const COLORS = {
   pike: [140, 100, 60],
   pikeTip: [226, 214, 186],
   door: [112, 72, 40],
+  ladder: [168, 124, 74],
+  lord: [120, 48, 120],
+  crown: [236, 196, 70],
   bowman: [74, 96, 52],
   catapult: [128, 92, 54],
   boulder: [128, 124, 116],
@@ -117,17 +120,20 @@ export class Renderer {
   // Axis-aligned box. `skip` is a 4-bit mask (N,E,S,W) of hidden sides.
   // `tex` ('stone' or 'wood') maps a texture onto the faces instead of a
   // flat colour, shaded to match the colour it replaces.
+  // z0 and z1 may be functions (x, y) => z for blocks that follow a slope.
   box(x0, y0, x1, y1, z0, z1, side, top, skip = 0, outline = true, tex = null) {
     const { ctx, cam } = this
     const cx = [x0, x1, x1, x0]
     const cy = [y0, y0, y1, y1]
+    const zb = typeof z0 === 'function' ? cx.map((x, k) => z0(x, cy[k])) : [z0, z0, z0, z0]
+    const zt = typeof z1 === 'function' ? cx.map((x, k) => z1(x, cy[k])) : [z1, z1, z1, z1]
     const texLum = tex ? TEXTURE_LUM[tex] : 0
     if (cam.cosE > 0.01) {
       for (let s = 0; s < 4; s++) {
         if (skip & (1 << s)) continue
         const [nx, ny, a, b] = SIDES[s]
         if (!cam.faceVisible(nx, ny)) continue
-        this.poly([cx[a], cy[a], z0, cx[b], cy[b], z0, cx[b], cy[b], z1, cx[a], cy[a], z1])
+        this.poly([cx[a], cy[a], zb[a], cx[b], cy[b], zb[b], cx[b], cy[b], zt[b], cx[a], cy[a], zt[a]])
         if (tex) this.texFace(cx[a], cy[a], cx[b], cy[b], tex, (faceShade(nx, ny) * lum(side)) / texLum)
         else {
           ctx.fillStyle = rgb(side, faceShade(nx, ny))
@@ -135,8 +141,9 @@ export class Renderer {
         }
       }
     }
-    this.poly([x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1])
-    if (tex) this.texTop(z1, tex === 'wood' ? 'wood' : 'flag', lum(top) / TEXTURE_LUM[tex === 'wood' ? 'wood' : 'flag'])
+    this.poly([x0, y0, zt[0], x1, y0, zt[1], x1, y1, zt[2], x0, y1, zt[3]])
+    const zm = (zt[0] + zt[1] + zt[2] + zt[3]) / 4
+    if (tex) this.texTop(zm, tex === 'wood' ? 'wood' : 'flag', lum(top) / TEXTURE_LUM[tex === 'wood' ? 'wood' : 'flag'])
     else {
       ctx.fillStyle = rgb(top)
       ctx.fill()
@@ -330,21 +337,40 @@ export class Renderer {
     const order = []
     for (let i = 0; i < world.tiles.length; i++) {
       const t = world.tiles[i]
-      const hasContent = t.type !== 'grass' || t.terrain === 'hill' || units.has(i)
+      const hasContent = t.type !== 'grass' || this.slopes[i] || units.has(i)
       if (!hasContent) continue
       const x = i % world.w
       const y = (i / world.w) | 0
       if (!this.onScreen(x + 0.5, y + 0.5)) continue
       order.push({ d: cam.depth(x + 0.5, y + 0.5), i, x, y })
     }
+    // Ladders against walls and ladders lying where they fell slot into
+    // the same order by their midpoints.
+    for (const l of game.ladders) {
+      const g = game.ladderGeom(l)
+      order.push({ d: cam.depth((g.fx + g.tx) / 2, (g.fy + g.ty) / 2), ladder: g })
+    }
+    for (const f of game.fallen) order.push({ d: cam.depth(f.x, f.y) - 0.01, fallen: f })
     order.sort((a, b) => a.d - b.d)
-    for (const { i, x, y } of order) {
+    for (const { i, x, y, ladder, fallen } of order) {
+      if (ladder) {
+        this.drawLadder(ladder.fx, ladder.fy, ladder.fz, ladder.tx, ladder.ty, ladder.tz)
+        continue
+      }
+      if (fallen) {
+        const z = world.heightAt(fallen.x, fallen.y) + 0.03
+        const [dx, dy] = fallen.dir
+        this.drawLadder(fallen.x + dx * 0.55, fallen.y + dy * 0.55, z, fallen.x - dx * 0.55, fallen.y - dy * 0.55, z)
+        continue
+      }
       const ground = world.groundElev(i)
-      if (world.tiles[i].terrain === 'hill') this.drawHill(world, i, x, y, ground)
+      if (this.slopes[i]) this.drawSlope(world, i, x, y)
       // A rock under a wall: the wall rises out of it but tops out at its
       // usual height, so the rock just shortens the visible wall face.
-      this.footZ = world.baseElev(i)
-      if (world.tiles[i].rock) this.drawFoundation(x, y, ground, this.footZ, world.tiles[i].v)
+      const t = world.tiles[i]
+      this.footZ = t.rock ? world.baseElev(i) : null
+      this.minFoot = world.minGround(i)
+      if (t.rock) this.drawFoundation(x, y, ground, this.footZ, t.v)
       this.drawTile(world, i, x, y, ground, game.time)
       this.footZ = null
       const here = units.get(i)
@@ -409,6 +435,9 @@ export class Renderer {
     if (sig !== this.groundSig) {
       this.groundSig = sig
       this.bakeGround(world)
+      this.slopes = new Uint8Array(world.tiles.length)
+      for (let i = 0; i < world.tiles.length; i++) this.slopes[i] = world.sloped(i) ? 1 : 0
+      this.groundPattern = null
     }
     const { cam } = this
     const k = cam.k
@@ -510,6 +539,7 @@ export class Renderer {
   bakeGround(world) {
     const S = 24 // texture pixels per tile
     const { w, h } = world
+    this.groundW = w
     const cv = (this.groundCanvas ||= document.createElement('canvas'))
     cv.width = w * S
     cv.height = h * S
@@ -651,15 +681,93 @@ export class Renderer {
     }
   }
 
-  drawHill(world, i, x, y, h) {
-    let skip = 0
-    for (let s = 0; s < 4; s++) {
-      const nx = x + N4[s][0]
-      const ny = y + N4[s][1]
-      if (world.inBounds(nx, ny) && world.tiles[world.idx(nx, ny)].terrain === 'hill') skip |= 1 << s
+  // Smooth ground on and around hills: the tile is drawn as a fan of
+  // triangles around its centre, textured with the baked ground and shaded
+  // by how each facet faces the sun.
+  drawSlope(world, i, x, y) {
+    const c = world.groundElev(i)
+    const e = [
+      (c + world.groundAt(x, y - 1)) / 2,
+      (c + world.groundAt(x + 1, y)) / 2,
+      (c + world.groundAt(x, y + 1)) / 2,
+      (c + world.groundAt(x - 1, y)) / 2,
+    ]
+    const k = [world.cornerHeight(x, y), world.cornerHeight(x + 1, y), world.cornerHeight(x + 1, y + 1), world.cornerHeight(x, y + 1)]
+    // Ring around the centre: NW, N, NE, E, SE, S, SW, W.
+    const ring = [
+      [x, y, k[0]], [x + 0.5, y, e[0]], [x + 1, y, k[1]], [x + 1, y + 0.5, e[1]],
+      [x + 1, y + 1, k[2]], [x + 0.5, y + 1, e[2]], [x, y + 1, k[3]], [x, y + 0.5, e[3]],
+    ]
+    if (ring.every((p) => p[2] === c)) {
+      if (c === 0) return
+      this.groundTri([x, y, c], [x + 1, y, c], [x + 1, y + 1, c], [x, y + 1, c])
+      return
     }
-    const top = COLORS.hillTop[Math.floor(world.tiles[i].v * 2)]
-    this.box(x, y, x + 1, y + 1, 0, h, COLORS.hillSide, top, skip, false)
+    const mid = [x + 0.5, y + 0.5, c]
+    for (let n = 0; n < 8; n++) this.groundTri(mid, ring[n], ring[(n + 1) % 8])
+  }
+
+  // Fill a ground facet (3 or 4 coplanar world points) with the baked
+  // ground texture, mapped by the affine that takes world x/y to screen.
+  groundTri(...pts) {
+    const { ctx, cam } = this
+    const scr = pts.map(([x, y, z]) => {
+      cam.P(x, y, z)
+      return [cam.sx, cam.sy]
+    })
+    const [A, B, C] = pts
+    const [sa, sb, sc] = scr
+    const det = (B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1])
+    if (Math.abs(det) < 1e-9) return
+    // Solve screen = M * (x, y, 1) from the three points.
+    const ux = ((sb[0] - sa[0]) * (C[1] - A[1]) - (sc[0] - sa[0]) * (B[1] - A[1])) / det
+    const vx = ((sc[0] - sa[0]) * (B[0] - A[0]) - (sb[0] - sa[0]) * (C[0] - A[0])) / det
+    const uy = ((sb[1] - sa[1]) * (C[1] - A[1]) - (sc[1] - sa[1]) * (B[1] - A[1])) / det
+    const vy = ((sc[1] - sa[1]) * (B[0] - A[0]) - (sb[1] - sa[1]) * (C[0] - A[0])) / det
+    const ox = sa[0] - ux * A[0] - vx * A[1]
+    const oy = sa[1] - uy * A[0] - vy * A[1]
+    // Path in screen space, nudged outward half a pixel to hide seams.
+    let mx = 0
+    let my = 0
+    for (const p of scr) {
+      mx += p[0] / scr.length
+      my += p[1] / scr.length
+    }
+    ctx.beginPath()
+    scr.forEach(([px, py], n) => {
+      const dx = px - mx
+      const dy = py - my
+      const d = Math.hypot(dx, dy) || 1
+      const qx = px + (dx / d) * 0.6
+      const qy = py + (dy / d) * 0.6
+      if (n === 0) ctx.moveTo(qx, qy)
+      else ctx.lineTo(qx, qy)
+    })
+    ctx.closePath()
+    this.groundPattern ||= ctx.createPattern(this.groundCanvas, 'no-repeat')
+    const S = this.groundCanvas.width / this.groundW
+    const d = this.dpr / S
+    ctx.save()
+    ctx.setTransform(ux * d, uy * d, vx * d, vy * d, this.dpr * ox, this.dpr * oy)
+    ctx.fillStyle = this.groundPattern
+    ctx.fill()
+    ctx.restore()
+    // Sun shading: facets tilted toward the sun lighten, away darken.
+    const ax = B[0] - A[0], ay = B[1] - A[1], az = B[2] - A[2]
+    const bx = C[0] - A[0], by = C[1] - A[1], bz = C[2] - A[2]
+    let nx = ay * bz - az * by
+    let ny = az * bx - ax * bz
+    let nz = ax * by - ay * bx
+    const nl = Math.hypot(nx, ny, nz) || 1
+    if (nz < 0) {
+      nx = -nx
+      ny = -ny
+    }
+    const lit = ((nx * SUN[0] + ny * SUN[1]) / nl) * 0.9
+    if (Math.abs(lit) > 0.01) {
+      ctx.fillStyle = lit > 0 ? `rgba(255,248,220,${(lit * 0.35).toFixed(3)})` : `rgba(12,18,8,${(-lit * 0.75).toFixed(3)})`
+      ctx.fill()
+    }
   }
 
   // Mask of sides hidden by an equally tall neighbouring block.
@@ -693,8 +801,11 @@ export class Renderer {
     if (this.connects(world, x, y, 3)) parts.push([x, cy - hw, cx - hw, cy + hw])
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
-    const foot = this.footZ ?? z
-    for (const p of parts) this.box(p[0], p[1], p[2], p[3], foot, z + h, scale(c.side, f), scale(c.top, f), 0, false, tex)
+    // The wall follows the ground: its top runs along the slope of the
+    // centre line, its foot along the ground (or the rock it's bedded in).
+    const top = (px, py) => (Math.abs(px - cx) >= Math.abs(py - cy) ? world.heightAt(px, cy) : world.heightAt(cx, py)) + h
+    const foot = this.footZ ?? ((px, py) => world.heightAt(px, py))
+    for (const p of parts) this.box(p[0], p[1], p[2], p[3], foot, top, scale(c.side, f), scale(c.top, f), 0, false, tex)
     if (!hoard) return
     // Wooden boards along both sides of the walkway.
     const rails = []
@@ -716,13 +827,15 @@ export class Renderer {
         rails.push([x0, y0, x0 + t, y1], [x1 - t, y0, x1, y1])
       }
     }
-    this.rails(rails, z + h)
+    this.rails(rails, top)
   }
 
+  // `z` is a height or a function (x, y) => height.
   rails(list, z) {
     const cam = this.cam
+    const z0 = typeof z === 'function' ? z : () => z
     list.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
-    for (const r of list) this.box(r[0], r[1], r[2], r[3], z, z + 0.3, COLORS.hoard, scale(COLORS.hoard, 1.25), 0, true)
+    for (const r of list) this.box(r[0], r[1], r[2], r[3], z0, (px, py) => z0(px, py) + 0.3, COLORS.hoard, scale(COLORS.hoard, 1.25), 0, true)
   }
 
   // Rails around the edges named by the N/E/S/W bit mask.
@@ -754,21 +867,23 @@ export class Renderer {
       case 'thick': {
         const h = STRUCTURES.thick.height
         const c = COLORS.thick
-        this.box(x, y, x + 1, y + 1, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f), this.hiddenSides(world, x, y, h), false, 'stone')
-        this.poly([x + 0.24, y + 0.24, z + h, x + 0.76, y + 0.24, z + h, x + 0.76, y + 0.76, z + h, x + 0.24, y + 0.76, z + h])
+        const top = (px, py) => world.heightAt(px, py) + h
+        const foot = this.footZ ?? ((px, py) => world.heightAt(px, py))
+        this.box(x, y, x + 1, y + 1, foot, top, scale(c.side, f), scale(c.top, f), this.hiddenSides(world, x, y, h), false, 'stone')
+        this.poly([x + 0.24, y + 0.24, top(x + 0.24, y + 0.24), x + 0.76, y + 0.24, top(x + 0.76, y + 0.24), x + 0.76, y + 0.76, top(x + 0.76, y + 0.76), x + 0.24, y + 0.76, top(x + 0.24, y + 0.76)])
         this.ctx.fillStyle = 'rgba(0,0,0,0.1)'
         this.ctx.fill()
         // Battlements on sides that face open ground.
         let edges = 0
         for (let s = 0; s < 4; s++) if (!this.connects(world, x, y, s)) edges |= 1 << s
-        if (t.hoard) this.edgeRails(x, y, x + 1, y + 1, z + h, edges)
-        else this.merlons(x, y, x + 1, y + 1, z + h, c, edges)
+        if (t.hoard) this.edgeRails(x, y, x + 1, y + 1, top, edges)
+        else this.merlons(x, y, x + 1, y + 1, top, c, edges)
         break
       }
       case 'tower': {
         const h = STRUCTURES.tower.height
         const c = COLORS.tower
-        this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f), 0, true, 'stone')
+        this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, this.footZ ?? this.minFoot ?? z, z + h, scale(c.side, f), scale(c.top, f), 0, true, 'stone')
         if (t.hoard) this.edgeRails(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, 15)
         else this.merlons(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, c, 15)
         break
@@ -792,7 +907,11 @@ export class Renderer {
         if (y === k.y + 2) edges |= 4
         if (x === k.x) edges |= 8
         this.merlons(x, y, x + 1, y + 1, z + h, c, edges)
-        if (x === k.x + 1 && y === k.y + 1) this.flag(x + 0.5, y + 0.5, z + h, time)
+        if (i === k.door) this.drawKeepDoor(k, x, y, z)
+        if (x === k.x + 1 && y === k.y + 1) {
+          this.flag(x + 0.5, y + 0.5, z + h, time)
+          this.drawLord(x + 0.85, y + 0.8, z + h, k)
+        }
         break
       }
       case 'pikes':
@@ -906,7 +1025,7 @@ export class Renderer {
     const side = scale(c.side, f)
     const top = scale(c.top, f)
     const alongX = this.axisX(world, x, y, (t) => WALL_FAMILY.has(t))
-    const fz = this.footZ ?? z
+    const fz = this.footZ ?? this.minFoot ?? z
     // Pillars at each end, a lintel over the passage, and the door.
     const parts = alongX
       ? [
@@ -1080,6 +1199,74 @@ export class Renderer {
     this.box(x + 0.1 - j, y + 0.12, x + 0.9 - j, y + 0.88, mid, z1, scale(side, 1.08), moss, 0, true)
   }
 
+  // The keep's door on its south face: oak while it holds, a dark hole
+  // with splinters once it's broken.
+  drawKeepDoor(k, x, y, z) {
+    if (!this.cam.faceVisible(0, 1)) return
+    const fy = y + 1.002
+    const x0 = x + 0.3
+    const x1 = x + 0.7
+    const hgt = 0.95
+    this.poly([x0, fy, z, x1, fy, z, x1, fy, z + hgt * 0.8, x + 0.5, fy, z + hgt, x0, fy, z + hgt * 0.8])
+    const broken = k.doorHp <= 0
+    const f = 0.6 + 0.4 * (k.doorHp / k.doorMax)
+    this.ctx.fillStyle = broken ? 'rgb(24,18,14)' : rgb(COLORS.door, f)
+    this.ctx.fill()
+    this.ctx.strokeStyle = 'rgba(30,20,10,0.8)'
+    this.ctx.lineWidth = Math.max(1, this.cam.k * 0.03)
+    this.ctx.stroke()
+    if (broken) {
+      for (const [ax, az, bx, bz] of [[0.32, 0.2, 0.42, 0.55], [0.68, 0.1, 0.6, 0.6], [0.36, 0.75, 0.5, 0.62]])
+        this.line(x + ax, fy, z + az, x + bx, fy, z + bz, rgb(COLORS.door, 1.1), Math.max(1.5, this.cam.k * 0.05))
+    } else {
+      for (const bz of [0.25, 0.6]) this.line(x0, fy, z + bz, x1, fy, z + bz, 'rgba(40,30,20,0.9)', Math.max(1, this.cam.k * 0.04))
+    }
+  }
+
+  // The lord on the keep roof: what the attackers are after.
+  drawLord(x, y, z, k) {
+    const hurt = k.hp < k.maxHp && (k.inside > 0)
+    this.ellipse(x, y, z, 0.14, 'rgba(0,0,0,0.3)')
+    this.ball(x, y, z + 0.27, 0.14, hurt ? '#fff' : rgb(COLORS.lord), '#2a1030')
+    this.ball(x, y, z + 0.5, 0.09, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
+    this.cam.P(x, y, z + 0.6)
+    const s = Math.max(2, this.cam.k * 0.09)
+    const { ctx } = this
+    ctx.beginPath()
+    ctx.moveTo(this.cam.sx - s, this.cam.sy)
+    ctx.lineTo(this.cam.sx - s, this.cam.sy - s * 1.1)
+    ctx.lineTo(this.cam.sx - s * 0.5, this.cam.sy - s * 0.5)
+    ctx.lineTo(this.cam.sx, this.cam.sy - s * 1.2)
+    ctx.lineTo(this.cam.sx + s * 0.5, this.cam.sy - s * 0.5)
+    ctx.lineTo(this.cam.sx + s, this.cam.sy - s * 1.1)
+    ctx.lineTo(this.cam.sx + s, this.cam.sy)
+    ctx.closePath()
+    ctx.fillStyle = rgb(COLORS.crown)
+    ctx.fill()
+  }
+
+  // A ladder from (fx, fy, fz) to (tx, ty, tz): two rails and rungs.
+  drawLadder(fx, fy, fz, tx, ty, tz) {
+    const dx = tx - fx
+    const dy = ty - fy
+    const len = Math.hypot(dx, dy) || 1
+    const px = (-dy / len) * 0.13
+    const py = (dx / len) * 0.13
+    const w = Math.max(1.2, this.cam.k * 0.045)
+    const col = rgb(COLORS.ladder)
+    const dark = rgb(COLORS.ladder, 0.7)
+    const n = 6
+    for (let r = 1; r < n; r++) {
+      const f = r / n
+      const x = fx + dx * f
+      const y = fy + dy * f
+      const z = fz + (tz - fz) * f
+      this.line(x - px, y - py, z, x + px, y + py, z, dark, w * 0.8)
+    }
+    this.line(fx - px, fy - py, fz, tx - px, ty - py, tz, col, w)
+    this.line(fx + px, fy + py, fz, tx + px, ty + py, tz, col, w)
+  }
+
   merlons(x0, y0, x1, y1, z, c, edges) {
     const s = 0.2
     const hgt = 0.22
@@ -1094,8 +1281,11 @@ export class Renderer {
     const cam = this.cam
     spots.sort((a, b) => cam.depth(a[0], a[1]) - cam.depth(b[0], b[1]))
     const cap = scale(c.top, 1.18)
-    for (const [mx, my] of spots)
-      this.box(mx - s / 2, my - s / 2, mx + s / 2, my + s / 2, z, z + hgt, c.side, cap, 0, true)
+    const zf = typeof z === 'function' ? z : () => z
+    for (const [mx, my] of spots) {
+      const mz = zf(mx, my)
+      this.box(mx - s / 2, my - s / 2, mx + s / 2, my + s / 2, mz, mz + hgt, c.side, cap, 0, true)
+    }
   }
 
   flag(x, y, z, time) {
@@ -1122,6 +1312,24 @@ export class Renderer {
       const hx = e.x + Math.cos(e.heading) * (0.45 + (e.attacking ? Math.abs(Math.sin(e.walk)) * 0.12 : 0))
       const hy = e.y + Math.sin(e.heading) * 0.45
       this.ball(hx, hy, z + 0.25, 0.1, '#555', '#222')
+      return
+    }
+    if (e.type === 'ladder') {
+      // Two raiders with a ladder on their shoulders (raised as they set it up).
+      const hx = Math.cos(e.heading)
+      const hy = Math.sin(e.heading)
+      const color = rgb(hit ? [255, 255, 255] : COLORS.raider)
+      const men = [[0.24, 0], [-0.24, Math.PI]]
+      men.sort((a, b) => cam.depth(e.x + hx * a[0], e.y + hy * a[0]) - cam.depth(e.x + hx * b[0], e.y + hy * b[0]))
+      for (const [o, ph] of men) {
+        const mx = e.x + hx * o
+        const my = e.y + hy * o
+        const b = Math.abs(Math.sin(e.walk + ph)) * 0.05
+        this.ball(mx, my, z + 0.28 + b, 0.17, color, 'rgba(20,10,5,0.7)')
+        this.ball(mx, my, z + 0.55 + b, 0.1, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
+      }
+      const lift = Math.min(1, e.raising / 1.2) * 0.9
+      this.drawLadder(e.x - hx * 0.5, e.y - hy * 0.5, z + 0.5, e.x + hx * 0.5, e.y + hy * 0.5, z + 0.5 + lift)
       return
     }
     const color = hit ? [255, 255, 255] : COLORS[e.type]
@@ -1302,8 +1510,30 @@ export class Renderer {
         this.hpBar((i % world.w) + 0.5, ((i / world.w) | 0) + 0.5, world.surface(i) + 0.45, t.hp / t.maxHp)
       }
     }
+    const k = world.keep
+    if (k.doorHp > 0 && k.doorHp < k.doorMax) this.hpBar(k.x + 1.5, k.y + 3.05, 1.35, k.doorHp / k.doorMax, 0.6)
+    if (k.inside > 0) this.insideBadge(k)
     for (const e of game.enemies) this.hpBar(e.x, e.y, e.z + 1.0, e.hp / e.maxHp, 0.5)
     for (const u of [...game.archers, ...game.swordsmen]) this.hpBar(u.x, u.y, u.z + 0.95, u.hp / u.maxHp, 0.4)
+  }
+
+  // How many attackers are inside the keep, fighting their way up.
+  insideBadge(k) {
+    const { ctx, cam } = this
+    cam.P(k.x + 1.5, k.y + 1.5, KEEP.height + 2.1)
+    const text = `⚔ ${k.inside} inside`
+    const fs = Math.max(11, Math.min(16, cam.k * 0.38))
+    ctx.font = `700 ${fs}px system-ui, sans-serif`
+    const w = ctx.measureText(text).width + fs
+    const h = fs * 1.6
+    ctx.fillStyle = 'rgba(150,30,24,0.92)'
+    ctx.beginPath()
+    ctx.roundRect(cam.sx - w / 2, cam.sy - h / 2, w, h, h / 2)
+    ctx.fill()
+    ctx.fillStyle = '#fff'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, cam.sx, cam.sy + 1)
   }
 
   // Price tags over the village's plots: what it wants and what it costs.

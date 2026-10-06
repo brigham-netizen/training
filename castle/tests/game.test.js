@@ -37,7 +37,7 @@ test('enemies route around a wall with a gap instead of breaking it', () => {
   // and never step onto a wall.
   let i = world.idx(world.spawns[0].x, world.spawns[0].y)
   const seen = new Set()
-  while (world.tiles[i].type !== 'keep') {
+  while (i !== world.keep.step) {
     assert.ok(!seen.has(i), 'flow loops')
     seen.add(i)
     assert.notEqual(world.tiles[i].type, 'wall', 'path goes through a wall despite the gap')
@@ -46,21 +46,24 @@ test('enemies route around a wall with a gap instead of breaking it', () => {
   assert.ok(seen.has(gap))
 })
 
-test('a sealed castle gets breached at a wall, not through scenery', () => {
+test('a sealed stone castle: foot soldiers need ladders, rams batter through', () => {
   const game = new Game()
   const { world } = game
   for (const i of ring(game, 3)) world.build(i, 'wall')
-  const flow = computeFlow(world)
   const start = world.idx(world.spawns[0].x, world.spawns[0].y)
-  assert.ok(isFinite(flow.dist[start]))
-  let i = start
-  let hitWall = false
-  for (let n = 0; n < 500 && world.tiles[i].type !== 'keep'; n++) {
-    if (world.tiles[i].type === 'wall') hitWall = true
-    assert.ok(!world.isBlocked(i))
-    i = flow.next[i]
+  assert.equal(computeFlow(world, 'foot').dist[start], Infinity, 'no way in on foot')
+  for (const mode of ['ladder', 'ram']) {
+    const flow = computeFlow(world, mode)
+    assert.ok(isFinite(flow.dist[start]), mode)
+    let i = start
+    let hitWall = false
+    for (let n = 0; n < 500 && i !== world.keep.step; n++) {
+      if (world.tiles[i].type === 'wall') hitWall = true
+      assert.ok(!world.isBlocked(i))
+      i = flow.next[i]
+    }
+    assert.ok(hitWall, mode)
   }
-  assert.ok(hitWall)
 })
 
 test('building costs gold and demolishing in the build phase refunds it fully', () => {
@@ -185,7 +188,7 @@ test('enemies avoid wading a moat when a dry path is close', () => {
   const flow = computeFlow(world)
   let i = world.idx(world.spawns[2].x, world.spawns[2].y) // north gate
   let wet = 0
-  for (let n = 0; n < 200 && world.tiles[i].type !== 'keep'; n++) {
+  for (let n = 0; n < 200 && i >= 0 && i !== world.keep.step; n++) {
     if (world.tiles[i].type === 'moat') wet++
     i = flow.next[i]
   }
@@ -319,7 +322,7 @@ import { HOARDING } from '../src/config.js'
 function followFlow(world, flow, from) {
   const seen = []
   let i = from
-  for (let n = 0; n < 300 && world.tiles[i].type !== 'keep'; n++) {
+  for (let n = 0; n < 300 && i >= 0 && i !== world.keep.step; n++) {
     seen.push(i)
     i = flow.next[i]
   }
@@ -577,4 +580,105 @@ test('painting a stronger wall over a weaker one upgrades it for the difference'
   before = game.gold
   game.demolish(j)
   assert.equal(game.gold - before, STRUCTURES.thick.cost)
+})
+
+// ---- stage 5: ladders, the keep door, smooth hills -----------------------------
+
+test('foot soldiers never damage stone; they wait at the wall', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  for (const i of ring(game, 3)) world.build(i, 'wall')
+  game.archers = []
+  skirmish(game)
+  for (let k = 0; k < 4; k++) game.spawnEnemy({ type: k % 2 ? 'brute' : 'raider', spawn: { x: world.keep.x - 6, y: world.keep.y + 1 }, hpMult: 1 })
+  step(game, 8)
+  for (const i of ring(game, 3)) assert.equal(world.tiles[i].hp, world.tiles[i].maxHp)
+  assert.ok(game.enemies.some((e) => e.stuck > 0), 'someone is waiting at the wall')
+})
+
+test('a ladder crew puts a ladder up and its raiders climb over the wall', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  const tiles = ring(game, 3)
+  for (const i of tiles) world.build(i, 'wall')
+  game.archers = []
+  skirmish(game)
+  game.spawnEnemy({ type: 'ladder', spawn: { x: world.keep.x - 6, y: world.keep.y + 1 }, hpMult: 1 })
+  let raised = false
+  let inside = false
+  for (let t = 0; t < 30 && !inside; t += 1 / 60) {
+    game.update(1 / 60)
+    raised ||= game.ladders.length > 0
+    const k = world.keep
+    inside = game.enemies.some((e) => e.type === 'raider' && Math.abs(e.x - (k.x + 1.5)) < 2.5 && Math.abs(e.y - (k.y + 1.5)) < 2.5 && !world.tiles[world.idxAt(e.x, e.y)].ladder)
+  }
+  assert.ok(raised, 'ladder went up')
+  assert.ok(inside, 'a raider got inside the ring')
+  assert.ok(tiles.every((i) => world.tiles[i].hp === world.tiles[i].maxHp), 'walls untouched')
+})
+
+test('archers on the wall push a ladder off', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  const tiles = ring(game, 3)
+  for (const i of tiles) world.build(i, 'wall')
+  const target = tiles.find((i) => i % world.w === world.keep.x - 2 && ((i / world.w) | 0) === world.keep.y + 1)
+  game.addArcher(target)
+  skirmish(game)
+  const l = { id: 1, tile: target, dir: [1, 0], hp: 80, maxHp: 80 }
+  game.ladders.push(l)
+  world.tiles[target].ladder = l
+  step(game, 8)
+  assert.equal(game.ladders.length, 0)
+  assert.equal(world.tiles[target].ladder, null)
+  assert.ok(game.fallen.length === 1, 'it lies where it fell')
+})
+
+test('attackers break the keep door, go in, and the lord\'s guard fights back', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  game.archers = []
+  skirmish(game)
+  const k = world.keep
+  const sx = k.step % world.w
+  const sy = (k.step / world.w) | 0
+  game.spawnEnemy({ type: 'raider', spawn: { x: sx, y: sy + 2 }, hpMult: 1 })
+  step(game, 60)
+  assert.equal(k.doorHp, 0, 'door broken')
+  assert.ok(k.hp < k.maxHp, 'lord hurt')
+  assert.ok(k.hp > 0, 'a lone raider cannot kill him')
+  assert.equal(game.intruders.length, 0, 'the guard killed the intruder')
+})
+
+test('catapults do not bombard the keep', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'catapult', spawn: { x: world.keep.x - 4, y: world.keep.y + 1 }, hpMult: 1 })
+  assert.equal(game.catapultTarget(e, 6), -1)
+})
+
+test('hills slope smoothly into the ground around them', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  const hx = 4
+  const hy = 4
+  world.tiles[world.idx(hx, hy)].terrain = 'hill'
+  const top = world.groundElev(world.idx(hx, hy))
+  assert.ok(Math.abs(world.heightAt(hx + 0.5, hy + 0.5) - top) < 1e-9, 'centre at full height')
+  // Continuous across every edge: sample just either side.
+  for (let x = hx - 1; x <= hx + 2; x++)
+    for (let f = 0.05; f < 1; f += 0.1) {
+      const a = world.heightAt(x - 1e-6, hy + f)
+      const b = world.heightAt(x + 1e-6, hy + f)
+      assert.ok(Math.abs(a - b) < 1e-4, `step at x=${x} f=${f}`)
+    }
+  assert.ok(world.heightAt(hx + 1.5, hy + 0.5) === 0, 'neighbour centre stays level')
+  assert.ok(world.heightAt(hx + 1, hy + 0.5) > 0 && world.heightAt(hx + 1, hy + 0.5) < top, 'edge in between')
 })

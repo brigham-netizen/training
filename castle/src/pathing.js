@@ -1,8 +1,9 @@
-import { SIEGE_COST_PER_HP, GATE_LURE, RAM_GATE_LURE } from './config.js'
+import { SIEGE_COST_PER_HP, GATE_LURE, RAM_GATE_LURE, STONE, LADDER } from './config.js'
 
-// Flow field toward the keep. Walls are not impassable: they cost extra in
+// Flow fields toward the keep's door. Breakable structures cost extra in
 // proportion to their HP, so enemies walk around when a gap exists and
-// break through the weakest point when the castle is sealed.
+// break through the weakest point when the castle is sealed. Foot soldiers
+// can't break stone at all: they need a gate, wood, or a ladder.
 
 const DIRS = [
   [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
@@ -49,13 +50,21 @@ class MinHeap {
   }
 }
 
-// Cost of stepping into tile i: slow ground takes longer to cross, and
-// structures cost time to break in proportion to their remaining HP.
-function stepCost(world, i, step, gateLure) {
+// Cost of stepping into tile i (Infinity if this kind of attacker can't).
+//   foot:   can't hurt stone; climbs it only where a ladder is up
+//   ladder: a ladder crew, who can put a ladder up against a wall
+//   ram:    siege engines, who batter through anything
+function stepCost(world, i, step, mode) {
   const t = world.tiles[i]
-  if (t.type === 'keep') return step
+  if (t.type === 'keep') return Infinity
   if (world.isSolid(i)) {
-    const lure = t.type === 'gate' ? gateLure : 1
+    const stone = STONE.includes(t.type)
+    if (stone && mode !== 'ram') {
+      if (t.ladder) return step / LADDER.climb
+      if (mode === 'ladder' && LADDER.reach.includes(t.type)) return step / LADDER.climb + LADDER.cost
+      return Infinity
+    }
+    const lure = t.type === 'gate' ? (mode === 'ram' ? RAM_GATE_LURE : GATE_LURE) : 1
     return step + Math.max(0, t.hp) * SIEGE_COST_PER_HP * lure
   }
   return step / world.slow(i)
@@ -67,20 +76,16 @@ function diagonalOk(world, x, y, dx, dy) {
   return world.isWalkable(world.idx(x + dx, y)) && world.isWalkable(world.idx(x, y + dy))
 }
 
-// `gateLure` scales how cheap gates look; rams get their own, lower value.
-export function computeFlow(world, gateLure = GATE_LURE) {
+// Flow field toward the keep's doorstep for one kind of attacker.
+export function computeFlow(world, mode = 'foot') {
   const { w, h } = world
   const n = w * h
   const dist = new Float64Array(n).fill(Infinity)
   const next = new Int32Array(n).fill(-1)
   const heap = new MinHeap()
-
-  for (let i = 0; i < n; i++) {
-    if (world.tiles[i].type === 'keep') {
-      dist[i] = 0
-      heap.push(i, 0)
-    }
-  }
+  const goal = world.keep.step
+  dist[goal] = 0
+  heap.push(goal, 0)
 
   while (heap.size) {
     const [d, u] = heap.pop()
@@ -95,7 +100,7 @@ export function computeFlow(world, gateLure = GATE_LURE) {
       const v = world.idx(vx, vy)
       if (world.isBlocked(v) || world.tiles[v].type === 'keep') continue
       if (!diagonalOk(world, vx, vy, dx, dy)) continue
-      const nd = d + stepCost(world, u, step, gateLure)
+      const nd = d + stepCost(world, u, step, mode)
       if (nd < dist[v]) {
         dist[v] = nd
         heap.push(v, nd)
@@ -114,7 +119,7 @@ export function computeFlow(world, gateLure = GATE_LURE) {
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
       const j = world.idx(nx, ny)
       if (world.isBlocked(j) || !diagonalOk(world, x, y, dx, dy)) continue
-      const c = dist[j] + stepCost(world, j, step, gateLure)
+      const c = dist[j] + stepCost(world, j, step, mode)
       if (c < best) {
         best = c
         next[i] = j
@@ -126,5 +131,9 @@ export function computeFlow(world, gateLure = GATE_LURE) {
 }
 
 export function computeRamFlow(world) {
-  return computeFlow(world, RAM_GATE_LURE)
+  return computeFlow(world, 'ram')
+}
+
+export function computeLadderFlow(world) {
+  return computeFlow(world, 'ladder')
 }

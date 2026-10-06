@@ -51,6 +51,21 @@ const C = {
   boulder: 0x807c74,
   arrow: 0xf0e2c0,
   arrowHostile: 0x2a2018,
+  ladder: 0xa87c4a,
+  lord: 0x783078,
+  crown: 0xecc446,
+  hole: 0x181210,
+}
+
+// How high or low each kind of ground sits (the 3D terrain is smoothed
+// between tiles the same way world.heightAt smooths hills).
+function groundLevel(world, i) {
+  const t = world.tiles[i]
+  if (t.type === 'moat') return -0.3
+  if (t.terrain === 'water') return -0.32
+  if (t.terrain === 'shallows') return -0.14
+  if (t.terrain === 'marsh') return -0.02
+  return world.groundElev(i)
 }
 
 const UP = new THREE.Vector3(0, 1, 0)
@@ -172,7 +187,7 @@ export class Renderer3D {
       this.mapSig = mapSig
       this.buildTerrain(world)
     }
-    const structSig = world.tiles.map((t) => `${t.type}${t.hoard ? 'h' : ''}${t.rock ? 'r' : ''}${t.plot || ''}`).join(',')
+    const structSig = mapSig + (world.keep.doorHp > 0 ? 'D' : 'd') + world.tiles.map((t) => `${t.type}${t.hoard ? 'h' : ''}${t.rock ? 'r' : ''}${t.plot || ''}`).join(',')
     if (structSig !== this.structSig) {
       this.structSig = structSig
       this.buildStructures(world)
@@ -194,6 +209,32 @@ export class Renderer3D {
   box(key, x0, y0, z0, x1, y1, z1) {
     const g = new THREE.BoxGeometry(x1 - x0, z1 - z0, y1 - y0)
     g.translate((x0 + x1) / 2, (z0 + z1) / 2, (y0 + y1) / 2)
+    this.add(key, g)
+  }
+
+  // Box whose bottom and top may slope: z0 and z1 are heights or functions
+  // (x, y) => height evaluated at each corner.
+  slab(key, x0, y0, x1, y1, z0, z1) {
+    const xs = [x0, x1, x1, x0]
+    const ys = [y0, y0, y1, y1]
+    const b = xs.map((x, k) => (typeof z0 === 'function' ? z0(x, ys[k]) : z0))
+    const t = xs.map((x, k) => (typeof z1 === 'function' ? z1(x, ys[k]) : z1))
+    // Corners as three.js points: bottom 0-3, top 4-7.
+    const P = [...xs.map((x, k) => [x, b[k], ys[k]]), ...xs.map((x, k) => [x, t[k], ys[k]])]
+    const quads = [
+      [4, 5, 6, 7], // top (counter-clockwise seen from above)
+      [0, 3, 2, 1], // bottom
+      [0, 1, 5, 4], // north
+      [1, 2, 6, 5], // east
+      [2, 3, 7, 6], // south
+      [3, 0, 4, 7], // west
+    ]
+    const pos = []
+    for (const [a, bb, c, d] of quads) for (const v of [a, c, bb, a, d, c]) pos.push(...P[v])
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((pos.length / 3) * 2), 2))
+    g.computeVertexNormals()
     this.add(key, g)
   }
 
@@ -242,39 +283,89 @@ export class Renderer3D {
   buildTerrain(world) {
     const { w, h } = world
     const positions = []
-    const normals = []
     const colors = []
     const col = new THREE.Color()
-    // Each tile is a column; its top sits at the terrain height.
-    const pushBox = (x, y, top, topHex, sideHex) => {
-      const g = new THREE.BoxGeometry(1, top + 0.8, 1).toNonIndexed()
-      g.translate(x + 0.5, (top - 0.8) / 2, y + 0.5)
-      const p = g.attributes.position.array
-      const n = g.attributes.normal.array
-      for (let v = 0; v < p.length; v += 3) {
-        positions.push(p[v], p[v + 1], p[v + 2])
-        normals.push(n[v], n[v + 1], n[v + 2])
-        col.setHex(n[v + 1] > 0.5 ? topHex : sideHex)
-        colors.push(col.r, col.g, col.b)
-      }
-      g.dispose()
-    }
-    for (let i = 0; i < world.tiles.length; i++) {
+    // A smooth heightfield on a half-tile lattice: tile centres at their
+    // own level, edges and corners averaging the tiles that meet there.
+    const GW = 2 * w + 1
+    const GH = 2 * h + 1
+    const level = new Float32Array(w * h)
+    const tint = []
+    for (let i = 0; i < w * h; i++) {
       const t = world.tiles[i]
-      const x = i % w
-      const y = (i / w) | 0
+      level[i] = groundLevel(world, i)
       const v = Math.floor(t.v * 4)
-      if (t.type === 'moat') pushBox(x, y, -0.3, C.bedDeep, C.dirt)
-      else if (t.terrain === 'water') pushBox(x, y, -0.32, C.bedDeep, C.dirt)
-      else if (t.terrain === 'shallows') pushBox(x, y, -0.14, C.bedShallow, C.dirt)
-      else if (t.terrain === 'marsh') pushBox(x, y, -0.02, C.marsh[v & 1], C.dirt)
-      else if (t.terrain === 'hill') pushBox(x, y, world.groundElev(i), C.hill[v & 1], C.hillSide)
-      else pushBox(x, y, 0, C.grass[v], C.dirt)
+      const hex =
+        t.type === 'moat' || t.terrain === 'water' ? C.bedDeep
+        : t.terrain === 'shallows' ? C.bedShallow
+        : t.terrain === 'marsh' ? C.marsh[v & 1]
+        : t.terrain === 'hill' ? C.hill[v & 1]
+        : C.grass[v]
+      tint.push(new THREE.Color(hex))
     }
+    const vh = new Float32Array(GW * GH)
+    const vc = []
+    for (let gy = 0; gy < GH; gy++)
+      for (let gx = 0; gx < GW; gx++) {
+        // Tiles touching this lattice point.
+        const xs = gx % 2 ? [(gx - 1) / 2] : [gx / 2 - 1, gx / 2]
+        const ys = gy % 2 ? [(gy - 1) / 2] : [gy / 2 - 1, gy / 2]
+        let sum = 0
+        let n = 0
+        const c = new THREE.Color(0, 0, 0)
+        for (const ty of ys)
+          for (const tx of xs) {
+            if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue
+            const i = ty * w + tx
+            sum += level[i]
+            c.r += tint[i].r
+            c.g += tint[i].g
+            c.b += tint[i].b
+            n++
+          }
+        vh[gy * GW + gx] = n ? sum / n : 0
+        vc.push(n ? c.multiplyScalar(1 / n) : c)
+      }
+    const index = []
+    const L = (gx, gy) => gy * GW + gx
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const cx = 2 * x + 1
+        const cy = 2 * y + 1
+        const ring = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]].map(([dx, dy]) => L(cx + dx, cy + dy))
+        const c = L(cx, cy)
+        for (let k = 0; k < 8; k++) index.push(c, ring[(k + 1) % 8], ring[k])
+      }
+    for (let gy = 0; gy < GH; gy++)
+      for (let gx = 0; gx < GW; gx++) {
+        positions.push(gx / 2, vh[L(gx, gy)], gy / 2)
+        const c = vc[L(gx, gy)]
+        colors.push(c.r, c.g, c.b)
+      }
+    // Skirt round the map edge so it reads as a slab of land.
+    const skirt = (pts) => {
+      for (let k = 0; k + 1 < pts.length; k++) {
+        const [ax, ay] = pts[k]
+        const [bx, by] = pts[k + 1]
+        const a = positions.length / 3
+        col.setHex(C.dirt)
+        for (const [px, py, top] of [[ax, ay, true], [bx, by, true], [bx, by, false], [ax, ay, false]]) {
+          positions.push(px / 2, top ? vh[L(px, py)] : -0.8, py / 2)
+          colors.push(col.r, col.g, col.b)
+        }
+        index.push(a, a + 1, a + 2, a, a + 2, a + 3)
+      }
+    }
+    const edge = (fn, n) => Array.from({ length: n }, (_, k) => fn(k))
+    skirt(edge((k) => [k, 0], GW))
+    skirt(edge((k) => [GW - 1, k], GH))
+    skirt(edge((k) => [GW - 1 - k, GH - 1], GW))
+    skirt(edge((k) => [0, GH - 1 - k], GH))
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    geo.setIndex(index)
+    geo.computeVertexNormals()
     for (const child of [...this.terrain.children]) {
       this.terrain.remove(child)
       child.geometry.dispose()
@@ -344,6 +435,7 @@ export class Renderer3D {
       player: this.mat('player', C.player, { side: THREE.DoubleSide }),
       ghost: this.mat('ghost', 0xf2e2b0, { transparent: true, opacity: 0.32, depthWrite: false }),
       stake: this.mat('stake', 0xe9d9b0),
+      hole: this.mat('hole', C.hole, { roughness: 1 }),
     }
   }
 
@@ -354,12 +446,14 @@ export class Renderer3D {
   }
 
   // Merlons along a run from (ax, ay) to (bx, by) at height z.
+  // `z` is a height or a function (x, y) => height.
   merlonRun(key, ax, ay, bx, by, z, n, s = 0.14, hgt = 0.18) {
     for (let k = 0; k < n; k++) {
       const f = n === 1 ? 0.5 : k / (n - 1)
       const x = ax + (bx - ax) * f
       const y = ay + (by - ay) * f
-      this.box(key, x - s / 2, y - s / 2, z, x + s / 2, y + s / 2, z + hgt)
+      const mz = typeof z === 'function' ? z(x, y) : z
+      this.box(key, x - s / 2, y - s / 2, mz, x + s / 2, y + s / 2, mz + hgt)
     }
   }
 
@@ -371,11 +465,13 @@ export class Renderer3D {
       const x = i % world.w
       const y = (i / world.w) | 0
       const z = world.elev(i)
-      const foot = world.baseElev(i)
+      // Upright blocks reach down past the lowest ground under them (or
+      // sit on the rock they're bedded into) so slopes never show a gap.
+      const foot = t.rock ? world.baseElev(i) : world.minGround(i) - 0.35
       if (t.rock) this.rockBase(x, y, z, foot, t.v)
       switch (t.type) {
         case 'palisade':
-          this.palisade(world, x, y, z)
+          this.palisade(world, x, y)
           break
         case 'wall':
           this.thinWall(world, x, y, z, foot, t.hoard)
@@ -462,12 +558,13 @@ export class Renderer3D {
   }
 
   // Wooden palisade: a row of sharpened logs along each connected arm.
-  palisade(world, x, y, z) {
+  palisade(world, x, y) {
     const cx = x + 0.5
     const cy = y + 0.5
     const arms = [[0, -1], [1, 0], [0, 1], [-1, 0]].filter(([dx, dy]) => this.connects(world, x, y, dx, dy))
     const log = (lx, ly) => {
-      this.cyl('wood', lx, ly, z, z + 0.75, 0.06, 6)
+      const z = world.heightAt(lx, ly)
+      this.cyl('wood', lx, ly, z - 0.2, z + 0.75, 0.06, 6)
       this.cone('woodLight', lx, ly, z + 0.75, 0.16, 0.06, 6)
     }
     log(cx, cy)
@@ -477,27 +574,29 @@ export class Renderer3D {
   thinWall(world, x, y, z, foot, hoard) {
     const d = STRUCTURES.wall
     const hw = d.thin / 2
-    const top = z + d.height
     const cx = x + 0.5
     const cy = y + 0.5
-    this.box('stone', cx - hw, cy - hw, foot, cx + hw, cy + hw, top)
+    // The top follows the ground along the wall's centre line.
+    const top = (px, py) => (Math.abs(px - cx) >= Math.abs(py - cy) ? world.heightAt(px, cy) : world.heightAt(cx, py)) + d.height
+    this.slab('stone', cx - hw, cy - hw, cx + hw, cy + hw, foot, top)
     const arms = [[0, -1], [1, 0], [0, 1], [-1, 0]].filter(([dx, dy]) => this.connects(world, x, y, dx, dy))
     for (const [dx, dy] of arms) {
       const x0 = dx ? (dx > 0 ? cx + hw : x) : cx - hw
       const x1 = dx ? (dx > 0 ? x + 1 : cx - hw) : cx + hw
       const y0 = dy ? (dy > 0 ? cy + hw : y) : cy - hw
       const y1 = dy ? (dy > 0 ? y + 1 : cy - hw) : cy + hw
-      this.box('stone', x0, y0, foot, x1, y1, top)
+      this.slab('stone', x0, y0, x1, y1, foot, top)
       // Battlements (or wooden hoarding) along both sides of the walkway.
       const key = hoard ? 'wood' : 'stoneDark'
+      const boards = (px, py) => top(px, py) + 0.3
       if (dx) {
         for (const sy of [cy - hw + 0.07, cy + hw - 0.07]) {
-          if (hoard) this.box(key, x0, sy - 0.04, top, x1, sy + 0.04, top + 0.3)
+          if (hoard) this.slab(key, x0, sy - 0.04, x1, sy + 0.04, top, boards)
           else this.merlonRun(key, x0 + 0.08, sy, x1 - 0.08, sy, top, 2)
         }
       } else {
         for (const sx of [cx - hw + 0.07, cx + hw - 0.07]) {
-          if (hoard) this.box(key, sx - 0.04, y0, top, sx + 0.04, y1, top + 0.3)
+          if (hoard) this.slab(key, sx - 0.04, y0, sx + 0.04, y1, top, boards)
           else this.merlonRun(key, sx, y0 + 0.08, sx, y1 - 0.08, top, 2)
         }
       }
@@ -506,9 +605,9 @@ export class Renderer3D {
   }
 
   thickWall(world, x, y, z, foot, hoard) {
-    const top = z + STRUCTURES.thick.height
-    this.box('stone', x, y, foot, x + 1, y + 1, top)
-    this.box('stoneDark', x + 0.25, y + 0.25, top, x + 0.75, y + 0.75, top + 0.01)
+    const top = (px, py) => world.heightAt(px, py) + STRUCTURES.thick.height
+    this.slab('stone', x, y, x + 1, y + 1, foot, top)
+    this.slab('stoneDark', x + 0.25, y + 0.25, x + 0.75, y + 0.75, top, (px, py) => top(px, py) + 0.01)
     const key = hoard ? 'wood' : 'stoneDark'
     const edges = [
       [[0, -1], x + 0.08, y + 0.08, x + 0.92, y + 0.08],
@@ -518,7 +617,7 @@ export class Renderer3D {
     ]
     for (const [[dx, dy], ax, ay, bx, by] of edges) {
       if (this.connects(world, x, y, dx, dy)) continue
-      if (hoard) this.box(key, Math.min(ax, bx) - 0.05, Math.min(ay, by) - 0.05, top, Math.max(ax, bx) + 0.05, Math.max(ay, by) + 0.05, top + 0.32)
+      if (hoard) this.slab(key, Math.min(ax, bx) - 0.05, Math.min(ay, by) - 0.05, Math.max(ax, bx) + 0.05, Math.max(ay, by) + 0.05, top, (px, py) => top(px, py) + 0.32)
       else this.merlonRun(key, ax, ay, bx, by, top, 3, 0.16, 0.22)
     }
   }
@@ -555,7 +654,11 @@ export class Renderer3D {
       const n = world.idx(x + dx, y + dy)
       const type = world.tiles[n].type
       if (type === 'tower' || type === 'keep') continue
-      const hgt = Math.min(world.elev(n) + STRUCTURES[type].height, top)
+      // Meet the neighbour's top where it touches this tile's edge.
+      const H = STRUCTURES[type].height
+      const hgt = type === 'gate'
+        ? Math.min(world.elev(n) + H, top)
+        : (px, py) => Math.min(top, (dx ? world.heightAt(px, cy) : world.heightAt(cx, py)) + H)
       if (type === 'palisade') {
         for (const f of [0.3, 0.45]) {
           this.cyl('wood', cx + dx * f, cy + dy * f, z, z + 0.75, 0.06, 6)
@@ -568,7 +671,7 @@ export class Renderer3D {
       const x1 = dx ? (dx > 0 ? x + 1 : cx) : cx + hw
       const y0 = dy ? (dy > 0 ? cy : y) : cy - hw
       const y1 = dy ? (dy > 0 ? y + 1 : cy) : cy + hw
-      this.box('stone', x0, y0, foot, x1, y1, hgt)
+      this.slab('stone', x0, y0, x1, y1, foot, hgt)
     }
     this.cyl('stone', cx, cy, foot, top, 0.47, 14, 0.44)
     this.cyl('stoneDark', cx, cy, top - 0.12, top, 0.48, 14)
@@ -668,6 +771,18 @@ export class Renderer3D {
       this.cyl('keep', tx, ty, 0, h + 0.5, 0.32, 10)
       this.cone('roof', tx, ty, h + 0.5, 0.55, 0.38, 10)
     }
+    // The door in the middle of the south face; a dark hole once broken.
+    const dx = k.x + 1.5
+    const dy = k.y + 3
+    if (k.doorHp > 0) {
+      this.box('door', dx - 0.22, dy - 0.02, 0, dx + 0.22, dy + 0.04, 0.8)
+      this.cyl('door', dx, dy + 0.01, 0.62, 0.68, 0.22, 10)
+      for (const bz of [0.22, 0.55]) this.box('iron', dx - 0.23, dy + 0.03, bz, dx + 0.23, dy + 0.05, bz + 0.04)
+    } else {
+      this.box('hole', dx - 0.22, dy - 0.02, 0, dx + 0.22, dy + 0.02, 0.85)
+      this.rod('door', [dx - 0.3, dy + 0.25, 0.02], [dx - 0.05, dy + 0.4, 0.05], 0.03)
+      this.rod('door', [dx + 0.1, dy + 0.3, 0.02], [dx + 0.35, dy + 0.15, 0.04], 0.03)
+    }
     // Flag.
     const fx = k.x + 1.5
     const fy = k.y + 1.5
@@ -752,6 +867,18 @@ export class Renderer3D {
         this.catapult(e, t, hit)
         continue
       }
+      if (e.type === 'ladder') {
+        // Two raiders with a ladder on their shoulders.
+        const hx = Math.cos(e.heading)
+        const hy = Math.sin(e.heading)
+        for (const [o, ph] of [[0.24, 0], [-0.24, Math.PI]]) {
+          const b = Math.abs(Math.sin(e.walk + ph)) * 0.05
+          this.figure(e.x + hx * o, e.y + hy * o, e.z + b, 0.15, 0.46, hit ? 0xffffff : C.raider, C.skin)
+        }
+        const lift = Math.min(1, e.raising / 1.2) * 0.9
+        this.ladder([e.x - hx * 0.5, e.y - hy * 0.5, e.z + 0.52], [e.x + hx * 0.5, e.y + hy * 0.5, e.z + 0.52 + lift])
+        continue
+      }
       const big = e.type === 'brute'
       const h = big ? 0.6 : 0.48
       const body = hit ? 0xffffff : C[e.type]
@@ -762,6 +889,24 @@ export class Renderer3D {
       if (e.type === 'bowman') this.bow(e.x, e.y, e.z, e.heading, 0x3b2a18)
       else this.putRod([e.x, e.y, hz], [e.x + Math.cos(e.heading + swing) * reach, e.y + Math.sin(e.heading + swing) * reach, hz + 0.1 + swing * 0.15], 0.025, big ? 0x3b3b3b : 0xd0d0d0)
     }
+
+    for (const l of game.ladders) {
+      const g = game.ladderGeom(l)
+      this.ladder([g.fx, g.fy, g.fz], [g.tx, g.ty, g.tz])
+    }
+    for (const f of game.fallen) {
+      const z = game.world.heightAt(f.x, f.y) + 0.04
+      const [dx, dy] = f.dir
+      this.ladder([f.x + dx * 0.55, f.y + dy * 0.55, z], [f.x - dx * 0.55, f.y - dy * 0.55, z])
+    }
+    // The lord on the keep roof, crowned.
+    const k = game.world.keep
+    const lx = k.x + 2.35
+    const ly = k.y + 2.3
+    const lz = KEEP.height
+    const struck = k.inside > 0 && Math.sin(t * 20) > 0.6
+    this.figure(lx, ly, lz, 0.13, 0.36, struck ? 0xffffff : C.lord, C.skin)
+    this.put('disc', new THREE.Vector3(lx, lz + 0.5, ly), new THREE.Quaternion(), new THREE.Vector3(0.07, 0.05, 0.07), C.crown)
 
     for (const a of game.archers) {
       const walking = a.path.length > 0
@@ -800,6 +945,24 @@ export class Renderer3D {
       p.mesh.count = p.n
       p.mesh.instanceMatrix.needsUpdate = true
       if (p.mesh.instanceColor) p.mesh.instanceColor.needsUpdate = true
+    }
+  }
+
+  // Two rails and rungs between game points a and b.
+  ladder(a, b) {
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const len = Math.hypot(dx, dy) || 1
+    const px = (-dy / len) * 0.13
+    const py = (dx / len) * 0.13
+    this.putRod([a[0] - px, a[1] - py, a[2]], [b[0] - px, b[1] - py, b[2]], 0.025, C.ladder)
+    this.putRod([a[0] + px, a[1] + py, a[2]], [b[0] + px, b[1] + py, b[2]], 0.025, C.ladder)
+    for (let r = 1; r < 6; r++) {
+      const f = r / 6
+      const x = a[0] + dx * f
+      const y = a[1] + dy * f
+      const z = a[2] + (b[2] - a[2]) * f
+      this.putRod([x - px, y - py, z], [x + px, y + py, z], 0.018, 0x7a5a34)
     }
   }
 

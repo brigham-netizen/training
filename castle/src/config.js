@@ -56,7 +56,20 @@ export const SWORDSMAN = { label: 'Swordsman', cost: 25, hp: 130, dps: 20, speed
 // Swordsmen with orders cover their zone plus this margin.
 export const ZONE_MARGIN = 0.75
 
-export const KEEP = { size: 3, hp: 1000, height: 2.6, slots: 2, perch: 1.5, archers: 2 }
+// The keep's `hp` is the lord's life. Attackers must batter the door
+// (doorHp) and then fight their way up to him; his guard fights back,
+// splitting `guard` damage per second among whoever is inside.
+export const KEEP = { size: 3, hp: 1000, height: 2.6, slots: 2, perch: 1.5, archers: 2, doorHp: 260, guard: 22, climb: 2.5 }
+
+// Foot soldiers can't hurt stone. They break gates and wooden things, and
+// get over stone walls with ladders carried by a crew of two.
+//   raise: seconds to set a ladder up, hp: shoves to push it off the wall,
+//   push:  shove damage per second from each archer on or beside the wall,
+//   climb: speed multiplier while climbing, cost: path cost of a ladder,
+//   regroup: seconds stuck at a wall before two soldiers lash a new ladder.
+export const LADDER = { raise: 1.2, hp: 80, push: 16, climb: 0.35, cost: 9, regroup: 14, reach: ['wall', 'thick'] }
+// Structures foot soldiers can't damage.
+export const STONE = ['wall', 'thick', 'tower']
 
 // Terrain. `slow` multiplies enemy speed (and so raises path cost).
 export const TERRAIN = {
@@ -69,13 +82,16 @@ export const TERRAIN = {
 
 export const ENEMIES = {
   raider: { hp: 40, speed: 1.6, dps: 8, siege: 1, gold: 3, r: 0.22 },
+  // Two raiders carrying a ladder. Once it's up they climb as raiders.
+  ladder: { hp: 80, speed: 1.25, dps: 0, siege: 0, gold: 6, r: 0.34, crew: 2 },
   brute: { hp: 140, speed: 0.95, dps: 16, siege: 1.2, gold: 8, r: 0.3 },
-  ram: { hp: 380, speed: 0.6, dps: 26, siege: 3, gold: 15, r: 0.38, noMelee: true },
+  // Siege engines (rams, catapults) are the only things that break stone.
+  ram: { hp: 380, speed: 0.6, dps: 26, siege: 3, gold: 15, r: 0.38, noMelee: true, siegeEngine: true },
   // Ranged: stop to shoot your archers and swordsmen.
   bowman: { hp: 34, speed: 1.3, dps: 4, siege: 0.6, gold: 5, r: 0.2, range: 4, rate: 0.6, shot: 6 },
   // Siege: lobs boulders at structures from beyond archer range.
   // After `ammo` boulders it rolls forward into archer range.
-  catapult: { hp: 240, speed: 0.45, dps: 0, siege: 0, gold: 25, r: 0.42, range: 6, rate: 0.22, boulder: 90, splash: 35, ammo: 10, noMelee: true },
+  catapult: { hp: 240, speed: 0.45, dps: 0, siege: 0, gold: 25, r: 0.42, range: 6, rate: 0.22, boulder: 90, splash: 35, ammo: 10, noMelee: true, siegeEngine: true },
 }
 
 export const ARROW_SPEED = 11
@@ -86,6 +102,7 @@ export const COVER = 0.5
 export function waveComposition(n) {
   return {
     raider: 8 + n * 3,
+    ladder: 1 + Math.floor(n / 2),
     brute: n >= 2 ? (n - 1) * 3 : 0,
     ram: n >= 4 ? Math.ceil((n - 3) * 1.5) : 0,
     bowman: n >= 3 ? n - 2 : 0,

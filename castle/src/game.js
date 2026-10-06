@@ -1,8 +1,8 @@
 import { World, mulberry32 } from './world.js'
-import { computeFlow, computeRamFlow } from './pathing.js'
+import { computeFlow, computeRamFlow, computeLadderFlow } from './pathing.js'
 import {
   START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
-  HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST,
+  HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST, LADDER, STONE,
   waveComposition, waveBonus,
 } from './config.js'
 
@@ -34,6 +34,9 @@ export class Game {
     this.archers = []
     this.swordsmen = []
     this.projectiles = []
+    this.ladders = [] // ladders standing against walls
+    this.fallen = [] // ladders pushed off, lying where they fell
+    this.intruders = [] // attackers inside the keep, climbing to the lord
     this.effects = [] // dust puffs and the like, purely visual
     this.floaters = []
     this.spawnQueue = []
@@ -531,12 +534,12 @@ export class Game {
           a.y += (dy / d) * step
         }
         // Step up or down onto the next surface as they cross the seam.
-        const surf = world.surface(d < 0.5 ? next : a.tile)
+        const surf = world.surfaceAt(d < 0.5 ? next : a.tile, a.x, a.y)
         a.z += (surf - a.z) * Math.min(1, dt * 10)
         return
       }
     }
-    a.z += (world.surface(a.tile) - a.z) * Math.min(1, dt * 10)
+    a.z += (world.surfaceAt(a.tile, a.x, a.y) - a.z) * Math.min(1, dt * 10)
 
     const target = this.pickTarget(a.x, a.y, this.range(a.tile))
     if (target) {
@@ -677,7 +680,7 @@ export class Game {
     s.flash = Math.max(0, s.flash - dt)
     s.think -= dt
     const here = world.idxAt(s.x, s.y)
-    s.z += (world.elev(here) - s.z) * Math.min(1, dt * 8)
+    s.z += (world.heightAt(s.x, s.y) - s.z) * Math.min(1, dt * 8)
     const [px, py] = this.center(s.post)
 
     if (s.think <= 0) {
@@ -754,6 +757,7 @@ export class Game {
         list.splice(from + Math.floor(this.rnd() * (list.length - from + 1)), 0, type)
     }
     for (let k = 0; k < comp.raider; k++) list.push('raider')
+    sprinkle('ladder', comp.ladder)
     sprinkle('brute', comp.brute)
     sprinkle('bowman', comp.bowman)
     // Siege engines arrive in the back half so the wall has been tested.
@@ -775,14 +779,20 @@ export class Game {
   }
 
   spawnEnemy({ type, spawn, hpMult }) {
+    const e = this.makeEnemy(type, spawn.x + 0.5 + (this.rnd() - 0.5) * 0.4, spawn.y + 0.5 + (this.rnd() - 0.5) * 0.4, hpMult)
+    this.enemies.push(e)
+    return e
+  }
+
+  makeEnemy(type, x, y, hpMult = 1) {
     const def = ENEMIES[type]
     const hp = Math.round(def.hp * hpMult)
-    this.enemies.push({
+    const e = {
       id: this.nextId++,
       type,
-      x: spawn.x + 0.5 + (this.rnd() - 0.5) * 0.4,
-      y: spawn.y + 0.5 + (this.rnd() - 0.5) * 0.4,
-      z: 0,
+      x,
+      y,
+      z: this.world.heightAt(x, y),
       hp,
       maxHp: hp,
       speed: def.speed * (0.9 + this.rnd() * 0.2),
@@ -799,7 +809,18 @@ export class Game {
       walk: this.rnd() * 10,
       flash: 0,
       dead: false,
-    })
+      stuck: 0, // seconds spent waiting at a wall they can't get over
+      raising: 0, // ladder crews: progress putting the ladder up
+    }
+    // A ladder crew is two soldiers; they climb on their own once it's up.
+    if (def.crew) {
+      e.members = []
+      for (let k = 0; k < def.crew; k++) {
+        const mhp = Math.round(ENEMIES.raider.hp * hpMult)
+        e.members.push({ type: 'raider', hp: mhp, maxHp: mhp })
+      }
+    }
+    return e
   }
 
   // ---- simulation ---------------------------------------------------------
@@ -822,6 +843,9 @@ export class Game {
       this.spawnEnemy(this.spawnQueue.shift())
 
     for (const e of this.enemies) this.updateEnemy(e, dt)
+    this.updateLadders(dt)
+    this.regroup(dt)
+    this.updateIntruders(dt)
     this.separate()
     this.updateTraps(dt)
     this.updateProjectiles(dt)
@@ -833,14 +857,14 @@ export class Game {
         this.floaters.push({ x: e.x, y: e.y, z: e.z, text: `+${e.gold}`, t: 0 })
       }
     }
-    this.enemies = this.enemies.filter((e) => !e.dead)
+    this.enemies = this.enemies.filter((e) => !e.dead && !e.gone)
 
     if (this.world.keep.hp <= 0) {
       this.phase = 'lost'
       this.emit('lost', { wave: this.nextWave })
       return
     }
-    if (!this.spawnQueue.length && !this.enemies.length) this.endWave()
+    if (!this.spawnQueue.length && !this.enemies.length && !this.intruders.length) this.endWave()
   }
 
   reapDefenders() {
@@ -855,13 +879,37 @@ export class Game {
 
   repath() {
     this.flow = computeFlow(this.world)
+    this.ladderFlow = computeLadderFlow(this.world)
     this.ramFlow = computeRamFlow(this.world)
     this.world.dirty = false
+  }
+
+  // Which flow field an enemy follows. Foot soldiers with no way in (stone
+  // all round, no ladder up) follow the ladder crews' field to the foot of
+  // the wall and wait there.
+  flowFor(e) {
+    if (ENEMIES[e.type].siegeEngine) return this.ramFlow
+    if (e.type === 'ladder') return this.ladderFlow
+    const ci = this.world.idxAt(e.x, e.y)
+    return isFinite(this.flow.dist[ci]) ? this.flow : this.ladderFlow
+  }
+
+  // Foot soldiers: everyone except siege engines and ladder crews.
+  climbs(e) {
+    return !ENEMIES[e.type].siegeEngine && e.type !== 'ladder'
   }
 
   endWave() {
     this.wave++
     this.projectiles = []
+    // Ladders are taken down and the keep door mended between waves.
+    for (const l of this.ladders) this.world.tiles[l.tile].ladder = null
+    this.ladders = []
+    this.fallen = []
+    this.intruders = []
+    this.world.keep.doorHp = this.world.keep.doorMax
+    this.world.keep.inside = 0
+    this.world.dirty = true
     // Survivors patch themselves up between waves.
     for (const u of [...this.archers, ...this.swordsmen]) u.hp = u.maxHp
     if (this.wave >= TOTAL_WAVES) {
@@ -879,7 +927,9 @@ export class Game {
     this.emit('waveEnd', { wave: this.wave, bonus, village, plots })
   }
 
-  blockedAt(x, y, r, troop = false) {
+  // `mode`: 'troop' (your swordsmen, through gates), 'climb' (foot
+  // soldiers, up ladders) or null.
+  blockedAt(x, y, r, mode = null) {
     const { world } = this
     // >= so a unit flush with the far edge never reads past the grid.
     if (x - r < 0 || y - r < 0 || x + r >= world.w || y + r >= world.h) return true
@@ -890,7 +940,7 @@ export class Game {
     for (let ty = y0; ty <= y1; ty++)
       for (let tx = x0; tx <= x1; tx++) {
         const i = world.idx(tx, ty)
-        if (troop ? !this.troopPassable(i) : !world.isWalkable(i)) return true
+        if (mode === 'troop' ? !this.troopPassable(i) : !world.isWalkable(i) && !(mode === 'climb' && world.tiles[i].ladder)) return true
       }
     return false
   }
@@ -898,9 +948,9 @@ export class Game {
   // Move with axis-separated sliding so units glide along walls.
   tryMove(u, dx, dy) {
     const cr = u.r * 0.8
-    const troop = u.kind === 'swordsman'
-    if (dx && !this.blockedAt(u.x + dx, u.y, cr, troop)) u.x += dx
-    if (dy && !this.blockedAt(u.x, u.y + dy, cr, troop)) u.y += dy
+    const mode = u.kind === 'swordsman' ? 'troop' : u.kind === 'archer' ? null : this.climbs(u) ? 'climb' : null
+    if (dx && !this.blockedAt(u.x + dx, u.y, cr, mode)) u.x += dx
+    if (dy && !this.blockedAt(u.x, u.y + dy, cr, mode)) u.y += dy
   }
 
   nearestDefender(x, y, range) {
@@ -918,7 +968,7 @@ export class Game {
     return best
   }
 
-  // Catapults go for towers first, then any other structure, then the keep.
+  // Catapults go for towers first, then any other structure.
   catapultTarget(e, range) {
     const { world } = this
     let best = -1
@@ -930,11 +980,11 @@ export class Game {
     for (let y = y0; y <= y1; y++)
       for (let x = x0; x <= x1; x++) {
         const i = world.idx(x, y)
-        if (!world.isSolid(i)) continue
+        if (!world.isSolid(i) || world.tiles[i].type === 'keep') continue
         const d = Math.hypot(x + 0.5 - e.x, y + 0.5 - e.y)
         if (d > range) continue
         const type = world.tiles[i].type
-        const score = d + (type === 'tower' ? -4 : type === 'keep' ? 3 : 0)
+        const score = d + (type === 'tower' ? -4 : 0)
         if (score < bestScore) {
           bestScore = score
           best = i
@@ -944,12 +994,14 @@ export class Game {
   }
 
   updateEnemy(e, dt) {
-    const { world, flow } = this
+    const { world } = this
     const def = ENEMIES[e.type]
     e.flash = Math.max(0, e.flash - dt)
     e.cd -= dt
     const ci = world.idxAt(e.x, e.y)
-    e.z += (world.elev(ci) - e.z) * Math.min(1, dt * 8)
+    // Up a ladder they stand on the wall; otherwise on the (smooth) ground.
+    const ground = world.tiles[ci].ladder ? world.surfaceAt(ci, e.x, e.y) : world.heightAt(e.x, e.y)
+    e.z += (ground - e.z) * Math.min(1, dt * 8)
     e.attacking = false
     e.shooting = false
 
@@ -982,8 +1034,9 @@ export class Game {
       }
     }
 
-    // Melee enemies stop to fight swordsmen in their way.
-    if (!def.noMelee) {
+    // Melee enemies stop to fight swordsmen in their way, and archers on
+    // the wall once they're up a ladder.
+    if (!def.noMelee && def.dps > 0) {
       for (const s of this.swordsmen) {
         if (s.dead || Math.hypot(s.x - e.x, s.y - e.y) > e.r + s.r + 0.3) continue
         e.attacking = true
@@ -993,41 +1046,211 @@ export class Game {
         s.flash = 0.1
         return
       }
+      if (world.tiles[ci].ladder) {
+        for (const a of this.archers) {
+          if (a.dead || Math.hypot(a.x - e.x, a.y - e.y) > e.r + 0.4) continue
+          e.attacking = true
+          e.heading = Math.atan2(a.y - e.y, a.x - e.x)
+          e.walk += dt * 6
+          a.hp -= e.dps * dt
+          a.flash = 0.1
+          return
+        }
+      }
     }
 
-    let target = (e.type === 'ram' ? this.ramFlow : flow).next[ci]
-    if (target < 0) {
-      // Off the flow field (should be rare): head straight for the keep.
-      const k = world.keep
-      target = world.idxAt(k.x + 1.5, k.y + 1.5)
+    // At the keep: batter the door, then go in after the lord.
+    const k = world.keep
+    const doorX = k.x + 1.5
+    const doorY = k.y + KEEP.size
+    const flow = this.flowFor(e)
+    let target = flow.next[ci]
+    if (ci === k.step || target < 0) {
+      const d = Math.hypot(doorX - e.x, doorY - e.y)
+      if (d <= e.r + (k.doorHp > 0 ? 0.3 : 0.7)) {
+        if (e.type === 'ladder') return this.splitCrew(e)
+        if (e.type === 'catapult') return
+        e.heading = Math.atan2(doorY - e.y, doorX - e.x)
+        if (k.doorHp > 0) {
+          e.attacking = true
+          e.walk += dt * 6
+          k.doorHp = Math.max(0, k.doorHp - e.dps * e.siege * dt)
+          if (k.doorHp <= 0) {
+            this.effects.push({ type: 'dust', x: doorX, y: doorY, z: 0.4, t: 0, life: 0.9, size: 0.8 })
+            this.sfx('crumble', doorX, doorY)
+            this.emit('doorBroken')
+          }
+        } else if (this.climbs(e)) {
+          // In through the door and up the stairs.
+          e.gone = true
+          this.intruders.push({ type: e.type, hp: e.hp, maxHp: e.maxHp, dps: e.dps, gold: e.gold, climb: KEEP.climb })
+          k.inside = this.intruders.length
+        }
+        return
+      }
+      this.walkToward(e, doorX, doorY, ci, dt)
+      return
     }
     const [tx, ty] = this.center(target)
+    const tt = world.tiles[target]
 
-    if (world.isSolid(target)) {
+    if (world.isSolid(target) && !(tt.ladder && this.climbs(e))) {
       const reach = Math.max(Math.abs(tx - e.x), Math.abs(ty - e.y))
       if (reach <= 0.5 + e.r + 0.08) {
-        if (e.type === 'catapult') return // out of boulders: parked at the wall
-        e.attacking = true
         e.heading = Math.atan2(ty - e.y, tx - e.x)
+        if (e.type === 'catapult') return // out of boulders: parked at the wall
+        if (e.type === 'ladder') {
+          if (tt.ladder) return this.splitCrew(e)
+          // Put the ladder up against the wall, then climb.
+          e.raising += dt
+          if (e.raising >= LADDER.raise) this.raiseLadder(e, target)
+          return
+        }
+        if (STONE.includes(tt.type) && !def.siegeEngine) {
+          // Stone they can't hurt: wait here for a ladder.
+          e.stuck += dt
+          return
+        }
+        e.attacking = true
         e.walk += dt * 6
-        const thorns = STRUCTURES[world.tiles[target].type]?.thorns
+        const thorns = STRUCTURES[tt.type]?.thorns
         if (thorns) this.hurt(e, thorns * dt, false)
         this.damageStructure(target, e.dps * e.siege * dt)
         return
       }
     }
-    const dx = tx - e.x
-    const dy = ty - e.y
-    const len = Math.hypot(dx, dy) || 1
-    const speed = e.speed * world.slow(ci)
-    const step = speed * dt
-    e.heading = Math.atan2(dy, dx)
-    e.walk += dt * speed * 6
-    this.tryMove(e, (dx / len) * step, (dy / len) * step)
+    e.stuck = 0
+    this.walkToward(e, tx, ty, ci, dt)
     // Marching boots ruin crops.
     const under = world.idxAt(e.x, e.y)
     const trample = STRUCTURES[world.tiles[under].type]?.trample
     if (trample) this.damageStructure(under, trample * dt)
+  }
+
+  walkToward(e, tx, ty, ci, dt) {
+    const dx = tx - e.x
+    const dy = ty - e.y
+    const len = Math.hypot(dx, dy) || 1
+    const speed = e.speed * (this.world.tiles[ci].ladder ? LADDER.climb : this.world.slow(ci))
+    const step = Math.min(len, speed * dt)
+    e.heading = Math.atan2(dy, dx)
+    e.walk += dt * speed * 6
+    this.tryMove(e, (dx / len) * step, (dy / len) * step)
+  }
+
+  // ---- ladders --------------------------------------------------------------
+
+  raiseLadder(e, tile) {
+    const { world } = this
+    const [cx, cy] = this.center(tile)
+    // The ladder leans on the side of the wall the crew is standing on.
+    const ddx = cx - e.x
+    const ddy = cy - e.y
+    const dir = Math.abs(ddx) >= Math.abs(ddy) ? [Math.sign(ddx), 0] : [0, Math.sign(ddy)]
+    const l = { id: this.nextId++, tile, dir, hp: LADDER.hp, maxHp: LADDER.hp }
+    this.ladders.push(l)
+    world.tiles[tile].ladder = l
+    world.dirty = true
+    this.sfx('build', cx, cy)
+    this.splitCrew(e)
+  }
+
+  // The crew drops what they carry and carries on as soldiers.
+  splitCrew(e) {
+    e.gone = true
+    e.members.forEach((m, k) => {
+      const u = this.makeEnemy(m.type, e.x + (k - 0.5) * 0.25, e.y + (k - 0.5) * 0.25)
+      u.hp = Math.max(1, Math.round(m.hp * (e.hp / e.maxHp)))
+      u.maxHp = m.maxHp
+      u.z = e.z
+      this.enemies.push(u)
+    })
+  }
+
+  // Where a ladder stands: foot on the ground, top against the wall.
+  ladderGeom(l) {
+    const { world } = this
+    const [cx, cy] = this.center(l.tile)
+    const t = world.tiles[l.tile]
+    const half = t.type === 'wall' ? STRUCTURES.wall.thin / 2 : 0.5
+    const tx = cx - l.dir[0] * half
+    const ty = cy - l.dir[1] * half
+    const tz = world.surfaceAt(l.tile, tx, ty) + 0.12
+    const fx = tx - l.dir[0] * 0.5
+    const fy = ty - l.dir[1] * 0.5
+    return { fx, fy, fz: world.heightAt(fx, fy), tx, ty, tz }
+  }
+
+  // Archers on or beside a laddered wall shove the ladder off. Anyone on
+  // it falls back down outside.
+  updateLadders(dt) {
+    const { world } = this
+    for (const l of this.ladders) {
+      const t = world.tiles[l.tile]
+      if (!LADDER.reach.includes(t.type)) l.hp = 0 // the wall under it is gone
+      const [cx, cy] = this.center(l.tile)
+      for (const a of this.archers) {
+        if (!a.dead && Math.abs(a.x - cx) < 1.4 && Math.abs(a.y - cy) < 1.4) l.hp -= LADDER.push * dt
+      }
+      if (l.hp > 0) continue
+      l.down = true
+      if (t.ladder === l) t.ladder = null
+      world.dirty = true
+      const g = this.ladderGeom(l)
+      this.fallen.push({ x: g.fx - l.dir[0] * 0.4, y: g.fy - l.dir[1] * 0.4, dir: l.dir })
+      this.sfx('crumble', cx, cy)
+      for (const e of this.enemies) {
+        if (e.dead || e.gone || world.idxAt(e.x, e.y) !== l.tile) continue
+        e.x = g.fx - l.dir[0] * 0.2
+        e.y = g.fy - l.dir[1] * 0.2
+        this.hurt(e, 25)
+      }
+    }
+    this.ladders = this.ladders.filter((l) => !l.down)
+  }
+
+  // Soldiers stuck at the foot of a wall pick up a fallen ladder, or after
+  // a while lash a new one together, and become a ladder crew again.
+  regroup(dt) {
+    const waiting = this.enemies.filter((e) => !e.dead && !e.gone && e.stuck > 0.5 && (e.type === 'raider' || e.type === 'brute'))
+    if (waiting.length < 2) return
+    for (const e of waiting) {
+      if (e.gone) continue
+      const near = this.fallen.findIndex((f) => Math.hypot(f.x - e.x, f.y - e.y) < 2)
+      if (near < 0 && e.stuck < LADDER.regroup) continue
+      const mate = waiting.find((o) => o !== e && !o.gone && Math.hypot(o.x - e.x, o.y - e.y) < 2.5)
+      if (!mate) continue
+      if (near >= 0) this.fallen.splice(near, 1)
+      e.gone = mate.gone = true
+      const crew = this.makeEnemy('ladder', (e.x + mate.x) / 2, (e.y + mate.y) / 2)
+      crew.members = [e, mate].map((m) => ({ type: m.type, hp: m.hp, maxHp: m.maxHp }))
+      crew.hp = e.hp + mate.hp
+      crew.maxHp = e.maxHp + mate.maxHp
+      crew.z = e.z
+      this.enemies.push(crew)
+    }
+  }
+
+  // Inside the keep: climb the stairs, then fight the lord and his guard.
+  updateIntruders(dt) {
+    const k = this.world.keep
+    const up = this.intruders.filter((u) => (u.climb -= dt) <= 0)
+    if (up.length) {
+      const guard = (KEEP.guard / up.length) * dt
+      for (const u of up) {
+        k.hp = Math.max(0, k.hp - u.dps * dt)
+        u.hp -= guard
+        if (u.hp <= 0) {
+          u.dead = true
+          this.gold += u.gold
+          this.floaters.push({ x: k.x + 1.5, y: k.y + 1.5, z: KEEP.height + 0.3, text: `+${u.gold}`, t: 0 })
+          this.sfx('fall', k.x + 1.5, k.y + 1.5)
+        }
+      }
+      if (Math.random() < dt * 3) this.sfx('clash', k.x + 1.5, k.y + 1.5)
+    }
+    this.intruders = this.intruders.filter((u) => !u.dead)
+    k.inside = this.intruders.length
   }
 
   damageStructure(i, amount) {
@@ -1075,14 +1298,15 @@ export class Game {
   }
 
   pickTarget(x, y, range) {
-    const { world, flow } = this
+    const { world } = this
     let best = null
     let bestDist = Infinity
     for (const e of this.enemies) {
       if (e.dead) continue
       if ((e.x - x) ** 2 + (e.y - y) ** 2 > range * range) continue
       // Shoot whoever is closest to breaking in; siege engines first.
-      let d = flow.dist[world.idxAt(e.x, e.y)]
+      let d = this.flowFor(e).dist[world.idxAt(e.x, e.y)]
+      if (!isFinite(d)) d = 1e6
       if (e.type === 'catapult') d -= 20
       if (d < bestDist) {
         bestDist = d

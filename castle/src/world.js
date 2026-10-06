@@ -70,7 +70,19 @@ export class World {
     const ky = Math.floor(h / 2) - 1
     const cx = kx + 1
     const cy = ky + 1
-    this.keep = { hp: KEEP.hp, maxHp: KEEP.hp, x: kx, y: ky }
+    // The keep's door is in the middle of its south face; `step` is the
+    // tile outside it, where attackers gather to break in.
+    this.keep = {
+      hp: KEEP.hp,
+      maxHp: KEEP.hp,
+      x: kx,
+      y: ky,
+      door: this.idx(kx + 1, ky + KEEP.size - 1),
+      step: this.idx(kx + 1, ky + KEEP.size),
+      doorHp: KEEP.doorHp,
+      doorMax: KEEP.doorHp,
+      inside: 0,
+    }
     // Order matters: waves unlock gates in this order.
     this.spawns = [
       { x: 0, y: cy, name: 'west' },
@@ -85,6 +97,11 @@ export class World {
         t.type = 'keep'
         t.terrain = 'grass'
       }
+    // The doorstep stays clear so the door can always be reached.
+    const step = this.tiles[this.keep.step]
+    this.reserved[this.keep.step] = 1
+    step.terrain = 'grass'
+    if (step.type === 'tree' || step.type === 'rock') step.type = 'grass'
     for (const s of this.spawns) {
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) {
@@ -135,6 +152,57 @@ export class World {
   rockHeight(i) {
     return 0.35 + this.tiles[i].v * 0.3
   }
+  // Smooth ground height at any point. Each tile's centre sits at its own
+  // height; edges and corners average the tiles that meet there, so hills
+  // slope down into their neighbours instead of ending in a cliff. The
+  // tile is a fan of eight triangles around its centre.
+  heightAt(px, py) {
+    const x = Math.min(this.w - 1, Math.max(0, Math.floor(px)))
+    const y = Math.min(this.h - 1, Math.max(0, Math.floor(py)))
+    const u = Math.min(1, Math.max(0, px - x))
+    const v = Math.min(1, Math.max(0, py - y))
+    const sx = u < 0.5 ? -1 : 1
+    const sy = v < 0.5 ? -1 : 1
+    const a = Math.abs(u - 0.5) * 2 // toward the side edge
+    const b = Math.abs(v - 0.5) * 2 // toward the top/bottom edge
+    const c = this.groundAt(x, y)
+    const ex = (c + this.groundAt(x + sx, y)) / 2
+    const ey = (c + this.groundAt(x, y + sy)) / 2
+    const k = this.cornerHeight(x + (sx > 0 ? 1 : 0), y + (sy > 0 ? 1 : 0))
+    return a >= b ? c + a * (ex - c) + b * (k - ex) : c + b * (ey - c) + a * (k - ey)
+  }
+  // Ground height of tile (x, y); off the map counts as level ground.
+  groundAt(x, y) {
+    return this.inBounds(x, y) ? this.groundElev(this.idx(x, y)) : 0
+  }
+  // Height at grid corner (cx, cy): the average of the tiles around it.
+  cornerHeight(cx, cy) {
+    let sum = 0
+    let n = 0
+    for (const [x, y] of [[cx - 1, cy - 1], [cx, cy - 1], [cx - 1, cy], [cx, cy]]) {
+      if (!this.inBounds(x, y)) continue
+      sum += this.groundElev(this.idx(x, y))
+      n++
+    }
+    return n ? sum / n : 0
+  }
+  // Lowest ground under tile i, so upright blocks never float.
+  minGround(i) {
+    const x = i % this.w
+    const y = (i / this.w) | 0
+    let m = this.groundElev(i)
+    for (const [cx, cy] of [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]]) m = Math.min(m, this.cornerHeight(cx, cy))
+    return m
+  }
+  // Is anything about this tile's ground not level at zero?
+  sloped(i) {
+    const x = i % this.w
+    const y = (i / this.w) | 0
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) if (this.groundAt(x + dx, y + dy) !== 0) return true
+    return false
+  }
+
   // Where things stand. Only hills raise it: a rock under a wall is a
   // natural base the wall rises out of, not a plinth that lifts it.
   elev(i) {
@@ -169,6 +237,14 @@ export class World {
     const t = this.tiles[i]
     const h = t.type === 'keep' ? KEEP.height : STRUCTURES[t.type]?.height || 0
     return this.elev(i) + h
+  }
+  // Surface height at a point on tile i: walls follow the slope of the
+  // ground under them; towers, gates and the keep are level.
+  surfaceAt(i, px, py) {
+    const t = this.tiles[i]
+    if (t.type === 'wall' || t.type === 'thick' || t.type === 'palisade' || t.type === 'grass')
+      return this.heightAt(px, py) + (STRUCTURES[t.type]?.height || 0)
+    return this.surface(i)
   }
 
   generate(seed) {
@@ -335,6 +411,7 @@ export class World {
     t.type = t.rock ? 'rock' : 'grass'
     t.rock = false
     t.hoard = false
+    t.ladder = null
     t.plot = null
     t.paid = undefined
     t.hp = t.maxHp = 0

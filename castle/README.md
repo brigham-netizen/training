@@ -45,9 +45,21 @@ across devices; elsewhere they stay in the browser.
 **Upgrade** turns a palisade into stone (1) and stone into thick wall (3), keeping
 archers in place, and repairs damaged top-tier structures for the cost of the damage.
 
-Enemies: raiders, brutes, rams (heavy siege), bowmen (shoot your archers and
-swordsmen, from wave 3) and catapults (boulders from beyond archer range,
-from wave 5; after 10 boulders they roll forward into range).
+Enemies: raiders, brutes, ladder crews, rams (heavy siege), bowmen (shoot your
+archers and swordsmen, from wave 3) and catapults (boulders from beyond archer
+range, from wave 5; after 10 boulders they roll forward into range).
+
+Soldiers on foot can't damage stone (walls, thick walls, towers). They break
+gates, palisades, pikes and village buildings, or get over stone with ladders:
+two raiders carry each ladder, set it against a wall or thick wall, then climb
+and fight the archers on top. Archers on or beside that wall push the ladder
+off, throwing down anyone on it. Soldiers stuck at a wall pick up fallen
+ladders, or after a while lash a new one together. Only rams and catapults
+break stone.
+
+The goal is your lord. Attackers who reach the keep batter its door (south
+face), then climb inside to fight him and his guard (the Lord bar). Catapults
+no longer bombard the keep. The door and the lord recover between waves.
 
 Walls, gates, towers and pikes can be built over marsh (×2 cost), fords (×3),
 water (×4), trees (×2, cleared) and rocks (×3). A rock stays as a natural
@@ -58,7 +70,8 @@ Paint a stronger wall over a weaker one (stone over palisade, thick over
 either) to upgrade it in place for the difference in price.
 
 Terrain: hills (+1 archer range, slow to climb), marsh and fords (slow, no
-building), rivers and lakes (impassable). Every map is random; "New map" in
+building), rivers and lakes (impassable). Hills slope smoothly into the
+ground around them, and walls built across a slope follow it. Every map is random; "New map" in
 the menu rolls another.
 
 ## Controls
@@ -83,8 +96,9 @@ the menu rolls another.
 
 - `src/config.js`: every balance number (costs, HP, enemy stats, wave sizes)
 - `src/world.js`: grid, terrain generation, building/damage
-- `src/pathing.js`: flow field to the keep; walls cost extra by HP, so enemies
-  go around a gap if one exists and breach the weakest wall if not
+- `src/pathing.js`: flow fields to the keep door for foot soldiers, ladder
+  crews and siege engines; breakable things cost extra by HP, so enemies go
+  around a gap if one exists and breach the weakest point if not
 - `src/game.js`: simulation (waves, enemies, archers, arrows), no DOM
 - `src/camera.js`: one camera that animates between top-down and isometric
 - `src/render.js`: classic canvas renderer (painter's-order boxes, baked

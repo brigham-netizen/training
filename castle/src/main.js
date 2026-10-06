@@ -539,14 +539,15 @@ function modal(title, bodyHtml, actions) {
 }
 
 const HELP = `
-  <p>Raiders march on your keep from the red banners. Build a castle that holds.</p>
+  <p>Raiders march on your keep from the red banners to kill your lord. Build a castle that holds.</p>
   <ul>
-    <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can, and break through the weakest point if they can't.</li>
+    <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can. Soldiers on foot can't break stone: they hack through gates and wood, or climb over with ladders.</li>
     <li><b>Towers and archers</b>: drag to aim, release to place. Archers stand on walls, towers and the keep, and walk along connected stone to reach attackers. Height adds range: towers most, then thick walls and hills.</li>
     <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates; enemies have to break gates down. Send them out to kill catapults.</li>
     <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
     <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
-    <li><b>Enemies</b>: raiders and brutes hack at walls, rams smash them, bowmen shoot your troops, and catapults throw boulders from beyond archer range.</li>
+    <li><b>Enemies</b>: raiders and brutes hack at gates, palisades and pikes. Pairs of raiders carry <b>ladders</b> to stone walls and climb over; archers on or next to that wall push the ladder off. Rams smash gates and stone, bowmen shoot your troops, and catapults throw boulders from beyond archer range.</li>
+    <li><b>The keep and your lord</b>: attackers who reach the keep batter its door, then fight their way up to your lord. His guard fights back, but a crowd will kill him. Masons mend the door after every wave.</li>
     <li><b>Terrain</b>: rivers and lakes block the way except at fords; marsh and fords slow enemies down. Walls, gates, towers and pikes can be built across marsh, water, trees and rocks, but cost more there.</li>
     <li><b>Village</b>: after each wave the village stakes out plots where it feels safe. Tap a plot to build it; it pays gold after every wave.</li>
     <li><b>Remove</b>: full refund between waves, half during an attack.</li>
@@ -752,6 +753,8 @@ function handleEvents() {
       audio.setMusic('build')
       ui.tool = ui.buildTool
       ui.speed = 1
+    } else if (ev.type === 'doorBroken') {
+      banner('The keep door is down!<small>Attackers are climbing to your lord.</small>', 2600)
     } else if (ev.type === 'won') {
       audio.play('victory')
       audio.setMusic('build')
@@ -762,7 +765,7 @@ function handleEvents() {
     } else if (ev.type === 'lost') {
       audio.play('defeat')
       audio.setMusic('build')
-      modal('The keep has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>`, [
+      modal('Your lord has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>`, [
         { label: 'Look around' },
         { label: 'Start over', run: () => restart() },
         {
