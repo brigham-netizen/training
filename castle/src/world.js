@@ -135,8 +135,13 @@ export class World {
   rockHeight(i) {
     return 0.35 + this.tiles[i].v * 0.3
   }
-  // Where things stand: the ground, or the top of a rock a wall sits on.
+  // Where things stand. Only hills raise it: a rock under a wall is a
+  // natural base the wall rises out of, not a plinth that lifts it.
   elev(i) {
+    return this.groundElev(i)
+  }
+  // Top of the rock a wall is bedded into (or the ground if none).
+  baseElev(i) {
     const t = this.tiles[i]
     return this.groundElev(i) + (t.rock ? this.rockHeight(i) : 0)
   }
@@ -157,7 +162,7 @@ export class World {
   perch(i) {
     const t = this.tiles[i]
     const s = t.type === 'keep' ? KEEP.perch : STRUCTURES[t.type]?.perch || 0
-    return s + (TERRAIN[t.terrain].perch || 0) + (t.rock ? ROCK_FOUNDATION.perch : 0)
+    return s + (TERRAIN[t.terrain].perch || 0)
   }
   // Top surface height (where an archer stands).
   surface(i) {

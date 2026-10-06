@@ -50,8 +50,12 @@ swordsmen, from wave 3) and catapults (boulders from beyond archer range,
 from wave 5; after 10 boulders they roll forward into range).
 
 Walls, gates, towers and pikes can be built over marsh (×2 cost), fords (×3),
-water (×4), trees (×2, cleared) and rocks (×3). A rock stays as the wall's
-foundation: +25% HP, +0.5 archer range, and it's still there if the wall falls.
+water (×4), trees (×2, cleared) and rocks (×3). A rock stays as a natural
+base the wall rises out of (same top height; only hills lift walls): +25% HP,
+and it's still there if the wall falls.
+
+Paint a stronger wall over a weaker one (stone over palisade, thick over
+either) to upgrade it in place for the difference in price.
 
 Terrain: hills (+1 archer range, slow to climb), marsh and fords (slow, no
 building), rivers and lakes (impassable). Every map is random; "New map" in

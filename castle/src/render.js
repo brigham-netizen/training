@@ -264,11 +264,13 @@ export class Renderer {
     order.sort((a, b) => a.d - b.d)
     for (const { i, x, y } of order) {
       const ground = world.groundElev(i)
-      const base = world.elev(i)
       if (world.tiles[i].terrain === 'hill') this.drawHill(world, i, x, y, ground)
-      // A rock serving as a wall's foundation, drawn wider so the wall sits on it.
-      if (world.tiles[i].rock) this.drawFoundation(x, y, ground, base, world.tiles[i].v)
-      this.drawTile(world, i, x, y, base, game.time)
+      // A rock under a wall: the wall rises out of it but tops out at its
+      // usual height, so the rock just shortens the visible wall face.
+      this.footZ = world.baseElev(i)
+      if (world.tiles[i].rock) this.drawFoundation(x, y, ground, this.footZ, world.tiles[i].v)
+      this.drawTile(world, i, x, y, ground, game.time)
+      this.footZ = null
       const here = units.get(i)
       if (!here) continue
       here.sort((a, b) => cam.depth(a.u.x, a.u.y) - cam.depth(b.u.x, b.u.y))
@@ -468,7 +470,8 @@ export class Renderer {
     if (this.connects(world, x, y, 3)) parts.push([x, cy - hw, cx - hw, cy + hw])
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
-    for (const p of parts) this.box(p[0], p[1], p[2], p[3], z, z + h, scale(c.side, f), scale(c.top, f), 0, false)
+    const foot = this.footZ ?? z
+    for (const p of parts) this.box(p[0], p[1], p[2], p[3], foot, z + h, scale(c.side, f), scale(c.top, f), 0, false)
     if (!hoard) return
     // Wooden boards along both sides of the walkway.
     const rails = []
@@ -528,7 +531,7 @@ export class Renderer {
       case 'thick': {
         const h = STRUCTURES.thick.height
         const c = COLORS.thick
-        this.box(x, y, x + 1, y + 1, z, z + h, scale(c.side, f), scale(c.top, f), this.hiddenSides(world, x, y, h), false)
+        this.box(x, y, x + 1, y + 1, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f), this.hiddenSides(world, x, y, h), false)
         this.poly([x + 0.24, y + 0.24, z + h, x + 0.76, y + 0.24, z + h, x + 0.76, y + 0.76, z + h, x + 0.24, y + 0.76, z + h])
         this.ctx.fillStyle = rgb(c.walk, f)
         this.ctx.fill()
@@ -542,7 +545,7 @@ export class Renderer {
       case 'tower': {
         const h = STRUCTURES.tower.height
         const c = COLORS.tower
-        this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z, z + h, scale(c.side, f), scale(c.top, f))
+        this.box(x + 0.04, y + 0.04, x + 0.96, y + 0.96, this.footZ ?? z, z + h, scale(c.side, f), scale(c.top, f))
         if (t.hoard) this.edgeRails(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, 15)
         else this.merlons(x + 0.04, y + 0.04, x + 0.96, y + 0.96, z + h, c, 15)
         break
@@ -570,7 +573,7 @@ export class Renderer {
         break
       }
       case 'pikes':
-        this.drawPikes(world, x, y, z, f)
+        this.drawPikes(world, x, y, this.footZ ?? z, f)
         break
       case 'gate':
         this.drawGate(world, i, x, y, z, f)
@@ -680,22 +683,23 @@ export class Renderer {
     const side = scale(c.side, f)
     const top = scale(c.top, f)
     const alongX = this.axisX(world, x, y, (t) => WALL_FAMILY.has(t))
+    const fz = this.footZ ?? z
     // Pillars at each end, a lintel over the passage, and the door.
     const parts = alongX
       ? [
-          [x, y + 0.12, x + 0.3, y + 0.88, z, z + h, side, top],
-          [x + 0.7, y + 0.12, x + 1, y + 0.88, z, z + h, side, top],
+          [x, y + 0.12, x + 0.3, y + 0.88, fz, z + h, side, top],
+          [x + 0.7, y + 0.12, x + 1, y + 0.88, fz, z + h, side, top],
           [x + 0.3, y + 0.12, x + 0.7, y + 0.88, z + 0.85, z + h, side, top],
         ]
       : [
-          [x + 0.12, y, x + 0.88, y + 0.3, z, z + h, side, top],
-          [x + 0.12, y + 0.7, x + 0.88, y + 1, z, z + h, side, top],
+          [x + 0.12, y, x + 0.88, y + 0.3, fz, z + h, side, top],
+          [x + 0.12, y + 0.7, x + 0.88, y + 1, fz, z + h, side, top],
           [x + 0.12, y + 0.3, x + 0.88, y + 0.7, z + 0.85, z + h, side, top],
         ]
     if (!this.openGates?.has(i)) {
       parts.push(alongX
-        ? [x + 0.3, y + 0.44, x + 0.7, y + 0.56, z, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)]
-        : [x + 0.44, y + 0.3, x + 0.56, y + 0.7, z, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)])
+        ? [x + 0.3, y + 0.44, x + 0.7, y + 0.56, fz, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)]
+        : [x + 0.44, y + 0.3, x + 0.56, y + 0.7, fz, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)])
     }
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))

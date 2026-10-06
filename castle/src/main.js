@@ -184,7 +184,9 @@ function paint(i) {
     const cost = tool === 'hoard' ? HOARDING.cost : STRUCTURES[t.plot]?.cost
     if (!game.place(i, tool) && cost && game.gold < cost) warnGold()
   } else if (STRUCTURES[tool]) {
-    if (!game.place(i, tool) && game.world.canBuild(i, tool) && game.gold < game.costAt(i, tool)) warnGold()
+    const over = game.layOverCost(i, tool)
+    const need = over ?? (game.world.canBuild(i, tool) ? game.costAt(i, tool) : null)
+    if (!game.place(i, tool) && need !== null && game.gold < need) warnGold()
   }
   refreshHud()
 }
@@ -471,7 +473,8 @@ function toolHint() {
     default:
       if (game.world.isRough(ui.tool) && game.phase === 'build') {
         const r = ROUGH_COST
-        return `<b>${TOOL_LABELS[ui.tool]}</b> goes through anything, at a price<br>Marsh ×${r.marsh} · Ford ×${r.shallows} · Water ×${r.water} · Trees ×${r.tree} · Rocks ×${r.rock}`
+        const over = ui.tool === 'wall' || ui.tool === 'thick' ? '<br>Paint over a weaker wall to upgrade it for the difference' : ''
+        return `<b>${TOOL_LABELS[ui.tool]}</b> goes through anything, at a price<br>Marsh ×${r.marsh} · Ford ×${r.shallows} · Water ×${r.water} · Trees ×${r.tree} · Rocks ×${r.rock}${over}`
       }
       return ''
   }

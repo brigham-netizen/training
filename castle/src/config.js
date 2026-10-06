@@ -35,8 +35,8 @@ export const STRUCTURES = {
 // Walls, gates, towers and pikes can be built over rough ground at a price.
 // Multipliers stack: terrain times whatever has to be cleared first.
 export const ROUGH_COST = { hill: 1, marsh: 2, shallows: 3, water: 4, tree: 2, rock: 3 }
-// Fortifications built on a rock keep it as a foundation: tougher and higher.
-export const ROCK_FOUNDATION = { hp: 1.25, perch: 0.5 }
+// Fortifications built on a rock keep it as a natural base: a bit tougher.
+export const ROCK_FOUNDATION = { hp: 1.25 }
 
 // Wooden hoarding built on top of a stone wall, gate or tower.
 export const HOARDING = { label: 'Hoarding', cost: 3, cover: 0.2, splash: 0.5, on: ['wall', 'thick', 'gate', 'tower'] }

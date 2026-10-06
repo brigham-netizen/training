@@ -517,7 +517,7 @@ test('the end-of-wave event lists the plots the village just staked', () => {
   assert.ok(ev && Array.isArray(ev.plots) && ev.plots.length >= 1)
 })
 
-test('a wall built on a rock sits on it, is tougher and higher, and leaves the rock behind', () => {
+test('a wall built on a rock is bedded into it, tougher, and leaves the rock behind', () => {
   const game = new Game()
   clearMap(game)
   game.gold = 1000
@@ -532,8 +532,10 @@ test('a wall built on a rock sits on it, is tougher and higher, and leaves the r
   assert.equal(t.type, 'wall')
   assert.ok(t.rock, 'rock kept as foundation')
   assert.ok(t.maxHp > world.tiles[plain].maxHp)
-  assert.ok(world.surface(onRock) > world.surface(plain))
-  assert.ok(world.perch(onRock) > world.perch(plain))
+  // Same top height as any other wall: only hills lift walls.
+  assert.equal(world.surface(onRock), world.surface(plain))
+  assert.equal(world.perch(onRock), world.perch(plain))
+  assert.ok(world.baseElev(onRock) > world.elev(onRock), 'rock forms a base')
   // Upgrading keeps the foundation and its bonus.
   game.place(onRock, 'upgrade')
   assert.equal(t.type, 'thick')
@@ -545,4 +547,34 @@ test('a wall built on a rock sits on it, is tougher and higher, and leaves the r
   world.damage(onRock, 1e6)
   assert.equal(t.type, 'rock')
   assert.ok(world.isBlocked(onRock))
+})
+
+test('painting a stronger wall over a weaker one upgrades it for the difference', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const tiles = ring(game, 5)
+  const i = tiles[3]
+  game.place(i, 'palisade')
+  let before = game.gold
+  assert.ok(game.place(i, 'thick'), 'thick over palisade')
+  assert.equal(before - game.gold, STRUCTURES.thick.cost - STRUCTURES.palisade.cost)
+  assert.equal(game.world.tiles[i].type, 'thick')
+  // Weaker over stronger does nothing.
+  before = game.gold
+  assert.equal(game.place(i, 'wall'), false)
+  assert.equal(game.gold, before)
+  assert.equal(game.world.tiles[i].type, 'thick')
+  // Archers on a stone wall stay when it's thickened.
+  const j = tiles[5]
+  game.place(j, 'wall')
+  game.place(j, 'archer')
+  before = game.gold
+  assert.ok(game.place(j, 'thick'))
+  assert.equal(before - game.gold, STRUCTURES.thick.cost - STRUCTURES.wall.cost)
+  assert.equal(game.archers.filter((a) => a.tile === j).length, 1)
+  // Removing refunds the total paid.
+  before = game.gold
+  game.demolish(j)
+  assert.equal(game.gold - before, STRUCTURES.thick.cost)
 })

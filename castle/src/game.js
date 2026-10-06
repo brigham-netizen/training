@@ -12,6 +12,9 @@ const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 
 const SAVE_VERSION = 1
+// Wall strengths, weakest first. Painting a stronger one over a weaker one
+// upgrades it in place for the difference.
+const WALL_TIERS = ['palisade', 'wall', 'thick']
 
 export class Game {
   // `map` is a saved landscape (World.snapshotMap); otherwise `seed` generates one.
@@ -86,6 +89,8 @@ export class Game {
     if (type === 'upgrade') return this.upgradeInfo(i) !== null && this.gold >= this.upgradeInfo(i).cost
     if (type === 'hoard') return this.canHoard(i)
     if (type === 'settle') return this.canSettle(i)
+    const over = this.layOverCost(i, type)
+    if (over !== null) return this.gold >= over
     if (!this.world.canBuild(i, type)) return false
     if (this.gold < this.costAt(i, type)) return false
     if (STRUCTURES[type].solid && (this.enemyOnTile(i) || this.swordsmanOnTile(i))) return false
@@ -98,6 +103,7 @@ export class Game {
     if (type === 'upgrade') return this.upgrade(i)
     if (type === 'hoard') return this.hoard(i)
     if (type === 'settle') return this.settle(i)
+    if (this.layOverCost(i, type) !== null) return this.layOver(i, type)
     if (!this.canPlace(i, type)) return false
     const cost = this.costAt(i, type)
     this.gold -= cost
@@ -109,6 +115,34 @@ export class Game {
     }
     for (let k = 0; k < (STRUCTURES[type].freeArchers || 0); k++) this.addArcher(i)
     this.sfx('build', ...this.center(i))
+    return true
+  }
+
+  // Cost to turn the wall on tile i into a stronger `type`, or null if
+  // that isn't a lay-over (empty tile, not a wall, or not stronger).
+  layOverCost(i, type) {
+    const from = this.world.tiles[i].type
+    const a = WALL_TIERS.indexOf(from)
+    const b = WALL_TIERS.indexOf(type)
+    if (a < 0 || b <= a || this.phase === 'won' || this.phase === 'lost') return null
+    return Math.max(1, this.costAt(i, type) - this.costAt(i, from))
+  }
+
+  layOver(i, type) {
+    const cost = this.layOverCost(i, type)
+    if (cost === null || this.gold < cost) return false
+    this.gold -= cost
+    const t = this.world.tiles[i]
+    t.paid = (t.paid ?? this.costAt(i, t.type)) + cost
+    // Rebuilt in place: archers standing on it stay put.
+    t.type = type
+    t.hp = t.maxHp = this.world.maxHpFor(i, type)
+    t.weakened = false
+    if (!HOARDING.on.includes(type)) t.hoard = false
+    this.world.dirty = true
+    const [x, y] = this.center(i)
+    this.floaters.push({ x, y, z: this.world.surface(i), text: `-${cost}`, t: 0, color: 'cost' })
+    this.sfx('build', x, y)
     return true
   }
 
