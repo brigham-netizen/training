@@ -1,4 +1,4 @@
-import { STRUCTURES, KEEP, ARCHER, TERRAIN } from './config.js'
+import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN } from './config.js'
 
 const COLORS = {
   grass: [[76, 114, 53], [80, 119, 56], [73, 109, 51], [83, 123, 58]],
@@ -15,7 +15,13 @@ const COLORS = {
   tower: { side: [125, 118, 104], top: [170, 161, 143] },
   keep: { side: [112, 106, 95], top: [158, 149, 132] },
   palisade: { side: [128, 90, 52], top: [162, 120, 74] },
-  pike: [150, 112, 70],
+  pike: [140, 100, 60],
+  pikeTip: [226, 214, 186],
+  door: [112, 72, 40],
+  bowman: [74, 96, 52],
+  catapult: [128, 92, 54],
+  boulder: [128, 124, 116],
+  shield: [178, 146, 62],
   rock: { side: [110, 108, 102], top: [150, 147, 140] },
   trunk: [92, 60, 32],
   leaf: [44, 98, 42],
@@ -39,7 +45,7 @@ const SUN = (() => {
 
 const N4 = [[0, -1], [1, 0], [0, 1], [-1, 0]] // N E S W, matching box() skip bits
 
-const WALL_FAMILY = new Set(['palisade', 'wall', 'thick', 'tower', 'keep'])
+const WALL_FAMILY = new Set(['palisade', 'wall', 'thick', 'gate', 'tower', 'keep'])
 
 function rgb(c, f = 1, a = 1) {
   const r = Math.min(255, c[0] * f) | 0
@@ -232,6 +238,9 @@ export class Renderer {
     }
     for (const e of game.enemies) addUnit(e, 0)
     for (const a of game.archers) addUnit(a, 1)
+    for (const s of game.swordsmen) addUnit(s, 2)
+    // Gates swing open while your troops pass through.
+    this.openGates = new Set(game.swordsmen.map((s) => world.idxAt(s.x, s.y)))
 
     const order = []
     for (let i = 0; i < world.tiles.length; i++) {
@@ -252,12 +261,17 @@ export class Renderer {
       if (!here) continue
       here.sort((a, b) => cam.depth(a.u.x, a.u.y) - cam.depth(b.u.x, b.u.y))
       for (const { u, kind } of here) {
-        if (kind === 0) this.drawEnemy(u)
-        else this.drawArcher(u, game.time)
+        if (kind === 0) this.drawEnemy(u, game.time)
+        else if (kind === 1) this.drawArcher(u, game.time)
+        else this.drawSwordsman(u)
       }
     }
 
-    for (const p of game.projectiles) this.drawArrow(p)
+    for (const p of game.projectiles) {
+      if (p.kind === 'boulder') this.drawBoulder(p)
+      else this.drawArrow(p)
+    }
+    for (const fx of game.effects) this.drawEffect(fx)
     if (ui.preview) this.drawPreview(game, ui.preview)
     this.drawBars(game)
     this.drawFloaters(game)
@@ -501,17 +515,12 @@ export class Renderer {
         if (x === k.x + 1 && y === k.y + 1) this.flag(x + 0.5, y + 0.5, z + h, time)
         break
       }
-      case 'pikes': {
-        // Cheval de frise: crossed stakes on a beam.
-        const lw = Math.max(1.2, this.cam.k * 0.06)
-        const col = rgb(COLORS.pike, f)
-        this.line(x + 0.1, y + 0.5, z + 0.25, x + 0.9, y + 0.5, z + 0.25, rgb(COLORS.trunk), lw * 1.3)
-        for (const px of [0.2, 0.5, 0.8]) {
-          this.line(x + px, y + 0.15, z, x + px, y + 0.85, z + 0.6, col, lw)
-          this.line(x + px, y + 0.85, z, x + px, y + 0.15, z + 0.6, col, lw)
-        }
+      case 'pikes':
+        this.drawPikes(world, x, y, z, f)
         break
-      }
+      case 'gate':
+        this.drawGate(world, i, x, y, z, f)
+        break
       case 'trap': {
         this.ctx.beginPath()
         this.pathQuad(x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + 0.01)
@@ -544,6 +553,89 @@ export class Renderer {
     }
   }
 
+  // Which way a gate or pike line runs: along x unless it only joins N/S.
+  axisX(world, x, y, family) {
+    const joins = (s) => {
+      const nx = x + N4[s][0]
+      const ny = y + N4[s][1]
+      return world.inBounds(nx, ny) && family(world.tiles[world.idx(nx, ny)].type)
+    }
+    return joins(1) || joins(3) || !(joins(0) || joins(2))
+  }
+
+  // Cheval de frise: a log with sharpened stakes crossed through it,
+  // pointing out both sides. Neighbouring pikes line up into a barrier.
+  drawPikes(world, x, y, z, f) {
+    const alongX = this.axisX(world, x, y, (t) => t === 'pikes' || WALL_FAMILY.has(t))
+    const cx = x + 0.5
+    const cy = y + 0.5
+    const ax = alongX ? 1 : 0
+    const ay = alongX ? 0 : 1
+    const px = -ay
+    const py = ax
+    this.ellipse(cx, cy, z, 0.45, 'rgba(0,0,0,0.18)')
+    const lw = Math.max(1.5, this.cam.k * 0.075)
+    const wood = rgb(COLORS.pike, f)
+    const tip = rgb(COLORS.pikeTip, f)
+    const stakes = []
+    for (const t of [-0.33, 0, 0.33]) {
+      const bx = cx + ax * t
+      const by = cy + ay * t
+      for (const dir of [1, -1]) {
+        // From the ground on one side, up through the log, to a point on the other.
+        const x0 = bx - px * 0.36 * dir
+        const y0 = by - py * 0.36 * dir
+        const x1 = bx + px * 0.42 * dir
+        const y1 = by + py * 0.42 * dir
+        stakes.push([x0, y0, x1, y1])
+      }
+    }
+    const cam = this.cam
+    stakes.sort((a, b) => cam.depth(a[2], a[3]) - cam.depth(b[2], b[3]))
+    const log = () => this.orientedBox(cx, cy, 0.5, 0.06, alongX ? 0 : Math.PI / 2, z + 0.2, z + 0.32, COLORS.trunk, scale(COLORS.trunk, 1.2))
+    let drewLog = false
+    for (const [x0, y0, x1, y1] of stakes) {
+      // Draw the log once the stakes behind it are down.
+      if (!drewLog && cam.depth(x1, y1) > cam.depth(cx, cy)) {
+        log()
+        drewLog = true
+      }
+      const mx = x0 + (x1 - x0) * 0.72
+      const my = y0 + (y1 - y0) * 0.72
+      this.line(x0, y0, z, mx, my, z + 0.45, wood, lw)
+      this.line(mx, my, z + 0.45, x1, y1, z + 0.62, tip, lw * 0.8)
+    }
+    if (!drewLog) log()
+  }
+
+  drawGate(world, i, x, y, z, f) {
+    const h = STRUCTURES.gate.height
+    const c = COLORS.thick
+    const side = scale(c.side, f)
+    const top = scale(c.top, f)
+    const alongX = this.axisX(world, x, y, (t) => WALL_FAMILY.has(t))
+    // Pillars at each end, a lintel over the passage, and the door.
+    const parts = alongX
+      ? [
+          [x, y + 0.12, x + 0.3, y + 0.88, z, z + h, side, top],
+          [x + 0.7, y + 0.12, x + 1, y + 0.88, z, z + h, side, top],
+          [x + 0.3, y + 0.12, x + 0.7, y + 0.88, z + 0.85, z + h, side, top],
+        ]
+      : [
+          [x + 0.12, y, x + 0.88, y + 0.3, z, z + h, side, top],
+          [x + 0.12, y + 0.7, x + 0.88, y + 1, z, z + h, side, top],
+          [x + 0.12, y + 0.3, x + 0.88, y + 0.7, z + 0.85, z + h, side, top],
+        ]
+    if (!this.openGates?.has(i)) {
+      parts.push(alongX
+        ? [x + 0.3, y + 0.44, x + 0.7, y + 0.56, z, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)]
+        : [x + 0.44, y + 0.3, x + 0.56, y + 0.7, z, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)])
+    }
+    const cam = this.cam
+    parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
+    for (const p of parts) this.box(...p, 0, true)
+  }
+
   merlons(x0, y0, x1, y1, z, c, edges) {
     const s = 0.2
     const hgt = 0.22
@@ -571,9 +663,13 @@ export class Renderer {
     this.ctx.fill()
   }
 
-  drawEnemy(e) {
+  drawEnemy(e, time) {
     const { cam } = this
     const z = e.z
+    if (e.type === 'catapult') {
+      this.drawCatapult(e, time)
+      return
+    }
     this.ellipse(e.x, e.y, z, e.r * 1.1, 'rgba(0,0,0,0.3)')
     const hit = e.flash > 0
     if (e.type === 'ram') {
@@ -587,6 +683,12 @@ export class Renderer {
     const color = hit ? [255, 255, 255] : COLORS[e.type]
     const bob = Math.abs(Math.sin(e.walk)) * 0.06
     const big = e.type === 'brute'
+    if (e.type === 'bowman') {
+      this.bow(e.x, e.y, z, e.heading, '#3b2a18')
+      this.ball(e.x, e.y, z + 0.28 + bob, e.r, rgb(color), 'rgba(20,10,5,0.7)')
+      this.ball(e.x, e.y, z + 0.52 + bob, e.r * 0.6, rgb(scale(COLORS.bowman, 0.7)), 'rgba(20,10,5,0.6)')
+      return
+    }
     // Weapon: swings while attacking, points ahead while marching.
     const swing = e.attacking ? Math.sin(e.walk * 2) * 0.25 : 0
     const reach = big ? 0.42 : 0.34
@@ -605,14 +707,86 @@ export class Renderer {
     const walking = a.path.length > 0
     const bob = walking ? Math.abs(Math.sin(time * 12 + a.id)) * 0.05 : 0
     this.ellipse(a.x, a.y, z, 0.15, 'rgba(0,0,0,0.3)')
-    // Bow held out toward the target.
-    const bx = a.x + Math.cos(a.heading) * 0.2
-    const by = a.y + Math.sin(a.heading) * 0.2
-    const px = -Math.sin(a.heading) * 0.14
-    const py = Math.cos(a.heading) * 0.14
-    this.line(bx - px, by - py, z + 0.25, bx + px, by + py, z + 0.55, '#6b4423', Math.max(1.2, cam.k * 0.045))
-    this.ball(a.x, a.y, z + 0.25 + bob, 0.13, rgb(COLORS.player), '#162440')
+    this.bow(a.x, a.y, z, a.heading, '#6b4423')
+    this.ball(a.x, a.y, z + 0.25 + bob, 0.13, a.flash > 0 ? '#fff' : rgb(COLORS.player), '#162440')
     this.ball(a.x, a.y, z + 0.47 + bob, 0.08, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
+  }
+
+  // Bow held out toward the target.
+  bow(x, y, z, heading, color) {
+    const bx = x + Math.cos(heading) * 0.2
+    const by = y + Math.sin(heading) * 0.2
+    const px = -Math.sin(heading) * 0.14
+    const py = Math.cos(heading) * 0.14
+    this.line(bx - px, by - py, z + 0.25, bx + px, by + py, z + 0.55, color, Math.max(1.2, this.cam.k * 0.045))
+  }
+
+  drawSwordsman(s) {
+    const { cam } = this
+    const z = s.z
+    const bob = Math.abs(Math.sin(s.walk)) * 0.05
+    this.ellipse(s.x, s.y, z, s.r * 1.1, 'rgba(0,0,0,0.3)')
+    const swing = s.fighting ? Math.sin(s.walk * 2) * 0.5 : 0.3
+    const h = s.heading
+    // Sword on the right hand, shield on the left.
+    this.line(
+      s.x + Math.cos(h + 1.2) * 0.12, s.y + Math.sin(h + 1.2) * 0.12, z + 0.4 + bob,
+      s.x + Math.cos(h + swing) * 0.42, s.y + Math.sin(h + swing) * 0.42, z + 0.5 + bob,
+      '#dfe4ea', Math.max(1.5, cam.k * 0.06),
+    )
+    this.ball(s.x, s.y, z + 0.3 + bob, s.r, s.flash > 0 ? '#fff' : rgb(COLORS.player), '#162440')
+    this.ball(s.x + Math.cos(h - 1.1) * 0.17, s.y + Math.sin(h - 1.1) * 0.17, z + 0.32 + bob, 0.11, rgb(COLORS.shield), '#4a3a14')
+    this.ball(s.x, s.y, z + 0.6 + bob, s.r * 0.55, '#9aa3ad', '#2a2f36')
+  }
+
+  drawCatapult(e, time) {
+    const z = e.z
+    const wood = e.flash > 0 ? [255, 255, 255] : COLORS.catapult
+    const c = Math.cos(e.heading)
+    const s = Math.sin(e.heading)
+    this.ellipse(e.x, e.y, z, 0.5, 'rgba(0,0,0,0.3)')
+    for (const [l, w] of [[0.3, 0.27], [0.3, -0.27], [-0.3, 0.27], [-0.3, -0.27]])
+      this.ball(e.x + c * l - s * w, e.y + s * l + c * w, z + 0.1, 0.09, '#3a2a1a')
+    this.orientedBox(e.x, e.y, 0.42, 0.24, e.heading, z + 0.08, z + 0.26, wood, scale(wood, 1.2))
+    // A-frame holding the pivot.
+    const px = -s * 0.2
+    const py = c * 0.2
+    const pz = z + 0.7
+    const frame = rgb(scale(wood, 0.75))
+    const fw = Math.max(1.5, this.cam.k * 0.06)
+    this.line(e.x + px, e.y + py, z + 0.26, e.x, e.y, pz, frame, fw)
+    this.line(e.x - px, e.y - py, z + 0.26, e.x, e.y, pz, frame, fw)
+    // Throwing arm: snaps forward when fired, then winches back down.
+    const since = time - e.fired
+    const fwd = since < 0.18 ? since / 0.18 : Math.max(0, 1 - (since - 0.18) / 1.8)
+    const ang = -0.45 + fwd * 1.9 // radians up from pointing back and down
+    const len = 0.7
+    const ex = e.x - c * Math.cos(ang) * len
+    const ey = e.y - s * Math.cos(ang) * len
+    const ez = pz + Math.sin(ang) * len
+    this.line(e.x + c * 0.18, e.y + s * 0.18, pz - Math.sin(ang) * 0.18, ex, ey, ez, rgb(scale(wood, 0.9)), Math.max(2.5, this.cam.k * 0.09))
+    // Loaded bucket once the crew has winched it back.
+    this.ball(ex, ey, ez + 0.04, 0.11, since > 1.2 ? rgb(COLORS.boulder) : rgb(scale(wood, 0.6)), '#3a2a1a')
+  }
+
+  drawBoulder(p) {
+    const groundZ = p.sz + (p.tz - p.sz) * p.t
+    this.ellipse(p.x, p.y, Math.max(0, groundZ - 0.4), 0.14, 'rgba(0,0,0,0.25)')
+    this.ball(p.x, p.y, p.z, 0.14, rgb(COLORS.boulder), '#3d3a36')
+  }
+
+  drawEffect(fx) {
+    const { ctx, cam } = this
+    const k = fx.t / fx.life
+    for (let n = 0; n < 4; n++) {
+      const a = n * 1.7 + fx.x * 3
+      const r = fx.size * (0.2 + k * 0.6)
+      cam.P(fx.x + Math.cos(a) * r * 0.6, fx.y + Math.sin(a) * r * 0.6, fx.z + k * 0.6)
+      ctx.beginPath()
+      ctx.arc(cam.sx, cam.sy, Math.max(1, r * 0.55 * cam.k), 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(170,155,130,${0.5 * (1 - k)})`
+      ctx.fill()
+    }
   }
 
   drawArrow(p) {
@@ -621,7 +795,8 @@ export class Renderer {
     const dz = p.z - p.pz
     const l = Math.hypot(dx, dy, dz) || 1
     const len = 0.35
-    this.line(p.x - (dx / l) * len, p.y - (dy / l) * len, p.z - (dz / l) * len, p.x, p.y, p.z, '#f3e6c4', Math.max(1, this.cam.k * 0.04))
+    const color = p.hostile ? '#2a2018' : '#f3e6c4'
+    this.line(p.x - (dx / l) * len, p.y - (dy / l) * len, p.z - (dz / l) * len, p.x, p.y, p.z, color, Math.max(1, this.cam.k * 0.04))
   }
 
   rangeRing(x, y, z, r) {
@@ -646,7 +821,7 @@ export class Renderer {
     const { world } = game
     const x = pv.i % world.w
     const y = (pv.i / world.w) | 0
-    const z = pv.type === 'archer' ? world.surface(pv.i) + 0.02 : world.elev(pv.i) + 0.02
+    const z = pv.type === 'archer' || pv.type === 'upgrade' || pv.type === 'demolish' ? world.surface(pv.i) + 0.02 : world.elev(pv.i) + 0.02
     ctx.beginPath()
     this.pathQuad(x, y, x + 1, y + 1, z)
     ctx.fillStyle = pv.ok ? 'rgba(120,230,120,0.35)' : 'rgba(240,80,60,0.35)'
@@ -658,6 +833,7 @@ export class Renderer {
     let r = 0
     if (pv.type === 'tower') r = ARCHER.range + STRUCTURES.tower.perch + (TERRAIN[world.tiles[pv.i].terrain].perch || 0)
     else if (pv.type === 'archer' && world.isRampart(pv.i)) r = game.range(pv.i)
+    else if (pv.type === 'swordsman') r = SWORDSMAN.guard
     if (r) this.rangeRing(x + 0.5, y + 0.5, world.elev(pv.i), r)
   }
 
@@ -682,6 +858,7 @@ export class Renderer {
       }
     }
     for (const e of game.enemies) this.hpBar(e.x, e.y, e.z + 1.0, e.hp / e.maxHp, 0.5)
+    for (const u of [...game.archers, ...game.swordsmen]) this.hpBar(u.x, u.y, u.z + 0.95, u.hp / u.maxHp, 0.4)
   }
 
   drawFloaters(game) {
@@ -690,7 +867,7 @@ export class Renderer {
     ctx.font = `700 ${Math.round(Math.max(11, cam.k * 0.4))}px system-ui, sans-serif`
     for (const f of game.floaters) {
       cam.P(f.x, f.y, (f.z || 0) + 1 + f.t * 1.2)
-      ctx.fillStyle = `rgba(255,214,90,${1 - f.t / 1.2})`
+      ctx.fillStyle = f.color === 'cost' ? `rgba(255,160,120,${1 - f.t / 1.2})` : `rgba(255,214,90,${1 - f.t / 1.2})`
       ctx.fillText(f.text, cam.sx, cam.sy)
     }
   }
@@ -698,6 +875,7 @@ export class Renderer {
 
 function blockHeight(t) {
   if (t.type === 'thick') return STRUCTURES.thick.height
+  if (t.type === 'gate') return STRUCTURES.gate.height
   if (t.type === 'keep') return KEEP.height
   return 0
 }

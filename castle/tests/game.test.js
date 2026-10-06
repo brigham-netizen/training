@@ -210,3 +210,102 @@ test('pikes hurt the enemies attacking them', () => {
   assert.ok(hurt)
   assert.ok(world)
 })
+
+// ---- stage 3 ----------------------------------------------------------------
+
+function step(game, seconds) {
+  for (let t = 0; t < seconds; t += 1 / 60) game.update(1 / 60)
+}
+
+// Put the game in an attack with no more spawns coming.
+function skirmish(game) {
+  game.phase = 'attack'
+  game.spawnQueue = [{ t: 1e9 }]
+}
+
+test('swordsmen walk out through a gate; enemies must break it', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const { world } = game
+  const tiles = ring(game, 3)
+  const gate = tiles[3] // middle of the north side
+  for (const i of tiles) game.place(i, i === gate ? 'gate' : 'wall')
+  assert.equal(world.tiles[gate].type, 'gate')
+  assert.ok(world.isSolid(gate), 'enemies see the gate as solid')
+  // A swordsman inside can path out through the gate.
+  const inside = world.idx(world.keep.x + 1, world.keep.y - 1)
+  const outside = world.idx(world.keep.x + 1, world.keep.y - 5)
+  const path = game.troopPath(inside, outside)
+  assert.ok(path && path.includes(gate))
+})
+
+test('swordsmen charge enemies near their post and kill them', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  game.archers = []
+  const { world } = game
+  const post = world.idx(world.keep.x - 3, world.keep.y + 1)
+  assert.ok(game.place(post, 'swordsman'))
+  skirmish(game)
+  game.spawnEnemy({ type: 'raider', spawn: { x: world.keep.x - 6, y: world.keep.y + 1 }, hpMult: 1 })
+  step(game, 8)
+  assert.equal(game.enemies.length, 0, 'raider killed')
+  assert.equal(game.swordsmen.length, 1)
+})
+
+test('upgrades step palisade to stone to thick and keep archers in place', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const i = ring(game, 4)[3]
+  game.place(i, 'palisade')
+  let gold = game.gold
+  assert.ok(game.place(i, 'upgrade'))
+  assert.equal(game.world.tiles[i].type, 'wall')
+  assert.equal(gold - game.gold, STRUCTURES.wall.cost - STRUCTURES.palisade.cost)
+  game.place(i, 'archer')
+  gold = game.gold
+  assert.ok(game.place(i, 'upgrade'))
+  assert.equal(game.world.tiles[i].type, 'thick')
+  assert.equal(gold - game.gold, STRUCTURES.thick.cost - STRUCTURES.wall.cost)
+  assert.equal(game.archers.filter((a) => a.tile === i).length, 1)
+  // Thick walls can't go higher, but a damaged one can be repaired.
+  assert.equal(game.upgradeInfo(i), null)
+  game.world.tiles[i].hp = 100
+  assert.equal(game.upgradeInfo(i).kind, 'repair')
+  assert.ok(game.place(i, 'upgrade'))
+  assert.equal(game.world.tiles[i].hp, STRUCTURES.thick.hp)
+})
+
+test('enemy bowmen shoot archers on the walls', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  skirmish(game)
+  const a = game.archers[0]
+  game.spawnEnemy({ type: 'bowman', spawn: { x: Math.floor(a.x) - 3, y: Math.floor(a.y) - 1 }, hpMult: 100 })
+  game.enemies[0].speed = 0
+  step(game, 5)
+  assert.ok(a.hp < a.maxHp || a.dead)
+  assert.ok(world)
+})
+
+test('catapults bombard towers from beyond archer range', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  game.archers = []
+  const { world } = game
+  const tower = world.idx(world.keep.x - 4, world.keep.y + 1)
+  game.place(tower, 'tower')
+  skirmish(game)
+  game.spawnEnemy({ type: 'catapult', spawn: { x: world.keep.x - 10, y: world.keep.y + 1 }, hpMult: 1 })
+  const cat = game.enemies[0]
+  step(game, 15)
+  const t = world.tiles[tower]
+  assert.ok(t.type !== 'tower' || t.hp < t.maxHp, 'tower took boulder damage')
+  // It stopped at range rather than walking up to the wall.
+  assert.ok(Math.hypot(cat.x - (world.keep.x - 3.5), cat.y - (world.keep.y + 1.5)) > 4)
+})

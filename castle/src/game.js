@@ -1,12 +1,12 @@
 import { World, mulberry32 } from './world.js'
 import { computeFlow } from './pathing.js'
 import {
-  START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, ARROW_SPEED,
+  START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
   waveComposition, waveBonus,
 } from './config.js'
 
 const SPAWN_INTERVAL = 0.75
-const ARCHER_THINK = 0.5
+const THINK = 0.4 // seconds between unit decisions
 const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 
@@ -24,13 +24,16 @@ export class Game {
     this.phase = 'build' // build | attack | won | lost
     this.enemies = []
     this.archers = []
+    this.swordsmen = []
     this.projectiles = []
+    this.effects = [] // dust puffs and the like, purely visual
     this.floaters = []
     this.spawnQueue = []
     this.waveTime = 0
     this.time = 0
     this.nextId = 1
     this.events = [] // drained by the UI
+    this.sounds = [] // drained by the UI each frame
     this.rnd = mulberry32(seed ^ 0x9e3779b9)
     this.flow = computeFlow(this.world)
     this.world.dirty = false
@@ -45,12 +48,20 @@ export class Game {
     this.events.push({ type, ...data })
   }
 
+  sfx(name, x, y) {
+    if (this.sounds.length < 48) this.sounds.push({ name, x, y })
+  }
+
   get nextWave() {
     return this.wave + 1
   }
 
   activeSpawns(n = this.nextWave) {
     return this.world.spawns.slice(0, waveComposition(n).spawnCount)
+  }
+
+  center(i) {
+    return [(i % this.world.w) + 0.5, ((i / this.world.w) | 0) + 0.5]
   }
 
   // ---- building -----------------------------------------------------------
@@ -66,18 +77,61 @@ export class Game {
   canPlace(i, type) {
     if (this.phase === 'won' || this.phase === 'lost') return false
     if (type === 'archer') return this.canPlaceArcher(i)
+    if (type === 'swordsman') return this.canPlaceSwordsman(i)
+    if (type === 'upgrade') return this.upgradeInfo(i) !== null && this.gold >= this.upgradeInfo(i).cost
     if (!this.world.canBuild(i, type)) return false
     if (this.gold < STRUCTURES[type].cost) return false
-    if (STRUCTURES[type].solid && this.enemyOnTile(i)) return false
+    if (STRUCTURES[type].solid && (this.enemyOnTile(i) || this.swordsmanOnTile(i))) return false
     return true
   }
 
   place(i, type) {
     if (type === 'archer') return this.placeArcher(i)
+    if (type === 'swordsman') return this.placeSwordsman(i)
+    if (type === 'upgrade') return this.upgrade(i)
     if (!this.canPlace(i, type)) return false
     this.gold -= STRUCTURES[type].cost
     this.world.build(i, type)
     for (let k = 0; k < (STRUCTURES[type].freeArchers || 0); k++) this.addArcher(i)
+    this.sfx('build', ...this.center(i))
+    return true
+  }
+
+  // What the Upgrade tool would do here: upgrade to the next tier, or
+  // repair a damaged structure that's already at the top tier.
+  upgradeInfo(i) {
+    const t = this.world.tiles[i]
+    const def = STRUCTURES[t.type]
+    if (!def || !def.hp) return null
+    if (def.upgrade) {
+      const to = STRUCTURES[def.upgrade]
+      return { kind: 'upgrade', to: def.upgrade, cost: Math.max(1, to.cost - def.cost) }
+    }
+    if (t.hp < t.maxHp) {
+      const missing = 1 - t.hp / t.maxHp
+      return { kind: 'repair', cost: Math.max(1, Math.ceil(def.cost * missing)) }
+    }
+    return null
+  }
+
+  upgrade(i) {
+    const info = this.upgradeInfo(i)
+    if (!info || this.gold < info.cost || this.phase === 'won' || this.phase === 'lost') return false
+    this.gold -= info.cost
+    const t = this.world.tiles[i]
+    if (info.kind === 'upgrade') {
+      // Rebuild in place; archers standing on it stay put.
+      t.type = info.to
+      t.hp = t.maxHp = STRUCTURES[info.to].hp
+      t.weakened = false
+      this.world.dirty = true
+    } else {
+      t.hp = t.maxHp
+      t.weakened = false
+      this.world.dirty = true
+    }
+    this.floaters.push({ x: (i % this.world.w) + 0.5, y: ((i / this.world.w) | 0) + 0.5, z: this.world.surface(i), text: `-${info.cost}`, t: 0, color: 'cost' })
+    this.sfx('build', ...this.center(i))
     return true
   }
 
@@ -126,6 +180,7 @@ export class Game {
     if (!this.canPlaceArcher(i)) return false
     this.gold -= ARCHER.cost
     this.addArcher(i)
+    this.sfx('recruit', ...this.center(i))
     return true
   }
 
@@ -134,9 +189,12 @@ export class Game {
     const { world } = this
     const a = {
       id: this.nextId++,
+      kind: 'archer',
       tile: i,
       post: i,
       path: [],
+      hp: ARCHER.hp,
+      maxHp: ARCHER.hp,
       // Small personal offset so archers sharing a tower don't overlap.
       ox: (this.rnd() - 0.5) * 0.3,
       oy: (this.rnd() - 0.5) * 0.3,
@@ -144,8 +202,9 @@ export class Game {
       y: ((i / world.w) | 0) + 0.5,
       z: world.surface(i),
       cd: 0,
-      think: this.rnd() * ARCHER_THINK,
+      think: this.rnd() * THINK,
       heading: Math.PI / 2,
+      flash: 0,
     }
     a.x += a.ox
     a.y += a.oy
@@ -179,9 +238,7 @@ export class Game {
   }
 
   enemyInRange(i) {
-    const { world } = this
-    const x = (i % world.w) + 0.5
-    const y = ((i / world.w) | 0) + 0.5
+    const [x, y] = this.center(i)
     const r2 = this.range(i) ** 2
     return this.enemies.some((e) => !e.dead && (e.x - x) ** 2 + (e.y - y) ** 2 <= r2)
   }
@@ -222,6 +279,7 @@ export class Game {
     }
     a.cd -= dt
     a.think -= dt
+    a.flash = Math.max(0, a.flash - dt)
 
     if (a.path.length) {
       const next = a.path[0]
@@ -256,12 +314,13 @@ export class Game {
       a.heading = Math.atan2(target.y - a.y, target.x - a.x)
       if (a.cd <= 0) {
         a.cd = 1 / ARCHER.fireRate
-        this.shoot(a.x, a.y, a.z + 0.5, target, ARCHER.damage)
+        this.shoot(a.x, a.y, a.z + 0.5, target, ARCHER.damage, false)
+        this.sfx('bow', a.x, a.y)
       }
       return
     }
     if (a.think > 0) return
-    a.think = ARCHER_THINK
+    a.think = THINK
     if (this.phase === 'attack') {
       // Nothing to shoot: walk the walls to the nearest spot that has a target.
       const path = this.rampartPath(a, (i) => this.hasRoom(i, a) && this.enemyInRange(i))
@@ -273,6 +332,150 @@ export class Game {
     }
   }
 
+  // ---- swordsmen ------------------------------------------------------------
+
+  // Your troops walk on open ground and through gates.
+  troopPassable(i) {
+    const t = this.world.tiles[i].type
+    return this.world.isWalkable(i) || t === 'gate'
+  }
+
+  swordsmanOnTile(i) {
+    const x = i % this.world.w
+    const y = (i / this.world.w) | 0
+    return this.swordsmen.some((s) => s.x > x && s.x < x + 1 && s.y > y && s.y < y + 1)
+  }
+
+  canPlaceSwordsman(i) {
+    return (
+      this.phase !== 'won' && this.phase !== 'lost' &&
+      this.gold >= SWORDSMAN.cost && this.world.isWalkable(i) && !this.world.reserved[i]
+    )
+  }
+
+  placeSwordsman(i) {
+    if (!this.canPlaceSwordsman(i)) return false
+    this.gold -= SWORDSMAN.cost
+    const [x, y] = this.center(i)
+    this.swordsmen.push({
+      id: this.nextId++,
+      kind: 'swordsman',
+      post: i,
+      x: x + (this.rnd() - 0.5) * 0.3,
+      y: y + (this.rnd() - 0.5) * 0.3,
+      z: this.world.elev(i),
+      hp: SWORDSMAN.hp,
+      maxHp: SWORDSMAN.hp,
+      r: SWORDSMAN.r,
+      path: [],
+      target: null,
+      think: 0,
+      heading: Math.PI / 2,
+      walk: 0,
+      fighting: false,
+      flash: 0,
+    })
+    this.sfx('recruit', x, y)
+    return true
+  }
+
+  // Shortest 4-way path for troops from tile a to tile b (excluding a).
+  troopPath(a, b, limit = 500) {
+    if (a === b) return []
+    const { world } = this
+    const prev = new Map([[a, -1]])
+    const queue = [a]
+    for (let q = 0; q < queue.length && q < limit; q++) {
+      const u = queue[q]
+      if (u === b) {
+        const path = []
+        for (let v = u; v !== a; v = prev.get(v)) path.push(v)
+        return path.reverse()
+      }
+      const ux = u % world.w
+      const uy = (u / world.w) | 0
+      for (const [dx, dy] of N4) {
+        const nx = ux + dx
+        const ny = uy + dy
+        if (!world.inBounds(nx, ny)) continue
+        const v = world.idx(nx, ny)
+        if (prev.has(v) || !this.troopPassable(v)) continue
+        prev.set(v, u)
+        queue.push(v)
+      }
+    }
+    return null
+  }
+
+  updateSwordsman(s, dt) {
+    const { world } = this
+    s.flash = Math.max(0, s.flash - dt)
+    s.think -= dt
+    const here = world.idxAt(s.x, s.y)
+    s.z += (world.elev(here) - s.z) * Math.min(1, dt * 8)
+    const [px, py] = this.center(s.post)
+
+    if (s.think <= 0) {
+      s.think = THINK
+      s.target = null
+      if (this.phase === 'attack') {
+        // Charge the closest enemy that has come within guard range of the post.
+        let best = Infinity
+        for (const e of this.enemies) {
+          if (e.dead || Math.hypot(e.x - px, e.y - py) > SWORDSMAN.guard) continue
+          const d = Math.hypot(e.x - s.x, e.y - s.y)
+          if (d < best) {
+            best = d
+            s.target = e
+          }
+        }
+      }
+      let path = s.target ? this.troopPath(here, world.idxAt(s.target.x, s.target.y)) : null
+      if (!path) {
+        // Unreachable (say, outside a wall with no gate): hold the post.
+        s.target = null
+        path = this.troopPath(here, s.post)
+      }
+      s.path = path || []
+    }
+
+    const e = s.target
+    if (e && !e.dead) {
+      const d = Math.hypot(e.x - s.x, e.y - s.y)
+      if (d <= s.r + e.r + 0.3) {
+        s.fighting = true
+        s.heading = Math.atan2(e.y - s.y, e.x - s.x)
+        s.walk += dt * 8
+        this.hurt(e, SWORDSMAN.dps * dt, false)
+        if (Math.random() < dt * 2) this.sfx('clash', s.x, s.y)
+        return
+      }
+    }
+    s.fighting = false
+
+    // Walk the path tile by tile, then straight at the target or post.
+    let tx
+    let ty
+    if (s.path.length) {
+      ;[tx, ty] = this.center(s.path[0])
+      if (Math.hypot(tx - s.x, ty - s.y) < 0.3) s.path.shift()
+    } else if (e && !e.dead) {
+      tx = e.x
+      ty = e.y
+    } else {
+      tx = px
+      ty = py
+    }
+    const dx = tx - s.x
+    const dy = ty - s.y
+    const d = Math.hypot(dx, dy)
+    if (d < 0.05) return
+    const step = Math.min(d, SWORDSMAN.speed * world.slow(here) * dt)
+    s.heading = Math.atan2(dy, dx)
+    s.walk += step * 6
+    this.tryMove(s, (dx / d) * step, (dy / d) * step)
+  }
+
   // ---- waves --------------------------------------------------------------
 
   startWave() {
@@ -281,12 +484,17 @@ export class Game {
     const comp = waveComposition(n)
     const spawns = this.activeSpawns(n)
     const list = []
+    const sprinkle = (type, count, from = 0) => {
+      for (let k = 0; k < count; k++)
+        list.splice(from + Math.floor(this.rnd() * (list.length - from + 1)), 0, type)
+    }
     for (let k = 0; k < comp.raider; k++) list.push('raider')
-    for (let k = 0; k < comp.brute; k++) list.splice(Math.floor(this.rnd() * (list.length + 1)), 0, 'brute')
-    // Rams arrive in the back half so the wall has already been tested.
+    sprinkle('brute', comp.brute)
+    sprinkle('bowman', comp.bowman)
+    // Siege engines arrive in the back half so the wall has been tested.
     const half = Math.floor(list.length / 2)
-    for (let k = 0; k < comp.ram; k++)
-      list.splice(half + Math.floor(this.rnd() * (list.length - half + 1)), 0, 'ram')
+    sprinkle('ram', comp.ram, half)
+    sprinkle('catapult', comp.catapult, half)
 
     // Each gate spawns its share in parallel.
     this.spawnQueue = list.map((type, k) => ({
@@ -319,6 +527,10 @@ export class Game {
       r: def.r,
       heading: 0,
       attacking: false,
+      shooting: false,
+      fired: -9, // time of last shot (for the catapult arm animation)
+      cd: 0.5 + this.rnd(),
+      ammo: def.ammo || 0,
       walk: this.rnd() * 10,
       flash: 0,
       dead: false,
@@ -331,10 +543,13 @@ export class Game {
     this.time += dt
     for (const f of this.floaters) f.t += dt
     this.floaters = this.floaters.filter((f) => f.t < 1.2)
+    for (const fx of this.effects) fx.t += dt
+    this.effects = this.effects.filter((fx) => fx.t < fx.life)
     if (this.world.dirty) this.repath()
 
     for (const a of this.archers) this.updateArcher(a, dt)
-    this.archers = this.archers.filter((a) => !a.dead)
+    for (const s of this.swordsmen) this.updateSwordsman(s, dt)
+    this.reapDefenders()
     if (this.phase !== 'attack') return
 
     this.waveTime += dt
@@ -345,6 +560,7 @@ export class Game {
     this.separate()
     this.updateTraps(dt)
     this.updateProjectiles(dt)
+    this.reapDefenders()
 
     for (const e of this.enemies) {
       if (e.dead) {
@@ -362,6 +578,16 @@ export class Game {
     if (!this.spawnQueue.length && !this.enemies.length) this.endWave()
   }
 
+  reapDefenders() {
+    for (const list of [this.archers, this.swordsmen])
+      for (const u of list) if (u.dead || u.hp <= 0) {
+        u.dead = true
+        this.sfx('fall', u.x, u.y)
+      }
+    this.archers = this.archers.filter((a) => !a.dead)
+    this.swordsmen = this.swordsmen.filter((s) => !s.dead)
+  }
+
   repath() {
     this.flow = computeFlow(this.world)
     this.world.dirty = false
@@ -370,6 +596,8 @@ export class Game {
   endWave() {
     this.wave++
     this.projectiles = []
+    // Survivors patch themselves up between waves.
+    for (const u of [...this.archers, ...this.swordsmen]) u.hp = u.maxHp
     if (this.wave >= TOTAL_WAVES) {
       this.phase = 'won'
       this.emit('won', { wave: this.wave })
@@ -383,52 +611,143 @@ export class Game {
     this.emit('waveEnd', { wave: this.wave, bonus })
   }
 
-  blockedAt(x, y, r) {
+  blockedAt(x, y, r, troop = false) {
     const { world } = this
-    if (x - r < 0 || y - r < 0 || x + r > world.w || y + r > world.h) return true
+    // >= so a unit flush with the far edge never reads past the grid.
+    if (x - r < 0 || y - r < 0 || x + r >= world.w || y + r >= world.h) return true
     const x0 = Math.floor(x - r)
     const x1 = Math.floor(x + r)
     const y0 = Math.floor(y - r)
     const y1 = Math.floor(y + r)
     for (let ty = y0; ty <= y1; ty++)
-      for (let tx = x0; tx <= x1; tx++) if (!world.isWalkable(world.idx(tx, ty))) return true
+      for (let tx = x0; tx <= x1; tx++) {
+        const i = world.idx(tx, ty)
+        if (troop ? !this.troopPassable(i) : !world.isWalkable(i)) return true
+      }
     return false
   }
 
-  // Move with axis-separated sliding so enemies glide along walls.
-  tryMove(e, dx, dy) {
-    const cr = e.r * 0.8
-    if (dx && !this.blockedAt(e.x + dx, e.y, cr)) e.x += dx
-    if (dy && !this.blockedAt(e.x, e.y + dy, cr)) e.y += dy
+  // Move with axis-separated sliding so units glide along walls.
+  tryMove(u, dx, dy) {
+    const cr = u.r * 0.8
+    const troop = u.kind === 'swordsman'
+    if (dx && !this.blockedAt(u.x + dx, u.y, cr, troop)) u.x += dx
+    if (dy && !this.blockedAt(u.x, u.y + dy, cr, troop)) u.y += dy
+  }
+
+  nearestDefender(x, y, range) {
+    let best = null
+    let bestD = range
+    for (const list of [this.archers, this.swordsmen])
+      for (const u of list) {
+        if (u.dead) continue
+        const d = Math.hypot(u.x - x, u.y - y)
+        if (d <= bestD) {
+          bestD = d
+          best = u
+        }
+      }
+    return best
+  }
+
+  // Catapults go for towers first, then any other structure, then the keep.
+  catapultTarget(e, range) {
+    const { world } = this
+    let best = -1
+    let bestScore = Infinity
+    const x0 = Math.max(0, Math.floor(e.x - range))
+    const x1 = Math.min(world.w - 1, Math.floor(e.x + range))
+    const y0 = Math.max(0, Math.floor(e.y - range))
+    const y1 = Math.min(world.h - 1, Math.floor(e.y + range))
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++) {
+        const i = world.idx(x, y)
+        if (!world.isSolid(i)) continue
+        const d = Math.hypot(x + 0.5 - e.x, y + 0.5 - e.y)
+        if (d > range) continue
+        const type = world.tiles[i].type
+        const score = d + (type === 'tower' ? -4 : type === 'keep' ? 3 : 0)
+        if (score < bestScore) {
+          bestScore = score
+          best = i
+        }
+      }
+    return best
   }
 
   updateEnemy(e, dt) {
     const { world, flow } = this
+    const def = ENEMIES[e.type]
     e.flash = Math.max(0, e.flash - dt)
+    e.cd -= dt
     const ci = world.idxAt(e.x, e.y)
     e.z += (world.elev(ci) - e.z) * Math.min(1, dt * 8)
+    e.attacking = false
+    e.shooting = false
+
+    if (e.type === 'bowman') {
+      const t = this.nearestDefender(e.x, e.y, def.range)
+      if (t) {
+        e.shooting = true
+        e.heading = Math.atan2(t.y - e.y, t.x - e.x)
+        if (e.cd <= 0) {
+          e.cd = 1 / def.rate
+          this.shoot(e.x, e.y, e.z + 0.5, t, def.shot, true)
+          this.sfx('bow', e.x, e.y)
+        }
+        return
+      }
+    } else if (e.type === 'catapult' && e.ammo > 0) {
+      const ti = this.catapultTarget(e, def.range)
+      if (ti >= 0) {
+        e.shooting = true
+        const [tx, ty] = this.center(ti)
+        e.heading = Math.atan2(ty - e.y, tx - e.x)
+        if (e.cd <= 0) {
+          e.cd = 1 / def.rate
+          e.fired = this.time
+          e.ammo--
+          this.lob(e, ti, def)
+          this.sfx('launch', e.x, e.y)
+        }
+        return
+      }
+    }
+
+    // Melee enemies stop to fight swordsmen in their way.
+    if (!def.noMelee) {
+      for (const s of this.swordsmen) {
+        if (s.dead || Math.hypot(s.x - e.x, s.y - e.y) > e.r + s.r + 0.3) continue
+        e.attacking = true
+        e.heading = Math.atan2(s.y - e.y, s.x - e.x)
+        e.walk += dt * 6
+        s.hp -= e.dps * dt
+        s.flash = 0.1
+        return
+      }
+    }
+
     let target = flow.next[ci]
     if (target < 0) {
       // Off the flow field (should be rare): head straight for the keep.
       const k = world.keep
       target = world.idxAt(k.x + 1.5, k.y + 1.5)
     }
-    const tx = (target % world.w) + 0.5
-    const ty = ((target / world.w) | 0) + 0.5
+    const [tx, ty] = this.center(target)
 
     if (world.isSolid(target)) {
       const reach = Math.max(Math.abs(tx - e.x), Math.abs(ty - e.y))
       if (reach <= 0.5 + e.r + 0.08) {
+        if (e.type === 'catapult') return // out of boulders: parked at the wall
         e.attacking = true
         e.heading = Math.atan2(ty - e.y, tx - e.x)
         e.walk += dt * 6
         const thorns = STRUCTURES[world.tiles[target].type]?.thorns
         if (thorns) this.hurt(e, thorns * dt, false)
-        world.damage(target, e.dps * e.siege * dt)
+        this.damageStructure(target, e.dps * e.siege * dt)
         return
       }
     }
-    e.attacking = false
     const dx = tx - e.x
     const dy = ty - e.y
     const len = Math.hypot(dx, dy) || 1
@@ -439,12 +758,22 @@ export class Game {
     this.tryMove(e, (dx / len) * step, (dy / len) * step)
   }
 
+  damageStructure(i, amount) {
+    const before = this.world.tiles[i].type
+    if (this.world.damage(i, amount) && before !== 'keep') {
+      const [x, y] = this.center(i)
+      this.effects.push({ type: 'dust', x, y, z: 0.3, t: 0, life: 0.9, size: 1 })
+      this.sfx('crumble', x, y)
+    }
+  }
+
   separate() {
-    const es = this.enemies
-    for (let a = 0; a < es.length; a++) {
-      for (let b = a + 1; b < es.length; b++) {
-        const A = es[a]
-        const B = es[b]
+    // Swordsmen take part so a line of them can hold a gap.
+    const us = [...this.enemies, ...this.swordsmen]
+    for (let a = 0; a < us.length; a++) {
+      for (let b = a + 1; b < us.length; b++) {
+        const A = us[a]
+        const B = us[b]
         const dx = B.x - A.x
         const dy = B.y - A.y
         const min = (A.r + B.r) * 0.85
@@ -480,8 +809,9 @@ export class Game {
     for (const e of this.enemies) {
       if (e.dead) continue
       if ((e.x - x) ** 2 + (e.y - y) ** 2 > range * range) continue
-      // Shoot whoever is closest to breaking in.
-      const d = flow.dist[world.idxAt(e.x, e.y)]
+      // Shoot whoever is closest to breaking in; siege engines first.
+      let d = flow.dist[world.idxAt(e.x, e.y)]
+      if (e.type === 'catapult') d -= 20
       if (d < bestDist) {
         bestDist = d
         best = e
@@ -490,23 +820,42 @@ export class Game {
     return best
   }
 
-  shoot(x, y, z, e, dmg) {
-    const dist = Math.hypot(e.x - x, e.y - y)
+  shoot(x, y, z, target, dmg, hostile) {
+    const dist = Math.hypot(target.x - x, target.y - y)
     this.projectiles.push({
+      kind: 'arrow',
+      hostile,
       sx: x, sy: y, sz: z,
-      tx: e.x, ty: e.y, tz: e.z + 0.4,
+      tx: target.x, ty: target.y, tz: target.z + 0.4,
       x, y, z,
       px: x, py: y, pz: z,
-      target: e,
+      target,
       t: 0,
       dur: Math.max(0.15, dist / ARROW_SPEED),
       dmg,
     })
   }
 
+  lob(e, tile, def) {
+    const [tx, ty] = this.center(tile)
+    const dist = Math.hypot(tx - e.x, ty - e.y)
+    this.projectiles.push({
+      kind: 'boulder',
+      sx: e.x, sy: e.y, sz: e.z + 0.6,
+      tx, ty, tz: this.world.surface(tile),
+      x: e.x, y: e.y, z: e.z + 0.6,
+      px: e.x, py: e.y, pz: e.z + 0.6,
+      tile,
+      t: 0,
+      dur: 0.8 + dist * 0.12,
+      dmg: def.boulder,
+      splash: def.splash,
+    })
+  }
+
   updateProjectiles(dt) {
     for (const p of this.projectiles) {
-      if (!p.target.dead) {
+      if (p.kind === 'arrow' && !p.target.dead) {
         p.tx = p.target.x
         p.ty = p.target.y
         p.tz = p.target.z + 0.4
@@ -517,11 +866,25 @@ export class Game {
       p.pz = p.z
       p.x = p.sx + (p.tx - p.sx) * p.t
       p.y = p.sy + (p.ty - p.sy) * p.t
-      const arc = Math.min(1.5, p.dur * 2)
+      const arc = p.kind === 'boulder' ? 2.5 + p.dur : Math.min(1.5, p.dur * 2)
       p.z = p.sz + (p.tz - p.sz) * p.t + Math.sin(p.t * Math.PI) * arc
-      if (p.t >= 1) {
-        if (!p.target.dead) this.hurt(p.target, p.dmg)
-        p.done = true
+      if (p.t < 1) continue
+      p.done = true
+      if (p.kind === 'boulder') {
+        this.damageStructure(p.tile, p.dmg)
+        // Archers on or next to the impact get knocked about.
+        for (const a of this.archers) if (Math.hypot(a.x - p.tx, a.y - p.ty) < 0.9) {
+          a.hp -= p.splash
+          a.flash = 0.15
+        }
+        this.effects.push({ type: 'dust', x: p.tx, y: p.ty, z: p.tz, t: 0, life: 0.7, size: 0.8 })
+        this.sfx('impact', p.tx, p.ty)
+      } else if (!p.target.dead) {
+        if (p.hostile) {
+          p.target.hp -= p.dmg * (p.target.kind === 'archer' ? COVER : 1)
+          p.target.flash = 0.12
+        } else this.hurt(p.target, p.dmg)
+        this.sfx('hit', p.tx, p.ty)
       }
     }
     this.projectiles = this.projectiles.filter((p) => !p.done)

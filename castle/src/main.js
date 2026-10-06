@@ -3,7 +3,8 @@ import { Game } from './game.js'
 import { Camera } from './camera.js'
 import { Renderer } from './render.js'
 import { Input } from './input.js'
-import { STRUCTURES, ARCHER, TOTAL_WAVES, waveComposition } from './config.js'
+import { Audio } from './audio.js'
+import { STRUCTURES, ARCHER, SWORDSMAN, TOTAL_WAVES, waveComposition } from './config.js'
 
 const ICONS = {
   look: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>',
@@ -19,6 +20,11 @@ const ICONS = {
   archer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3c6 3 6 15 0 18M7 3v18M3 12h17M17 9l3 3-3 3"/></svg>',
   moat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>',
   pikes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 20L9 4M9 20L3 4M13 20l6-16M19 20L13 4M1 14h22"/></svg>',
+  gate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 21V5h3V3h3v2h8V3h3v2h3v16h-7v-6a3 3 0 0 0-6 0v6z"/><path d="M12 12v9"/></svg>',
+  swordsman: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7L9 22l-2-2L19 8M5 15l4 4M3 17l4 4"/></svg>',
+  upgrade: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21h16M7 21V11h10v10M12 3v10M8 7l4-4 4 4"/></svg>',
+  soundOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>',
+  soundOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
@@ -31,6 +37,9 @@ const TOOL_LABELS = {
   archer: 'Archer',
   moat: 'Moat',
   pikes: 'Pikes',
+  gate: 'Gate',
+  swordsman: 'Swordsman',
+  upgrade: 'Upgrade',
   trap: 'Spikes',
   demolish: 'Remove',
 }
@@ -40,6 +49,8 @@ const TOOL_HINTS = {
   thick: 'Very tough, holds 2 archers.',
   tower: 'Comes with an archer. Height adds range.',
   archer: 'Tap a wall, tower or the keep.',
+  gate: 'Your troops walk through. Enemies must break it.',
+  swordsman: 'Guards a spot and charges nearby enemies.',
   moat: 'Enemies wade through slowly.',
   pikes: 'Hurts anyone who attacks it.',
   trap: 'Hurts anyone who walks over it.',
@@ -47,14 +58,15 @@ const TOOL_HINTS = {
 // Toolbar groups; multi-tool groups open a flyout.
 const GROUPS = [
   { id: 'look', tools: ['look'] },
-  { id: 'walls', tools: ['palisade', 'wall', 'thick'] },
-  { id: 'defend', tools: ['tower', 'archer'] },
+  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate'] },
+  { id: 'defend', tools: ['tower', 'archer', 'swordsman'] },
   { id: 'obstacles', tools: ['moat', 'pikes', 'trap'] },
+  { id: 'upgrade', tools: ['upgrade'] },
   { id: 'demolish', tools: ['demolish'] },
 ]
-const KEYS = ['look', 'palisade', 'wall', 'thick', 'tower', 'archer', 'moat', 'pikes', 'trap', 'demolish']
-const PLACE_ON_RELEASE = new Set(['tower', 'archer'])
-const costOf = (id) => (id === 'archer' ? ARCHER.cost : STRUCTURES[id]?.cost)
+const KEYS = ['look', 'palisade', 'wall', 'thick', 'gate', 'tower', 'archer', 'swordsman', 'upgrade', 'demolish']
+const PLACE_ON_RELEASE = new Set(['tower', 'archer', 'swordsman', 'gate'])
+const costOf = (id) => (id === 'archer' ? ARCHER.cost : id === 'swordsman' ? SWORDSMAN.cost : STRUCTURES[id]?.cost)
 
 const $ = (id) => document.getElementById(id)
 
@@ -63,6 +75,11 @@ const game = new Game(randomSeed())
 const camera = new Camera(game.world.w, game.world.h)
 const canvas = $('game')
 const renderer = new Renderer(canvas, camera)
+const audio = new Audio()
+// Handle for automated screenshot tests.
+window.htk = { game, audio }
+// Browsers only start audio from a user gesture.
+window.addEventListener('pointerdown', () => audio.unlock(), { capture: true })
 
 const ui = {
   tool: 'wall',
@@ -110,6 +127,8 @@ function paint(i) {
   const tool = ui.tool
   if (tool === 'demolish') {
     game.demolish(i)
+  } else if (tool === 'upgrade') {
+    if (!game.place(i, 'upgrade') && game.upgradeInfo(i) && game.gold < game.upgradeInfo(i).cost) warnGold()
   } else if (STRUCTURES[tool]) {
     if (!game.place(i, tool) && game.world.canBuild(i, tool) && game.gold < costOf(tool)) warnGold()
   }
@@ -209,6 +228,20 @@ function selectTool(id) {
 }
 
 $('menu-btn').innerHTML = ICONS.menu
+const soundBtn = $('sound-btn')
+function refreshSoundBtn() {
+  const on = audio.musicOn || audio.sfxOn
+  soundBtn.innerHTML = on ? ICONS.soundOn : ICONS.soundOff
+  soundBtn.setAttribute('aria-label', on ? 'Mute' : 'Unmute')
+}
+soundBtn.addEventListener('click', () => {
+  // One tap mutes everything; the next restores both.
+  const on = audio.musicOn || audio.sfxOn
+  if (on === audio.musicOn) audio.toggleMusic()
+  if (on === audio.sfxOn) audio.toggleSfx()
+  refreshSoundBtn()
+})
+refreshSoundBtn()
 $('rotate-btn').innerHTML = ICONS.rotate
 $('wave-total').textContent = TOTAL_WAVES
 
@@ -277,6 +310,14 @@ function refreshHud() {
     const gates = game.activeSpawns(n).map((s) => s.name).join(', ')
     info.innerHTML = `<b>Wave ${n}</b> from ${gates}<br>${parts.join(' · ')}`
   }
+  const hint = $('tool-hint')
+  const upgrading = ui.tool === 'upgrade'
+  hint.classList.toggle('hidden', !upgrading)
+  if (upgrading && !hint.dataset.set) {
+    hint.dataset.set = '1'
+    const step = (a, b) => STRUCTURES[b].cost - STRUCTURES[a].cost
+    hint.innerHTML = `<b>Upgrade</b>: tap or drag over walls<br>Palisade → stone ${step('palisade', 'wall')} · Stone → thick ${step('wall', 'thick')}<br>Damaged thick walls, towers, gates: repair`
+  }
   ui.showGrid = building || ui.tool !== 'look'
 }
 
@@ -314,23 +355,42 @@ const HELP = `
   <ul>
     <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can, and break through the weakest point if they can't.</li>
     <li><b>Towers and archers</b>: drag to aim, release to place. Archers stand on walls, towers and the keep, and walk along connected stone to reach attackers. Height adds range: towers most, then thick walls and hills.</li>
+    <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates; enemies have to break gates down. Send them out to kill catapults.</li>
+    <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
     <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
+    <li><b>Enemies</b>: raiders and brutes hack at walls, rams smash them, bowmen shoot your troops, and catapults throw boulders from beyond archer range.</li>
     <li><b>Terrain</b>: rivers and lakes block the way except at fords. Marsh and fords slow enemies down, and you can't build on them.</li>
     <li><b>Remove</b>: full refund between waves, half during an attack.</li>
   </ul>
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
   The camera tilts to 3D when a wave starts so you can watch it play out, and returns to 2D for building.</p>`
 
+const CREDITS = `<p class="credits">Music: “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0.</p>`
+
 function showMenu() {
-  modal('Hold the Keep', HELP, [
+  const toggles = `<div class="toggles">
+    <button id="music-toggle" class="${audio.musicOn ? 'on' : ''}">Music: ${audio.musicOn ? 'on' : 'off'}</button>
+    <button id="sfx-toggle" class="${audio.sfxOn ? 'on' : ''}">Sound effects: ${audio.sfxOn ? 'on' : 'off'}</button>
+  </div>`
+  modal('Hold the Keep', toggles + HELP + CREDITS, [
     { label: 'New map', run: () => restart(randomSeed()) },
     { label: 'Restart', run: () => restart() },
     { label: 'Resume', primary: true },
   ])
 }
 
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'music-toggle') audio.toggleMusic()
+  else if (e.target.id === 'sfx-toggle') audio.toggleSfx()
+  else return
+  e.target.classList.toggle('on')
+  e.target.textContent = e.target.id === 'music-toggle' ? `Music: ${audio.musicOn ? 'on' : 'off'}` : `Sound effects: ${audio.sfxOn ? 'on' : 'off'}`
+  refreshSoundBtn()
+})
+
 function restart(seed) {
   game.reset(seed)
+  audio.setMusic('build')
   ui.tool = ui.buildTool = 'wall'
   ui.speed = 1
   setView('top')
@@ -343,19 +403,27 @@ function handleEvents() {
       banner(`Wave ${ev.wave} incoming!<small>from the ${ev.spawns.join(' & ')}</small>`)
       // Show off the castle while it's under siege.
       setView('iso')
+      audio.play('horn')
+      audio.setMusic('battle')
       ui.tool = 'look'
       closeFlyout()
     } else if (ev.type === 'waveEnd') {
       banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold. Strengthen your defenses.</small>`, 3200)
       setView('top')
+      audio.play('waveEnd')
+      audio.setMusic('build')
       ui.tool = ui.buildTool
       ui.speed = 1
     } else if (ev.type === 'won') {
+      audio.play('victory')
+      audio.setMusic('build')
       modal('Victory!', `<p>Your keep stood against all <b>${TOTAL_WAVES}</b> waves.</p>`, [
         { label: 'Keep looking' },
         { label: 'New map', primary: true, run: () => restart(randomSeed()) },
       ])
     } else if (ev.type === 'lost') {
+      audio.play('defeat')
+      audio.setMusic('build')
       modal('The keep has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>`, [
         { label: 'Look around' },
         { label: 'Try again', primary: true, run: () => restart() },
@@ -411,6 +479,13 @@ function frame(now) {
   }
   camera.update(dt)
   handleEvents()
+  // Effects near the camera's focus play louder.
+  for (const snd of game.sounds) {
+    const d = Math.hypot(snd.x - camera.fx, snd.y - camera.fy)
+    audio.play(snd.name, Math.max(0.25, 1 - d / 22))
+  }
+  game.sounds.length = 0
+  audio.update(dt)
   hudTimer += dt
   if (hudTimer > 0.1) {
     hudTimer = 0

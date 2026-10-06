@@ -118,7 +118,7 @@ button {
 }
 .keep-bar {
   position: relative;
-  width: min(32vw, 260px);
+  width: min(24vw, 240px);
   height: 22px;
   overflow: hidden;
   margin-top: 7px;
@@ -467,4 +467,53 @@ button {
     min-height: 46px;
     padding: 4px 10px;
   }
+}
+
+/* ---- stage 3 ---- */
+.top-right {
+  display: flex;
+  gap: 8px;
+}
+#sound-btn {
+  width: 40px;
+  height: 40px;
+}
+#sound-btn svg {
+  width: 22px;
+  height: 22px;
+}
+/* Six toolbar buttons: fill the space under the top bar on short screens. */
+.toolbar {
+  top: calc(var(--safe-t) + 46px);
+  bottom: var(--safe-b);
+  transform: none;
+  justify-content: center;
+}
+.toolbar .tool {
+  flex: 0 1 58px;
+  min-height: 40px;
+}
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.toggles button {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #2c261c;
+  border: 1px solid var(--panel-edge);
+  color: var(--ink-dim);
+  font-weight: 600;
+}
+.toggles button.on {
+  color: var(--ink);
+  border-color: var(--gold);
+}
+.card .credits {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.8;
 }
