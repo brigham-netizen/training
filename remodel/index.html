@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Move-In Ready Comparison</title>
+<title>House Fit Calc</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600&display=swap">
@@ -139,6 +139,23 @@ button, input, select { font: inherit; color: inherit; }
 .dock .sum b { font-family: var(--mono); font-weight: 500; }
 
 /* report */
+:root { --commute: #6b7280; }
+:root[data-brand="ss"] { --commute: #003366; }
+.prefs { padding: 14px 16px; display: grid; gap: 12px; }
+.pref { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.pref .pl { display: grid; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.pref .pl b { font-weight: 500; }
+.pref .pv { display: flex; align-items: center; gap: 12px; flex: 1 1 220px; justify-content: flex-end; }
+.pref input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.pref .pv b { white-space: nowrap; min-width: 82px; text-align: right; }
+.assume summary { cursor: pointer; color: var(--accent-text); font-size: 14px; }
+.assume[open] { display: grid; gap: 10px; }
+.assume[open] summary { margin-bottom: 4px; }
+.score { display: flex; align-items: center; gap: 8px; }
+.score .sbar { flex: 1; height: 6px; background: var(--rule); border-radius: 99px; overflow: hidden; }
+.score .sbar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.score b { font-size: 15px; }
+.stack .c { background: var(--commute); } .stack .n { background: var(--accent); }
 .agent { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 16px; border-color: var(--accent); background: var(--accent-soft); }
 .avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-family: var(--display); font-size: 26px; font-weight: 600; overflow: hidden; }
 .agent .who { display: grid; gap: 2px; min-width: 0; }
@@ -714,15 +731,19 @@ const ITEM = Object.fromEntries(ITEMS.map(i => [i.id, i]));
 
 const EXAMPLE = {
   client: "",
+  commute: { on: true, place: "Example: downtown Idaho Falls", days: 5 },
   homes: [
-    { id: "a", example: true, name: "Example: 1978 rambler", price: 389000, sqft: 1850, asIs: false,
+    { id: "a", example: true, name: "Example: 1978 rambler", price: 389000, sqft: 1850, asIs: false, nbhd: 72, miles: 3, mins: 9,
       ups: { roof_asphalt: { qty: 20 }, lvp: { qty: 900 }, int_paint: { qty: 1850 }, water_heater: { qty: 1 }, bath_refresh: { qty: 2 } } },
-    { id: "b", example: true, name: "Example: 2016 build in Ammon", price: 419000, sqft: 2100, asIs: true, ups: {} },
+    { id: "b", example: true, name: "Example: 2016 build in Ammon", price: 419000, sqft: 2100, asIs: true, nbhd: 84, miles: 11, mins: 22, ups: {} },
   ],
 };
 
+// Buyer priorities. Commute math is a placeholder until the House Fit commute methodology is dropped in (see commuteAnnual).
+const DEFAULT_PREFS = { nbhdPerPt: 1000, years: 7, costPerMile: 0.70, timePerHour: 25, weeks: 48 };
+
 // ─── STATE (this viewer's comparison, kept in this browser) ──────────────────
-const STORE_KEY = "lor-movein-v1";
+const STORE_KEY = "lor-housefit-v1";
 let state = load();
 let open = null;          // expanded update line, "homeId:itemId"
 let agentBids = {};       // itemId → [numbers] from the shared database, this market
@@ -730,10 +751,13 @@ let myRequests = {};      // "homeId:itemId" → latest request doc from this vi
 let inbox = [];           // pending requests (agents only)
 let db = null, me = null, isAgent = false;
 
-function blankHome(id) { return { id, name: "", price: null, sqft: null, asIs: null, ups: {} }; }
+function blankHome(id) { return { id, name: "", price: null, sqft: null, asIs: null, nbhd: null, miles: null, mins: null, ups: {} }; }
 function load() {
-  const base = { brand: "lor", step: "report", cur: 0, ...structuredClone(EXAMPLE) };
-  try { const raw = localStorage.getItem(STORE_KEY); if (raw) return { ...base, ...JSON.parse(raw) }; } catch (e) {}
+  const base = { brand: "lor", step: "report", cur: 0, prefs: { ...DEFAULT_PREFS }, ...structuredClone(EXAMPLE) };
+  try {
+    const raw = localStorage.getItem(STORE_KEY) || localStorage.getItem("lor-movein-v1");
+    if (raw) { const o = JSON.parse(raw); return { ...base, ...o, prefs: { ...DEFAULT_PREFS, ...(o.prefs || {}) }, commute: o.commute || { on: null, place: "", days: 5 } }; }
+  } catch (e) {}
   return base;
 }
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
@@ -781,6 +805,26 @@ function updatesTotal(home) {
   return t;
 }
 
+// Commute: round trips per year × (driving cost + time cost). Placeholder method; swap in the House Fit methodology here.
+function commuteAnnual(home) {
+  const c = state.commute, p = state.prefs;
+  if (!c?.on || !(Number(home.miles) > 0 || Number(home.mins) > 0)) return 0;
+  const trips = (Number(c.days) || 0) * p.weeks * 2;
+  return trips * ((Number(home.miles) || 0) * p.costPerMile + (Number(home.mins) || 0) / 60 * p.timePerHour);
+}
+const hasScore = h => Number(h.nbhd) >= 1 && Number(h.nbhd) <= 100;
+// Neighborhood: the lower-scoring home carries the point gap × what each point is worth to the buyer.
+function nbhdGap(home) {
+  const scored = state.homes.filter(hasScore);
+  if (scored.length < 2 || !hasScore(home)) return 0;
+  return (Math.max(...scored.map(h => Number(h.nbhd))) - Number(home.nbhd)) * state.prefs.nbhdPerPt;
+}
+function fit(home) {
+  const u = updatesTotal(home), cAnn = commuteAnnual(home), c = cAnn * state.prefs.years, n = nbhdGap(home), p = Number(home.price) || 0;
+  const base = p + c + n;
+  return { u, cAnn, c, n, lo: base + u.lo, mid: base + u.mid, hi: base + u.hi, ready: p + u.mid };
+}
+
 // ─── FORMAT ──────────────────────────────────────────────────────────────────
 const usd0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const usd2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -817,22 +861,40 @@ function header() {
         <button type="button" data-brand="lor" aria-pressed="${!ss}">Lift Off Realty</button>
         <button type="button" data-brand="ss" aria-pressed="${ss}">SettleSavvy</button>
       </div></div>
-    <div style="display:grid;gap:6px"><h1>Move-In Ready Comparison</h1>
-      <p class="muted" style="max-width:62ch">Compare two homes the way you'd actually live in them: asking price plus what it takes to make each one move-in ready, priced for the ${MARKET.name}.</p></div>
+    <div style="display:grid;gap:6px"><h1>House Fit Calc</h1>
+      <p class="muted" style="max-width:62ch">Compare two homes the way you'd actually live in them: asking price, what it takes to make each one move-in ready, your commute, and how much the neighborhood matters to you. Priced for the ${MARKET.name}.</p></div>
     <nav class="steps" aria-label="Steps">${steps.map(([id, l], i) =>
       `<button type="button" data-step="${id}" ${state.step === id ? 'aria-current="step"' : ""} class="${i < idx ? "done" : ""}" ${can[i] ? "" : "disabled"}><i></i>${i + 1}. ${l}</button>`).join("")}</nav>`;
 }
 const homeReady = h => Number(h.price) > 0;
 
 function stepHomes() {
-  return `<section class="grid2" aria-label="Homes">
+  const c = state.commute || {};
+  return `<section class="card homeform" aria-label="Commute">
+      <div class="ask" style="padding:0"><p>Does anyone in your household commute to work or school?</p>
+        <div class="choice">
+          <button type="button" data-commute="yes" aria-pressed="${c.on === true}"><b>Yes</b><span>Count the commute from each home</span></button>
+          <button type="button" data-commute="no" aria-pressed="${c.on === false}"><b>No</b><span>Leave commute out</span></button>
+        </div></div>
+      ${c.on ? `<div class="row2">
+        <label class="label" for="cPlace"><span>Where to</span><input class="field" id="cPlace" value="${esc(c.place)}" placeholder="e.g. INL, EIRMC, downtown"></label>
+        <label class="label" for="cDays"><span>Days per week</span><input class="field num" id="cDays" type="number" inputmode="numeric" min="0" max="7" value="${c.days ?? 5}"></label>
+      </div>` : ""}
+    </section>
+    <section class="grid2" aria-label="Homes">
       ${state.homes.map((h, i) => `<div class="card homeform">
         <span class="tag">Home ${String.fromCharCode(65 + i)}</span>
         <label class="label" for="n-${h.id}"><span>Address or nickname</span><input class="field" id="n-${h.id}" data-h="${h.id}" data-f="name" value="${esc(h.name)}" placeholder="e.g. 1450 Sunnyside Rd"></label>
         <div class="row2">
           <label class="label" for="p-${h.id}"><span>Asking price</span><input class="field num" id="p-${h.id}" data-h="${h.id}" data-f="price" type="number" inputmode="numeric" min="0" step="1000" value="${h.price ?? ""}" placeholder="$"></label>
           <label class="label" for="s-${h.id}"><span>Finished sq ft</span><input class="field num" id="s-${h.id}" data-h="${h.id}" data-f="sqft" type="number" inputmode="numeric" min="0" value="${h.sqft ?? ""}"></label>
-        </div></div>`).join("")}
+        </div>
+        <label class="label" for="nb-${h.id}"><span>Neighborhood score (1–100)</span><input class="field num" id="nb-${h.id}" data-h="${h.id}" data-f="nbhd" type="number" inputmode="numeric" min="1" max="100" value="${h.nbhd ?? ""}" placeholder="From SettleSavvy"></label>
+        ${c.on ? `<div class="row2">
+          <label class="label" for="mi-${h.id}"><span>Miles, one way</span><input class="field num" id="mi-${h.id}" data-h="${h.id}" data-f="miles" type="number" inputmode="decimal" min="0" step="0.1" value="${h.miles ?? ""}"></label>
+          <label class="label" for="mn-${h.id}"><span>Minutes, one way</span><input class="field num" id="mn-${h.id}" data-h="${h.id}" data-f="mins" type="number" inputmode="numeric" min="0" value="${h.mins ?? ""}"></label>
+        </div>` : ""}
+      </div>`).join("")}
     </section>
     <div class="card homeform"><label class="label" for="client"><span>Your name</span><input class="field" id="client" value="${esc(state.client)}" placeholder="So your agent knows who's asking"></label></div>
     <div class="actions"><button type="button" class="btn ghost" data-act="new">Start over with blank homes</button>
@@ -871,36 +933,59 @@ function stepCond() {
 }
 
 function stepReport() {
-  const ss = state.brand === "ss";
-  const H = state.homes.map((h, i) => ({ h, i, u: updatesTotal(h) }));
-  H.forEach(x => { x.all = { lo: x.h.price + x.u.lo, mid: x.h.price + x.u.mid, hi: x.h.price + x.u.hi }; });
-  const max = Math.max(...H.map(x => x.all.hi));
+  const ss = state.brand === "ss", P = state.prefs, commuteOn = !!state.commute?.on;
+  const H = state.homes.map((h, i) => ({ h, i, f: fit(h) }));
+  const max = Math.max(...H.map(x => x.f.hi));
   const [A, B] = H;
-  const listDiff = B.h.price - A.h.price, allDiff = B.all.mid - A.all.mid;
-  const cheaper = allDiff > 0 ? A : B;
-  const listCheaper = listDiff > 0 ? A : B;
-  const flipped = listDiff !== 0 && allDiff !== 0 && cheaper !== listCheaper;
-  const overlap = Math.min(A.all.hi, B.all.hi) >= Math.max(A.all.lo, B.all.lo);
+  const listDiff = B.h.price - A.h.price, allDiff = B.f.mid - A.f.mid;
+  const better = allDiff > 0 ? A : B, listCheaper = listDiff > 0 ? A : B;
+  const flipped = listDiff !== 0 && allDiff !== 0 && better !== listCheaper;
+  const overlap = Math.min(A.f.hi, B.f.hi) >= Math.max(A.f.lo, B.f.lo);
+  const parts = ["updates", commuteOn && "commute", H.some(x => x.f.n) && "neighborhood"].filter(Boolean);
+  const counted = parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts.at(-1) : parts[0];
   const verdict = Math.abs(allDiff) < 1000
-    ? `Once both are move-in ready, these homes cost about the same.`
-    : `Once both are move-in ready, ${esc(hname(cheaper.h, cheaper.i))} costs about ${money(Math.abs(allDiff))} less.`;
+    ? `Counting ${counted}, these homes come out about even.`
+    : `Counting ${counted}, ${esc(hname(better.h, better.i))} comes out about ${money(Math.abs(allDiff))} ahead.`;
   const sub = `${flipped ? `That flips the list prices, where ${esc(hname(listCheaper.h, listCheaper.i))} looked ${money(Math.abs(listDiff))} cheaper. ` : `List prices differ by ${money(Math.abs(listDiff))}. `}${overlap ? "The ranges still overlap, so narrow the widest updates below before deciding." : "The ranges don't overlap, so the gap holds even at the extremes."}`;
+  const scored = H.filter(x => hasScore(x.h)).length === 2;
 
   return `${ss ? agentCard() : ""}
     <section class="card verdict" aria-label="Result"><span class="tiny">${esc(hname(A.h, 0))} vs ${esc(hname(B.h, 1))}</span><p class="big">${verdict}</p><p class="sub">${sub}</p></section>
-    <section class="cols" aria-label="Totals">${H.map(x => `<div class="card col">
+
+    <section class="card prefs" aria-label="Your priorities">
+      <h3>Your priorities</h3>
+      <label class="pref" for="pNb"><span class="pl"><b>How much the neighborhood matters</b><span class="tiny">Each point of neighborhood score is worth this much to you</span></span>
+        <span class="pv"><input type="range" id="pNb" min="0" max="5000" step="250" value="${P.nbhdPerPt}" aria-describedby="pNbV"><b class="num" id="pNbV">${money(P.nbhdPerPt)} / pt</b></span></label>
+      ${scored ? "" : `<p class="tiny">Add a neighborhood score to both homes to use this.</p>`}
+      ${commuteOn ? `<label class="pref" for="pYrs"><span class="pl"><b>Years you'll commute from this home</b><span class="tiny">Commute cost = annual cost × years</span></span>
+        <span class="pv"><span class="stepper"><button type="button" data-yrs="-1" aria-label="Fewer years">−</button><input id="pYrs" type="number" inputmode="numeric" min="0" max="40" value="${P.years}" aria-label="Years"><button type="button" data-yrs="1" aria-label="More years">+</button></span></span></label>
+      <details class="assume"><summary>Commute assumptions</summary>
+        <div class="row2">
+          <label class="label" for="pCpm"><span>Driving cost per mile</span><input class="field num" id="pCpm" type="number" inputmode="decimal" min="0" step="0.01" value="${P.costPerMile}"></label>
+          <label class="label" for="pVot"><span>Your time, per hour</span><input class="field num" id="pVot" type="number" inputmode="decimal" min="0" step="1" value="${P.timePerHour}"></label>
+        </div>
+        <p class="tiny">${esc(state.commute.days)} days a week × ${P.weeks} weeks × 2 trips. Driving cost defaults to the IRS 2025 mileage rate.</p>
+      </details>` : ""}
+    </section>
+
+    <section class="cols" aria-label="Totals">${H.map(x => { const f = x.f; return `<div class="card col">
         <div class="hname">${esc(hname(x.h, x.i))}${x.h.example ? '<span class="tag">Example</span>' : ""}</div>
+        ${hasScore(x.h) ? `<div class="score" title="Neighborhood score"><span class="tiny">Neighborhood</span><span class="sbar"><i style="width:${Number(x.h.nbhd)}%"></i></span><b class="num">${Number(x.h.nbhd)}</b></div>` : `<div class="score"><span class="tiny">Neighborhood score not added</span></div>`}
         <div class="ledger">
           <div class="ln"><span>List price</span><span class="num">${money(x.h.price)}</span></div>
-          <div class="ln"><span>${x.h.asIs === false ? `+ ${Object.keys(x.h.ups).length} updates` : "+ updates"}</span><span class="num">${x.h.asIs === false ? money(x.u.mid) : "$0"}</span></div>
-          ${x.h.asIs === false && x.u.hi > x.u.lo ? `<div class="rng num">${k(x.u.lo)} – ${k(x.u.hi)}</div>` : ""}
-          <div class="ln tot"><span>Move-in ready</span><span class="num">${money(x.all.mid)}</span></div>
-          ${x.all.hi > x.all.lo ? `<div class="rng num">${k(x.all.lo)} – ${k(x.all.hi)}</div>` : ""}
+          <div class="ln"><span>${x.h.asIs === false ? `+ ${Object.keys(x.h.ups).length} updates` : "+ updates"}</span><span class="num">${x.h.asIs === false ? money(f.u.mid) : "$0"}</span></div>
+          ${x.h.asIs === false && f.u.hi > f.u.lo ? `<div class="rng num">${k(f.u.lo)} – ${k(f.u.hi)}</div>` : ""}
+          ${commuteOn ? `<div class="ln"><span>+ Commute, ${P.years} yr${P.years === 1 ? "" : "s"}</span><span class="num">${money(f.c)}</span></div>
+          <div class="rng num">${f.cAnn ? `${money(f.cAnn)} a year · ${Number(x.h.miles) || 0} mi, ${Number(x.h.mins) || 0} min` : "Add miles and minutes on Homes"}</div>` : ""}
+          ${scored && P.nbhdPerPt ? `<div class="ln"><span>+ Neighborhood gap</span><span class="num">${money(f.n)}</span></div>
+          ${f.n ? `<div class="rng num">${Number(H[1 - x.i].h.nbhd) - Number(x.h.nbhd)} pts × ${money(P.nbhdPerPt)}</div>` : `<div class="rng">Higher score</div>`}` : ""}
+          <div class="ln tot"><span>House Fit cost</span><span class="num">${money(f.mid)}</span></div>
+          ${f.hi > f.lo ? `<div class="rng num">${k(f.lo)} – ${k(f.hi)}</div>` : ""}
         </div>
-        <div class="stack" aria-hidden="true"><i class="p" style="width:${x.h.price / max * 100}%"></i><i class="u" style="width:${x.u.mid / max * 100}%"></i></div>
-        ${x.h.sqft ? `<span class="tiny num">${usd0.format(x.all.mid / x.h.sqft)} per sq ft move-in ready</span>` : ""}
-      </div>`).join("")}</section>
-    <div class="legend"><span><i style="background:var(--ink-3)"></i>List price</span><span><i style="background:var(--hl)"></i>Updates (midpoint)</span><span>Ranges run from budget to upper finishes.</span></div>
+        <div class="stack" aria-hidden="true"><i class="p" style="width:${x.h.price / max * 100}%"></i><i class="u" style="width:${f.u.mid / max * 100}%"></i><i class="c" style="width:${f.c / max * 100}%"></i><i class="n" style="width:${f.n / max * 100}%"></i></div>
+        <span class="tiny num">${money(f.ready)} move-in ready${x.h.sqft ? ` · ${usd0.format(f.ready / x.h.sqft)}/sq ft` : ""}</span>
+      </div>`; }).join("")}</section>
+    <div class="legend"><span><i style="background:var(--ink-3)"></i>List price</span><span><i style="background:var(--hl)"></i>Updates</span>${commuteOn ? `<span><i style="background:var(--commute)"></i>Commute</span>` : ""}${scored ? `<span><i style="background:var(--accent)"></i>Neighborhood gap</span>` : ""}<span>Ranges run from budget to upper finishes.</span></div>
 
     <section class="updates" aria-label="Updates by home">
       <h2>Fine-tune the updates</h2>
@@ -992,6 +1077,8 @@ function footer() {
       <li>National sources are scaled by ${factor().toFixed(2)}, Craftsman's 2025 adjustment for Idaho Falls. Homewyse already prices by ZIP code.</li>
       <li>Every home in the ${esc(MARKET.name)} uses the same rates, so comparisons stay fair across neighborhoods.</li>
       <li>Ranges run from budget to upper finishes. Pick a finish level or get an agent's number to narrow a line to one figure.</li>
+      <li>Neighborhood scores come from SettleSavvy (1–100). The lower-scoring home carries the point gap times what you said each point is worth.</li>
+      <li>Commute cost is round trips per year times driving cost per mile plus the value of your time, multiplied by the years you expect to live there.</li>
     </ul></div>
     <div><h2>Sources</h2><ul>${DATA.sources.map(s => `<li><a href="${esc(s.home)}" target="_blank" rel="noopener">${esc(s.name)}</a>: ${esc(s.summary)}</li>`).join("")}</ul>
       <p class="tiny">${esc(DATA.note || "")} Planning estimates, not bids. Get written bids before relying on any number.</p></div>
@@ -1010,6 +1097,8 @@ document.addEventListener("click", e => {
   const t = e.target.closest("button"); if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.brand) { state.brand = d.brand; return commit(); }
+  if (d.commute) { state.commute = { place: "", days: 5, ...(state.commute || {}), on: d.commute === "yes" }; return commit(); }
+  if (d.yrs) { state.prefs.years = Math.max(0, Math.min(40, (Number(state.prefs.years) || 0) + Number(d.yrs))); return commit(); }
   if (d.step) { state.step = d.step; if (d.step === "cond") state.cur = 0; toTop(); return commit(); }
   if (d.act === "new") { state.homes = [blankHome("a"), blankHome("b")]; state.step = "homes"; state.cur = 0; open = null; toTop(); return commit(); }
   if (d.act === "toCond") { state.step = "cond"; state.cur = 0; toTop(); return commit(); }
@@ -1036,6 +1125,10 @@ document.addEventListener("input", e => {
   const t = e.target, d = t.dataset;
   if (d.h) { const h = homeById(d.h); h[d.f] = d.f === "name" ? t.value : (t.value === "" ? null : Number(t.value)); untag(h); return commit(); }
   if (t.id === "client") { state.client = t.value; return save(); }
+  if (t.id === "cPlace") { state.commute.place = t.value; return save(); }
+  if (t.id === "cDays") { state.commute.days = Math.min(7, Math.max(0, Number(t.value) || 0)); return save(); }
+  const pref = { pNb: "nbhdPerPt", pYrs: "years", pCpm: "costPerMile", pVot: "timePerHour" }[t.id];
+  if (pref) { if (t.value !== "") { state.prefs[pref] = Math.max(0, Number(t.value)); commit(); } return; }
   if (d.q) { state.homes[state.cur].ups[d.q].qty = t.value === "" ? 0 : Number(t.value); return commit(); }
   if (d.tqi) { const [hid, id] = d.tqi.split(":"); homeById(hid).ups[id].qty = t.value === "" ? 0 : Number(t.value); return commit(); }
 });
