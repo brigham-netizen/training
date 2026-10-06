@@ -36,14 +36,32 @@ export class Audio {
     }
   }
 
+  // Call from every user gesture: browsers differ on which ones count
+  // (iPhone Safari only accepts a finished tap, not touch-down).
   unlock() {
+    // iPhone: treat the game as media playback so the silent switch
+    // doesn't mute it (Safari 16.4+).
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = 'playback'
+    } catch {
+      // ignore
+    }
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume()
+      if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {})
+      // A track that failed to start earlier gets another go on this gesture.
+      if (this.musicOn) this.setMusic(this.want)
       return
     }
     const AC = window.AudioContext || window.webkitAudioContext
     if (!AC) return
     this.ctx = new AC()
+    this.ctx.resume().catch(() => {})
+    // A one-sample silent buffer started inside the gesture fully wakes
+    // the audio engine on older iPhones.
+    const wake = this.ctx.createBufferSource()
+    wake.buffer = this.ctx.createBuffer(1, 1, this.ctx.sampleRate)
+    wake.connect(this.ctx.destination)
+    wake.start(0)
     this.master = this.ctx.createGain()
     this.master.gain.value = 0.5
     this.master.connect(this.ctx.destination)
@@ -54,13 +72,33 @@ export class Audio {
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1
 
     for (const [key, src] of Object.entries(MUSIC)) {
-      const el = new window.Audio(src)
+      const el = new window.Audio()
       el.loop = true
       el.preload = 'auto'
       el.volume = 0
+      el.setAttribute('playsinline', '')
+      // If the page's frame refuses to stream the file directly, fetch it
+      // and play it from memory instead.
+      el.addEventListener('error', () => this.fallbackSource(el, src), { once: true })
+      el.src = src
       this.tracks[key] = el
     }
     this.setMusic(this.want)
+  }
+
+  async fallbackSource(el, src) {
+    try {
+      const res = await fetch(src)
+      if (!res.ok) return
+      el.src = URL.createObjectURL(await res.blob())
+      if (this.musicOn) this.setMusic(this.want)
+    } catch {
+      // No music, but effects still work.
+    }
+  }
+
+  get running() {
+    return !!this.ctx && this.ctx.state === 'running'
   }
 
   setMusic(which) {

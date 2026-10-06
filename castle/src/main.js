@@ -29,6 +29,8 @@ const ICONS = {
   hoard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 21V13h18v8M3 13V7h3v6M9 13V7h3v6M15 13V7h3v6M21 13V7"/><path d="M2 7h20"/></svg>',
   orders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V3M5 4h12l-3 4 3 4H5"/><path d="M14 16h7v5h-7z" stroke-dasharray="2 2"/></svg>',
   settle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 11l9-7 9 7M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>',
+  fsOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
+  fsOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
@@ -91,8 +93,10 @@ const renderer = new Renderer(canvas, camera)
 const audio = new Audio()
 // Handle for automated screenshot tests.
 window.htk = { game, audio }
-// Browsers only start audio from a user gesture.
-window.addEventListener('pointerdown', () => audio.unlock(), { capture: true })
+// Browsers only start audio from a user gesture, and they disagree on
+// which events count, so try on all of them.
+for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'])
+  window.addEventListener(type, () => audio.unlock(), { capture: true, passive: true })
 
 const ui = {
   tool: 'wall',
@@ -307,6 +311,40 @@ soundBtn.addEventListener('click', () => {
   refreshSoundBtn()
 })
 refreshSoundBtn()
+
+// Full screen where the browser allows it (desktop, Android). iPhone
+// doesn't let web pages go full screen; there the answer is adding the
+// game to the home screen from its own site.
+const fsBtn = $('fs-btn')
+const fsEnabled = document.fullscreenEnabled || document.webkitFullscreenEnabled
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement
+function refreshFsBtn() {
+  fsBtn.innerHTML = fsElement() ? ICONS.fsOff : ICONS.fsOn
+  fsBtn.setAttribute('aria-label', fsElement() ? 'Leave full screen' : 'Full screen')
+}
+if (fsEnabled) {
+  fsBtn.classList.remove('hidden')
+  refreshFsBtn()
+  fsBtn.addEventListener('click', async () => {
+    try {
+      if (fsElement()) {
+        await (document.exitFullscreen || document.webkitExitFullscreen).call(document)
+      } else {
+        const el = document.documentElement
+        await (el.requestFullscreen || el.webkitRequestFullscreen).call(el, { navigationUI: 'hide' })
+        // Phones: keep it sideways while full screen.
+        await screen.orientation?.lock?.('landscape').catch(() => {})
+      }
+    } catch {
+      banner('Full screen isn\'t available here<small>Open the game in its own browser tab instead</small>')
+    }
+  })
+  document.addEventListener('fullscreenchange', () => {
+    refreshFsBtn()
+    setTimeout(resize, 50)
+  })
+  document.addEventListener('webkitfullscreenchange', refreshFsBtn)
+}
 $('rotate-btn').innerHTML = ICONS.rotate
 $('wave-total').textContent = TOTAL_WAVES
 
@@ -467,7 +505,8 @@ function showMenu() {
   const toggles = `<div class="toggles">
     <button id="music-toggle" class="${audio.musicOn ? 'on' : ''}">Music: ${audio.musicOn ? 'on' : 'off'}</button>
     <button id="sfx-toggle" class="${audio.sfxOn ? 'on' : ''}">Sound effects: ${audio.sfxOn ? 'on' : 'off'}</button>
-  </div>`
+    <button id="test-sound">Test sound</button>
+  </div><p class="save-note" id="sound-note"></p>`
   const savesRow = `<div class="toggles">
     <button id="save-game">Save game</button>
     <button id="load-game">Load save</button>
@@ -499,6 +538,23 @@ document.addEventListener('click', async (e) => {
     if (!data) return note('No saved game yet.')
     closeModal()
     loadGame(data)
+    return
+  }
+  if (id === 'test-sound') {
+    audio.unlock()
+    audio.play('horn')
+    setTimeout(() => {
+      const el = $('sound-note')
+      if (!el) return
+      const music = audio.tracks.build
+      const parts = []
+      parts.push(audio.running ? 'Sound engine is running: you should hear a horn.' : 'This browser is blocking sound so far. Tap again; if it stays silent, check the volume and the silent switch.')
+      if (!audio.musicOn) parts.push('Music is turned off.')
+      else if (music?.error) parts.push('The music files could not be loaded here.')
+      else if (music && !music.paused) parts.push('Music is playing.')
+      else parts.push('Music is still loading.')
+      el.textContent = parts.join(' ')
+    }, 600)
     return
   }
   if (id === 'save-map') return showSaveMap()
