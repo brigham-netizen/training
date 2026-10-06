@@ -1,11 +1,13 @@
-// Sound: synthesized effects (no files) plus two music tracks that
-// crossfade between building and battle. Browsers only allow audio after
+// Sound: synthesized effects (no files) plus music that crossfades between
+// a building track (player's choice) and a battle track. Browsers only allow audio after
 // a tap, so nothing plays until unlock() runs from a pointer event.
 
-const MUSIC = {
-  build: './music/minstrel.mp3',
-  battle: './music/heroic.mp3',
+// Building music is the player's pick; battle music is fixed.
+export const BUILD_TRACKS = {
+  chamber: { label: 'Castle Chamber', src: './music/castle-chamber.mp3' },
+  minstrel: { label: 'Minstrel Guild', src: './music/minstrel.mp3' },
 }
+const BATTLE_TRACK = './music/heroic.mp3'
 
 // Minimum seconds between repeats of each effect so a volley of 30
 // arrows doesn't turn into noise.
@@ -18,11 +20,13 @@ export class Audio {
     this.sfxOn = true
     this.tracks = {}
     this.want = 'build' // which track should be playing
+    this.buildTrack = 'chamber'
     this.last = {}
     try {
       const saved = JSON.parse(localStorage.getItem('htk-audio') || '{}')
       if (saved.music === false) this.musicOn = false
       if (saved.sfx === false) this.sfxOn = false
+      if (BUILD_TRACKS[saved.buildTrack]) this.buildTrack = saved.buildTrack
     } catch {
       // Storage blocked: keep defaults.
     }
@@ -30,7 +34,7 @@ export class Audio {
 
   save() {
     try {
-      localStorage.setItem('htk-audio', JSON.stringify({ music: this.musicOn, sfx: this.sfxOn }))
+      localStorage.setItem('htk-audio', JSON.stringify({ music: this.musicOn, sfx: this.sfxOn, buildTrack: this.buildTrack }))
     } catch {
       // ignore
     }
@@ -71,19 +75,36 @@ export class Audio {
     const data = this.noise.getChannelData(0)
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1
 
-    for (const [key, src] of Object.entries(MUSIC)) {
-      const el = new window.Audio()
-      el.loop = true
-      el.preload = 'auto'
-      el.volume = 0
-      el.setAttribute('playsinline', '')
-      // If the page's frame refuses to stream the file directly, fetch it
-      // and play it from memory instead.
-      el.addEventListener('error', () => this.fallbackSource(el, src), { once: true })
-      el.src = src
-      this.tracks[key] = el
-    }
+    this.tracks.build = this.makeTrack(BUILD_TRACKS[this.buildTrack].src)
+    this.tracks.battle = this.makeTrack(BATTLE_TRACK)
     this.setMusic(this.want)
+  }
+
+  makeTrack(src) {
+    const el = new window.Audio()
+    el.loop = true
+    el.preload = 'auto'
+    el.volume = 0
+    el.setAttribute('playsinline', '')
+    // If the page's frame refuses to stream the file directly, fetch it
+    // and play it from memory instead.
+    el.addEventListener('error', () => this.fallbackSource(el, src), { once: true })
+    el.src = src
+    return el
+  }
+
+  // Cycle to the next building track and swap it in straight away.
+  nextBuildTrack() {
+    const keys = Object.keys(BUILD_TRACKS)
+    this.buildTrack = keys[(keys.indexOf(this.buildTrack) + 1) % keys.length]
+    this.save()
+    const old = this.tracks.build
+    if (!old) return
+    old.pause()
+    const el = this.makeTrack(BUILD_TRACKS[this.buildTrack].src)
+    el.volume = old.volume
+    this.tracks.build = el
+    if (this.musicOn && this.want === 'build') el.play().catch(() => {})
   }
 
   async fallbackSource(el, src) {

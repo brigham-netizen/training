@@ -3,7 +3,7 @@ import { Game } from './game.js'
 import { Camera } from './camera.js'
 import { Renderer } from './render.js'
 import { Input } from './input.js'
-import { Audio } from './audio.js'
+import { Audio, BUILD_TRACKS } from './audio.js'
 import { Saves } from './saves.js'
 import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, waveComposition } from './config.js'
 
@@ -522,12 +522,13 @@ const HELP = `
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
   The camera tilts to 3D when a wave starts so you can watch it play out, and returns to 2D for building.</p>`
 
-const CREDITS = `<p class="credits">Music: “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0.</p>`
+const CREDITS = `<p class="credits">Music: “Castle Chamber” by brigham773. “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0.</p>`
 
 function showMenu() {
   const toggles = `<div class="toggles">
     <button id="music-toggle" class="${audio.musicOn ? 'on' : ''}">Music: ${audio.musicOn ? 'on' : 'off'}</button>
     <button id="sfx-toggle" class="${audio.sfxOn ? 'on' : ''}">Sound effects: ${audio.sfxOn ? 'on' : 'off'}</button>
+    <button id="build-track">Build music: ${BUILD_TRACKS[audio.buildTrack].label}</button>
     <button id="test-sound">Test sound</button>
   </div><p class="save-note" id="sound-note"></p>`
   const savesRow = `<div class="toggles">
@@ -561,6 +562,12 @@ document.addEventListener('click', async (e) => {
     if (!data) return note('No saved game yet.')
     closeModal()
     loadGame(data)
+    return
+  }
+  if (id === 'build-track') {
+    audio.unlock()
+    audio.nextBuildTrack()
+    e.target.textContent = `Build music: ${BUILD_TRACKS[audio.buildTrack].label}`
     return
   }
   if (id === 'test-sound') {

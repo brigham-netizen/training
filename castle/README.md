@@ -69,7 +69,8 @@ the menu rolls another.
 
 ## Music
 
-"Minstrel Guild" (building) and "Heroic Age" (battle) by Kevin MacLeod
+"Castle Chamber" (building, default) by brigham773, made with Suno.
+"Minstrel Guild" (building, switchable in the menu) and "Heroic Age" (battle) by Kevin MacLeod
 (incompetech.com), licensed under Creative Commons: By Attribution 4.0
 (https://creativecommons.org/licenses/by/4.0/). Re-encoded to mono 80 kbps in
 `public/music/`. Sound effects are synthesized in `src/audio.js`.
