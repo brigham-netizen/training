@@ -74,6 +74,15 @@ building), rivers and lakes (impassable). Hills slope smoothly into the
 ground around them, and walls built across a slope follow it. Every map is random; "New map" in
 the menu rolls another.
 
+## Playing on a phone
+
+The `gh-pages` branch holds the built game (`npm run build`, then the contents
+of `dist/`), served by GitHub Pages at
+https://brigham-netizen.github.io/training/. Open it in Safari or Chrome and
+use Share → Add to Home Screen (iPhone) or ⋮ → Add to Home screen / Install
+(Android): it opens full screen in landscape and works offline. Saves are kept
+on each device.
+
 ## Controls
 
 | | |

@@ -121,6 +121,12 @@ function setGfx(mode) {
 }
 const audio = new Audio()
 // Handle for automated screenshot tests.
+// Installed from a real web address (not embedded in a page): cache the
+// game so it opens offline from the home screen.
+if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top === window) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {})
+}
+
 window.htk = { game, audio, camera, setGfx: (m) => setGfx(m) }
 // Browsers only start audio from a user gesture, and they disagree on
 // which events count, so try on all of them.
