@@ -263,8 +263,11 @@ export class Renderer {
     }
     order.sort((a, b) => a.d - b.d)
     for (const { i, x, y } of order) {
+      const ground = world.groundElev(i)
       const base = world.elev(i)
-      if (world.tiles[i].terrain === 'hill') this.drawHill(world, i, x, y, base)
+      if (world.tiles[i].terrain === 'hill') this.drawHill(world, i, x, y, ground)
+      // A rock serving as a wall's foundation, drawn wider so the wall sits on it.
+      if (world.tiles[i].rock) this.drawFoundation(x, y, ground, base, world.tiles[i].v)
       this.drawTile(world, i, x, y, base, game.time)
       const here = units.get(i)
       if (!here) continue
@@ -837,6 +840,17 @@ export class Renderer {
       ctx.lineWidth = 2
       ctx.stroke()
     }
+  }
+
+  // Craggy rock under a wall: a wide dark base with a mossy step on top.
+  drawFoundation(x, y, z0, z1, v) {
+    // Same stone as the bare rocks on the map, so it reads as the rock you built over.
+    const side = COLORS.rock.side
+    const moss = [138, 146, 112]
+    const mid = z0 + (z1 - z0) * (0.55 + v * 0.2)
+    const j = (v - 0.5) * 0.08
+    this.box(x + 0.02, y + 0.03 + j, x + 0.98, y + 0.97 + j, z0, mid, side, COLORS.rock.top, 0, true)
+    this.box(x + 0.1 - j, y + 0.12, x + 0.9 - j, y + 0.88, mid, z1, scale(side, 1.08), moss, 0, true)
   }
 
   merlons(x0, y0, x1, y1, z, c, edges) {

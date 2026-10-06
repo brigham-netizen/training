@@ -92,7 +92,7 @@ const canvas = $('game')
 const renderer = new Renderer(canvas, camera)
 const audio = new Audio()
 // Handle for automated screenshot tests.
-window.htk = { game, audio }
+window.htk = { game, audio, camera }
 // Browsers only start audio from a user gesture, and they disagree on
 // which events count, so try on all of them.
 for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'])

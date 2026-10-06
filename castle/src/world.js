@@ -1,4 +1,4 @@
-import { GRID_W, GRID_H, STRUCTURES, KEEP, TERRAIN } from './config.js'
+import { GRID_W, GRID_H, STRUCTURES, KEEP, TERRAIN, ROCK_FOUNDATION } from './config.js'
 
 // Each tile has a terrain (grass, hill, marsh, shallows, water) and an
 // occupant `type`: 'grass' means empty, otherwise scenery (tree, rock),
@@ -39,7 +39,7 @@ export class World {
     let v = ''
     for (const t of this.tiles) {
       terrain += TERRAIN_CODES[t.terrain]
-      scenery += t.type === 'tree' ? 't' : t.type === 'rock' ? 'r' : '.'
+      scenery += t.type === 'tree' ? 't' : t.type === 'rock' || t.rock ? 'r' : '.'
       v += Math.min(9, Math.floor(t.v * 10))
     }
     return { w: this.w, h: this.h, terrain, scenery, v }
@@ -127,8 +127,22 @@ export class World {
     const s = TERRAIN[t.terrain].slow ?? 1
     return t.type === 'moat' ? Math.min(s, STRUCTURES.moat.slow) : s
   }
-  elev(i) {
+  // Height of the ground itself (hills), ignoring any rock on it.
+  groundElev(i) {
     return TERRAIN[this.tiles[i].terrain].elev || 0
+  }
+  // Same rock height the renderer draws for a bare rock.
+  rockHeight(i) {
+    return 0.35 + this.tiles[i].v * 0.3
+  }
+  // Where things stand: the ground, or the top of a rock a wall sits on.
+  elev(i) {
+    const t = this.tiles[i]
+    return this.groundElev(i) + (t.rock ? this.rockHeight(i) : 0)
+  }
+  maxHpFor(i, type) {
+    const hp = STRUCTURES[type]?.hp || 0
+    return Math.round(hp * (this.tiles[i].rock ? ROCK_FOUNDATION.hp : 1))
   }
   isRampart(i) {
     const t = this.tiles[i]
@@ -143,7 +157,7 @@ export class World {
   perch(i) {
     const t = this.tiles[i]
     const s = t.type === 'keep' ? KEEP.perch : STRUCTURES[t.type]?.perch || 0
-    return s + (TERRAIN[t.terrain].perch || 0)
+    return s + (TERRAIN[t.terrain].perch || 0) + (t.rock ? ROCK_FOUNDATION.perch : 0)
   }
   // Top surface height (where an archer stands).
   surface(i) {
@@ -300,10 +314,11 @@ export class World {
 
   build(i, type) {
     const t = this.tiles[i]
+    // Fortifications sit on top of a rock; anything else would clear it.
+    if (t.type === 'rock') t.rock = this.isRough(type)
     t.type = type
     t.plot = null
-    const def = STRUCTURES[type]
-    t.hp = t.maxHp = def.hp || 0
+    t.hp = t.maxHp = this.maxHpFor(i, type)
     t.weakened = false
     this.dirty = true
   }
@@ -311,7 +326,9 @@ export class World {
   // Remove a player structure, returning it to empty ground.
   clear(i) {
     const t = this.tiles[i]
-    t.type = 'grass'
+    // A wall's rock foundation outlasts the wall.
+    t.type = t.rock ? 'rock' : 'grass'
+    t.rock = false
     t.hoard = false
     t.plot = null
     t.paid = undefined

@@ -516,3 +516,33 @@ test('the end-of-wave event lists the plots the village just staked', () => {
   const ev = game.events.find((e) => e.type === 'waveEnd')
   assert.ok(ev && Array.isArray(ev.plots) && ev.plots.length >= 1)
 })
+
+test('a wall built on a rock sits on it, is tougher and higher, and leaves the rock behind', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const tiles = ring(game, 5)
+  const onRock = tiles[3]
+  const plain = tiles[5]
+  world.tiles[onRock].type = 'rock'
+  game.place(onRock, 'wall')
+  game.place(plain, 'wall')
+  const t = world.tiles[onRock]
+  assert.equal(t.type, 'wall')
+  assert.ok(t.rock, 'rock kept as foundation')
+  assert.ok(t.maxHp > world.tiles[plain].maxHp)
+  assert.ok(world.surface(onRock) > world.surface(plain))
+  assert.ok(world.perch(onRock) > world.perch(plain))
+  // Upgrading keeps the foundation and its bonus.
+  game.place(onRock, 'upgrade')
+  assert.equal(t.type, 'thick')
+  assert.ok(t.rock && t.maxHp > STRUCTURES.thick.hp)
+  // Saved maps and games remember the rock.
+  const back = Game.restore(JSON.parse(JSON.stringify(game.serialize())))
+  assert.ok(back.world.tiles[onRock].rock && back.world.tiles[onRock].type === 'thick')
+  // Knocked down, the rock is still there.
+  world.damage(onRock, 1e6)
+  assert.equal(t.type, 'rock')
+  assert.ok(world.isBlocked(onRock))
+})

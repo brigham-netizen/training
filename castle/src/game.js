@@ -147,7 +147,7 @@ export class Game {
       // Rebuild in place; archers standing on it stay put.
       t.paid = (t.paid ?? STRUCTURES[t.type].cost) + info.cost
       t.type = info.to
-      t.hp = t.maxHp = STRUCTURES[info.to].hp
+      t.hp = t.maxHp = this.world.maxHpFor(i, info.to)
       t.weakened = false
       this.world.dirty = true
     } else {
