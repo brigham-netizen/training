@@ -740,7 +740,7 @@ const ITEMS = [
   { id: "panel", cat: "sys", name: "Electrical panel", unit: "panel", unitLong: "200A panel upgrades", ask: "a 200A electrical panel upgrade", qty: () => 1 },
   { id: "radon", cat: "sys", name: "Radon mitigation", unit: "system", unitLong: "systems", ask: "a radon mitigation system", qty: () => 1 },
 ];
-// White-glove links: an agent shares this page's link ending in #agent-<slug>. The tag sticks to this buyer
+// White-label links: an agent shares this page's link ending in #agent-<slug>. The tag sticks to this buyer
 // and rides along on SettleSavvy sign-up links and agent requests, so they land as that agent's client.
 const PAGE_URL = "https://claude.ai/artifact/PGLiNUV2oYXBHnxcEuDF2W";
 const SS_MAP_URL = "https://settlesavvy.com/";   // SettleSavvy map / account setup
@@ -748,7 +748,7 @@ const DEFAULT_AGENT = "brigham-redd";
 let AGENT = AGENTS[DEFAULT_AGENT];
 function ssLink() {
   const q = new URLSearchParams({ utm_source: "housefit", utm_medium: "calc", utm_campaign: MARKET.id });
-  if (state.ref) { q.set("agent", state.ref); q.set("utm_content", "white-glove"); }
+  if (state.ref) { q.set("agent", state.ref); q.set("utm_content", "white-label"); }
   if (state.client) q.set("name", state.client);
   return SS_MAP_URL + "?" + q.toString();
 }
@@ -771,7 +771,7 @@ const DEFAULT_PREFS = { nbhdPerPt: 1000, years: 7, costPerMile: 0.70, timePerHou
 // ─── STATE (this viewer's comparison, kept in this browser) ──────────────────
 const STORE_KEY = "lor-housefit-v1";
 let state = load();
-// Pick up an agent's white-glove tag from the link (#agent-<slug>); first agent tag wins and is remembered.
+// Pick up an agent's white-label tag from the link (#agent-<slug>); first agent tag wins and is remembered.
 (() => { const m = /^#agent-([a-z0-9-]{2,60})$/.exec(location.hash || ""); if (m && !state.ref) { state.ref = m[1]; save(); } })();
 if (state.ref && AGENTS[state.ref]) AGENT = AGENTS[state.ref];
 let open = null;          // expanded update line, "homeId:itemId"
@@ -908,7 +908,8 @@ function stepHomes() {
       ${c.on ? `<div class="row2">
         <label class="label" for="cPlace"><span>Where to</span><input class="field" id="cPlace" value="${esc(c.place)}" placeholder="e.g. INL, EIRMC, downtown"></label>
         <label class="label" for="cDays"><span>Days per week</span><input class="field num" id="cDays" type="number" inputmode="numeric" min="0" max="7" value="${c.days ?? 5}"></label>
-      </div>` : ""}
+      </div>
+      <p class="tiny">Your SettleSavvy map works out the miles and drive time from each home. You can still type them in below.</p>` : ""}
     </section>
     <section class="grid2" aria-label="Homes">
       ${state.homes.map((h, i) => `<div class="card homeform">
@@ -920,8 +921,8 @@ function stepHomes() {
         </div>
         <label class="label" for="nb-${h.id}"><span>Neighborhood score (1–100)</span><input class="field num" id="nb-${h.id}" data-h="${h.id}" data-f="nbhd" type="number" inputmode="numeric" min="1" max="100" value="${h.nbhd ?? ""}" placeholder="Fills in from your SettleSavvy map"></label>
         ${c.on ? `<div class="row2">
-          <label class="label" for="mi-${h.id}"><span>Miles, one way</span><input class="field num" id="mi-${h.id}" data-h="${h.id}" data-f="miles" type="number" inputmode="decimal" min="0" step="0.1" value="${h.miles ?? ""}"></label>
-          <label class="label" for="mn-${h.id}"><span>Minutes, one way</span><input class="field num" id="mn-${h.id}" data-h="${h.id}" data-f="mins" type="number" inputmode="numeric" min="0" value="${h.mins ?? ""}"></label>
+          <label class="label" for="mi-${h.id}"><span>Miles, one way</span><input class="field num" id="mi-${h.id}" data-h="${h.id}" data-f="miles" type="number" inputmode="decimal" min="0" step="0.1" value="${h.miles ?? ""}" placeholder="From map"></label>
+          <label class="label" for="mn-${h.id}"><span>Minutes, one way</span><input class="field num" id="mn-${h.id}" data-h="${h.id}" data-f="mins" type="number" inputmode="numeric" min="0" value="${h.mins ?? ""}" placeholder="From map"></label>
         </div>` : ""}
       </div>`).join("")}
     </section>
@@ -1117,7 +1118,7 @@ function inboxCard() {
       <div class="act"><input class="field num" id="ans-${r.id}" type="number" inputmode="decimal" min="0" step="any" placeholder="$ per ${esc(ITEM[r.item]?.unit || "unit")}" aria-label="Your number">
         <button type="button" class="btn primary" data-answer="${r.id}">Send number</button><button type="button" class="btn" data-pass="${r.id}">Pass</button></div></div>`).join("")
       : `<div class="empty">No requests waiting.</div>`}
-    <div class="req"><b>Your white-glove link</b><span class="small muted">Send this to a client. They'll be tagged as yours here and on SettleSavvy.</span>
+    <div class="req"><b>Your white-label link</b><span class="small muted">Send this to a client. They'll be tagged as yours here and on SettleSavvy.</span>
       <div class="act"><input class="field" id="wgLink" readonly value="${esc(PAGE_URL + "#agent-" + AGENT.slug)}" style="flex:1 1 260px;width:auto"><button type="button" class="btn" data-act="copyLink">Copy link</button></div></div>
   </section>`;
 }
