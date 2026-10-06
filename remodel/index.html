@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Remodel Cost Comparison</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a contractor's takeoff sheet. Home totals across the top, then the scope list grouped by trade, one row per line item. */
+:root {
+  --paper: #f4f6f5;
+  --sheet: #ffffff;
+  --ink: #1c2629;
+  --ink-2: #4d5b60;
+  --ink-3: #7d8a8e;
+  --rule: #dbe1e0;
+  --rule-2: #c5cecd;
+  --steel: #2c5f7c;
+  --steel-soft: #e3edf2;
+  --pencil: #e5ad1c;
+  --pencil-soft: #fbf1d3;
+  --ok: #2f7a4f;
+  --ok-soft: #e1f1e7;
+  --warn: #a66a00;
+  --warn-soft: #fbefd8;
+  --bad: #b23a2c;
+  --bad-soft: #f8e2df;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12181a; --sheet: #192124; --ink: #e5ecec; --ink-2: #a9b6b8; --ink-3: #75858a;
+    --rule: #263135; --rule-2: #34424a; --steel: #7fb5d3; --steel-soft: #1d3240;
+    --pencil: #f0c14b; --pencil-soft: #3a3118; --ok: #6fc796; --ok-soft: #173025;
+    --warn: #e8b04f; --warn-soft: #3a2c12; --bad: #f08a7c; --bad-soft: #3d1e1a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12181a; --sheet: #192124; --ink: #e5ecec; --ink-2: #a9b6b8; --ink-3: #75858a;
+  --rule: #263135; --rule-2: #34424a; --steel: #7fb5d3; --steel-soft: #1d3240;
+  --pencil: #f0c14b; --pencil-soft: #3a3118; --ok: #6fc796; --ok-soft: #173025;
+  --warn: #e8b04f; --warn-soft: #3a2c12; --bad: #f08a7c; --bad-soft: #3d1e1a;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 28px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: .01em; text-wrap: balance; margin: 0; line-height: 1.1; }
+h1 { font-size: clamp(30px, 5vw, 44px); }
+h2 { font-size: 24px; }
+h3 { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); font-weight: 600; }
+p { margin: 0; }
+a { color: var(--steel); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font-family: var(--display); text-transform: uppercase; letter-spacing: .12em; font-size: 14px; color: var(--steel); font-weight: 600; }
+.muted { color: var(--ink-2); }
+.small { font-size: 13px; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+
+/* header */
+.head { display: grid; gap: 10px; }
+.head .lede { max-width: 66ch; color: var(--ink-2); }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: end; padding: 14px 16px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+.ctl { display: grid; gap: 4px; }
+.ctl > span { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: 5px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule-2); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.field { border: 1px solid var(--rule-2); background: var(--sheet); border-radius: 5px; padding: 6px 8px; }
+.field.num { width: 84px; text-align: right; }
+.check { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; padding-block: 6px; }
+.check input { width: 16px; height: 16px; accent-color: var(--steel); }
+
+/* home cards */
+.homes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.home { text-align: left; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; cursor: pointer; display: grid; gap: 6px; position: relative; min-width: 0; }
+.home[aria-pressed="true"] { border-color: var(--steel); box-shadow: inset 0 0 0 1px var(--steel); }
+.home .name { font-family: var(--display); font-size: 20px; font-weight: 600; line-height: 1.15; overflow-wrap: anywhere; }
+.home .meta { font-size: 13px; color: var(--ink-3); }
+.home .total { font-family: var(--mono); font-size: 26px; font-weight: 500; letter-spacing: -.01em; }
+.home .range { font-size: 13px; color: var(--ink-2); }
+.home .bar { height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+.home .bar i { display: block; height: 100%; background: var(--pencil); border-radius: 3px; transition: width .25s; }
+.home .tag { position: absolute; top: 12px; right: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); }
+.add-home { border: 1px dashed var(--rule-2); background: transparent; border-radius: 6px; padding: 14px; cursor: pointer; color: var(--ink-2); min-height: 120px; }
+.add-home:hover { color: var(--ink); border-color: var(--ink-3); }
+
+/* active home editor */
+.editor { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+.editor-head { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; padding: 16px; border-bottom: 1px solid var(--rule); }
+.editor-head .ctl.grow { flex: 1 1 220px; }
+.editor-head .ctl.grow .field { width: 100%; }
+.linkbtn { background: none; border: 0; color: var(--steel); cursor: pointer; padding: 6px 2px; text-decoration: underline; text-underline-offset: 3px; }
+.linkbtn.danger { color: var(--bad); }
+
+.group { border-bottom: 1px solid var(--rule); }
+.group:last-child { border-bottom: 0; }
+.group-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 16px 6px; }
+.group-head .num { color: var(--ink-2); font-size: 14px; }
+
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 132px 120px 28px; gap: 12px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--rule); }
+.row.colhead { border-top: 0; padding-block: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
+.row.colhead > :nth-child(n+2) { text-align: right; }
+.row.has-qty { background: linear-gradient(90deg, var(--pencil-soft), transparent 60%); }
+.item-name { min-width: 0; }
+.item-name b { font-weight: 500; }
+.item-name .unit { display: block; font-size: 12px; color: var(--ink-3); }
+.qty { display: flex; justify-content: flex-end; }
+.qty input { width: 88px; text-align: right; }
+.rate, .line { text-align: right; }
+.rate .num { display: block; }
+.line .num { font-weight: 500; }
+.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; letter-spacing: .02em; white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.chip.local { background: var(--steel-soft); color: var(--steel); }
+.expand { width: 28px; height: 28px; border: 1px solid var(--rule-2); background: transparent; border-radius: 4px; cursor: pointer; display: grid; place-items: center; color: var(--ink-2); }
+.expand svg { transition: transform .15s; }
+.expand[aria-expanded="true"] svg { transform: rotate(90deg); }
+
+.detail { padding: 4px 16px 16px; display: grid; gap: 10px; }
+.src-table-wrap { overflow-x: auto; }
+.src-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 520px; }
+.src-table th, .src-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.src-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
+.src-table td.r, .src-table th.r { text-align: right; }
+.src-table tr.blend td { font-weight: 600; border-bottom: 0; }
+.src-table .note { color: var(--ink-3); font-size: 12px; }
+.local-entry { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; background: var(--steel-soft); border-radius: 5px; }
+.local-entry label { font-weight: 500; }
+.local-entry .field { width: 110px; text-align: right; }
+
+/* spread meter */
+.spread { position: relative; height: 18px; margin-top: 2px; }
+.spread .track { position: absolute; left: 0; right: 0; top: 8px; height: 2px; background: var(--rule-2); }
+.spread .seg-r { position: absolute; top: 5px; height: 8px; border-radius: 4px; opacity: .55; }
+.spread .dot { position: absolute; top: 3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; border: 2px solid var(--sheet); }
+.spread .avg { position: absolute; top: 0; width: 2px; height: 18px; margin-left: -1px; background: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+/* method */
+.method { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.method > div { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.method ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.footnote { font-size: 12px; color: var(--ink-3); max-width: 80ch; }
+
+@media (max-width: 720px) {
+  .row { grid-template-columns: minmax(0, 1fr) 88px 28px; grid-template-areas: "name qty exp" "rate line line"; row-gap: 4px; }
+  .row .item-name { grid-area: name; } .row .qty { grid-area: qty; } .row .expand { grid-area: exp; }
+  .row .rate { grid-area: rate; text-align: left; } .row .line { grid-area: line; }
+  .row .rate .num { display: inline; margin-right: 6px; }
+  .row.colhead { display: none; }
+  .qty input { width: 80px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <div class="eyebrow">Lift Off Realty · Buyer tools</div>
+    <h1>Remodel Cost Comparison</h1>
+    <p class="lede">Price the same scope of work on up to three homes with the same assumptions. Each line blends published cost data from three sources, adjusted to the Idaho Falls market, so you can compare homes on equal terms.</p>
+  </header>
+
+  <section class="controls" aria-label="Assumptions">
+    <div class="ctl">
+      <span>Finish level</span>
+      <div class="seg" role="group" aria-label="Finish level" id="level">
+        <button type="button" data-level="low">Budget</button>
+        <button type="button" data-level="mid">Mid-range</button>
+        <button type="button" data-level="high">Upper</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Idaho Falls factor</span>
+      <input class="field num" id="factor" type="number" step="0.01" min="0.5" max="1.5" inputmode="decimal" aria-describedby="factor-help">
+    </div>
+    <label class="check" for="useLocal"><input type="checkbox" id="useLocal"> Include agent bids in the average</label>
+    <label class="check" for="localDouble"><input type="checkbox" id="localDouble"> Count agent bids twice</label>
+    <p class="small muted" id="factor-help" style="flex-basis:100%">The factor scales national-average sources to local labor and material costs. Sources that already price by ZIP code are not scaled.</p>
+  </section>
+
+  <section aria-label="Homes being compared" class="homes" id="homes"></section>
+
+  <section class="editor" id="editor" aria-label="Scope of work"></section>
+
+  <section class="method" aria-label="Method and sources">
+    <div>
+      <h2>How each number is built</h2>
+      <ul>
+        <li>Each source gives a typical installed range (labor and materials) for one unit, such as a roofing square or a square foot of LVP.</li>
+        <li>Budget uses the low end of each range, Upper uses the high end, and Mid-range uses the midpoint.</li>
+        <li>National sources are multiplied by the Idaho Falls factor. Sources that already price by ZIP code are used as published.</li>
+        <li>The blended rate is the plain average of every source with data. Agent bids join that average when included.</li>
+        <li>The chip on each line shows how closely the sources agree. Wide spread means the item needs a real bid.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Sources</h2>
+      <ul id="source-list"></ul>
+      <p class="footnote" id="data-note"></p>
+    </div>
+  </section>
+
+  <p class="footnote">These are planning estimates for comparing homes, not bids. Actual costs depend on the house's condition, access, permits, material choices and contractor availability. Get written bids before you rely on any number here. Agent bids you enter are saved only in this browser.</p>
+</div>
+
+<script>
+// ─── COST DATA ────────────────────────────────────────────────────────────────
+// Each source: typical installed range [low, high] per unit, or null where the source has no data.
+// "localized: true" sources already price for Idaho Falls ZIP codes and are not scaled by the factor.
+const DATA = /*DATA*/{}/*END*/;
+
+// ─── SCOPE ITEMS ─────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { id: "ext", name: "Exterior" },
+  { id: "int", name: "Interior" },
+  { id: "kb",  name: "Kitchen & bath" },
+  { id: "sys", name: "Systems" },
+];
+const ITEMS = [
+  { id: "roof_asphalt", cat: "ext", name: "Roof, architectural asphalt shingle", unit: "square", unitLong: "per roofing square (100 sq ft), tear-off and replace" },
+  { id: "siding_vinyl", cat: "ext", name: "Vinyl siding", unit: "sq ft", unitLong: "per sq ft of wall" },
+  { id: "ext_paint",    cat: "ext", name: "Exterior paint", unit: "sq ft", unitLong: "per sq ft of painted wall surface" },
+  { id: "windows",      cat: "ext", name: "Replacement window, vinyl", unit: "window", unitLong: "per standard-size window, installed" },
+  { id: "garage_door",  cat: "ext", name: "Garage door, 16×7 insulated steel", unit: "door", unitLong: "per door, installed" },
+  { id: "entry_door",   cat: "ext", name: "Entry door, steel prehung", unit: "door", unitLong: "per door, installed" },
+  { id: "concrete",     cat: "ext", name: "Concrete driveway / flatwork", unit: "sq ft", unitLong: "per sq ft, remove and pour" },
+  { id: "fence",        cat: "ext", name: "Privacy fence, 6 ft", unit: "lin ft", unitLong: "per linear foot" },
+  { id: "sprinkler",    cat: "ext", name: "Lawn sprinkler system", unit: "zone", unitLong: "per zone" },
+  { id: "int_paint",    cat: "int", name: "Interior paint, walls and ceilings", unit: "sq ft", unitLong: "per sq ft of floor area" },
+  { id: "lvp",          cat: "int", name: "Luxury vinyl plank flooring", unit: "sq ft", unitLong: "per sq ft, installed" },
+  { id: "carpet",       cat: "int", name: "Carpet and pad", unit: "sq ft", unitLong: "per sq ft, installed" },
+  { id: "drywall",      cat: "int", name: "Drywall, hang and finish", unit: "sq ft", unitLong: "per sq ft of drywall" },
+  { id: "basement_finish", cat: "int", name: "Basement finish", unit: "sq ft", unitLong: "per sq ft of basement finished" },
+  { id: "int_doors",    cat: "int", name: "Interior door, prehung", unit: "door", unitLong: "per door, installed" },
+  { id: "cabinets",     cat: "kb",  name: "Kitchen cabinets, mid-grade", unit: "lin ft", unitLong: "per linear foot of cabinet run" },
+  { id: "countertops",  cat: "kb",  name: "Quartz countertops", unit: "sq ft", unitLong: "per sq ft of counter" },
+  { id: "appliances",   cat: "kb",  name: "Appliance package, 4-piece mid-range", unit: "package", unitLong: "fridge, range, dishwasher, microwave" },
+  { id: "bath_full",    cat: "kb",  name: "Full bathroom remodel, mid-range", unit: "bath", unitLong: "per bathroom, about 5×8" },
+  { id: "bath_refresh", cat: "kb",  name: "Bath refresh: vanity, toilet, fixtures", unit: "bath", unitLong: "per bathroom" },
+  { id: "furnace",      cat: "sys", name: "Gas furnace replacement", unit: "unit", unitLong: "per furnace" },
+  { id: "ac",           cat: "sys", name: "Central AC, 3 ton", unit: "unit", unitLong: "per system" },
+  { id: "water_heater", cat: "sys", name: "Water heater, 50 gal gas", unit: "unit", unitLong: "per heater" },
+  { id: "panel",        cat: "sys", name: "Electrical panel, 200A upgrade", unit: "panel", unitLong: "per panel" },
+  { id: "radon",        cat: "sys", name: "Radon mitigation system", unit: "system", unitLong: "per system (Bonneville County is a high-radon area)" },
+];
+
+// ─── EXAMPLE HOMES ───────────────────────────────────────────────────────────
+const EXAMPLE_HOMES = [
+  { id: "ex1", example: true, name: "Example: 1978 rambler", address: "Idaho Falls, 83401", sqft: 1850,
+    qty: { roof_asphalt: 22, windows: 12, int_paint: 1850, lvp: 1100, carpet: 600, cabinets: 18, countertops: 45, bath_refresh: 2, furnace: 1, water_heater: 1, panel: 1, radon: 1 } },
+  { id: "ex2", example: true, name: "Example: 2004 two-story", address: "Ammon, 83406", sqft: 2400,
+    qty: { int_paint: 2400, carpet: 900, lvp: 500, basement_finish: 1000, drywall: 3600, bath_full: 1, sprinkler: 2, ac: 1, water_heater: 1 } },
+];
+
+// ─── STATE ───────────────────────────────────────────────────────────────────
+const STORE_KEY = "lor-remodel-v1";
+const DEFAULT_STATE = {
+  level: "mid",
+  factor: null,          // null → use DATA.locationFactor.value
+  useLocal: true,
+  localDouble: false,
+  local: {},             // itemId → agent $/unit
+  homes: EXAMPLE_HOMES,
+  active: "ex1",
+  open: {},
+};
+let state = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return Object.assign({}, structuredClone(DEFAULT_STATE), JSON.parse(raw), { open: {} });
+  } catch (e) {}
+  return structuredClone(DEFAULT_STATE);
+}
+function save() {
+  try { const { open, ...rest } = state; localStorage.setItem(STORE_KEY, JSON.stringify(rest)); } catch (e) {}
+}
+
+// ─── MATH ────────────────────────────────────────────────────────────────────
+const SRC_COLORS = ["var(--steel)", "var(--ok)", "var(--warn)"];
+function factor() { return state.factor ?? DATA.locationFactor?.value ?? 1; }
+function pick(r, level) { return level === "low" ? r[0] : level === "high" ? r[1] : (r[0] + r[1]) / 2; }
+
+// Per-source unit values for an item, at the current level, after the location factor.
+function sourceValues(item, level = state.level) {
+  return DATA.sources.map((s, i) => {
+    const r = s.items[item.id];
+    if (!r) return { source: s, idx: i, value: null };
+    const f = s.localized ? 1 : factor();
+    return { source: s, idx: i, value: pick([r.low, r.high], level) * f, low: r.low * f, high: r.high * f, raw: r };
+  });
+}
+function localValue(item) {
+  const v = Number(state.local[item.id]);
+  return state.local[item.id] !== undefined && state.local[item.id] !== "" && v > 0 ? v : null;
+}
+function blended(item, level = state.level) {
+  const vals = sourceValues(item, level).filter(v => v.value != null).map(v => v.value);
+  const loc = localValue(item);
+  if (state.useLocal && loc != null) { vals.push(loc); if (state.localDouble) vals.push(loc); }
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+// Agreement between published sources at the midpoint: (max − min) / mean.
+function agreement(item) {
+  const mids = sourceValues(item, "mid").filter(v => v.value != null).map(v => v.value);
+  if (mids.length < 2) return { cls: "warn", label: mids.length ? "1 source" : "No data" };
+  const mean = mids.reduce((a, b) => a + b, 0) / mids.length;
+  const spread = (Math.max(...mids) - Math.min(...mids)) / mean;
+  if (spread <= 0.25) return { cls: "ok", label: "Sources agree", spread };
+  if (spread <= 0.6) return { cls: "warn", label: "Some spread", spread };
+  return { cls: "bad", label: "Wide spread", spread };
+}
+function homeTotal(home, level = state.level) {
+  let t = 0;
+  for (const item of ITEMS) {
+    const q = Number(home.qty[item.id]) || 0;
+    if (!q) continue;
+    const b = blended(item, level);
+    if (b != null) t += q * b;
+  }
+  return t;
+}
+
+// ─── FORMAT ──────────────────────────────────────────────────────────────────
+const usd0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const usd2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function money(v) { return v == null ? "—" : usd0.format(v); }
+function rate(v) { return v == null ? "—" : v < 100 ? usd2.format(v) : usd0.format(v); }
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+const activeHome = () => state.homes.find(h => h.id === state.active) || state.homes[0];
+
+// ─── RENDER: HOMES ───────────────────────────────────────────────────────────
+function renderHomes() {
+  const totals = state.homes.map(h => homeTotal(h));
+  const max = Math.max(1, ...totals);
+  const el = document.getElementById("homes");
+  el.innerHTML = state.homes.map((h, i) => {
+    const t = totals[i], lo = homeTotal(h, "low"), hi = homeTotal(h, "high");
+    const count = ITEMS.filter(it => Number(h.qty[it.id]) > 0).length;
+    const psf = h.sqft ? t / h.sqft : null;
+    return `<button type="button" class="home" data-home="${h.id}" aria-pressed="${h.id === state.active}">
+      ${h.example ? '<span class="tag">Example</span>' : ""}
+      <span class="name">${esc(h.name || "Untitled home")}</span>
+      <span class="meta">${esc(h.address || "No address")} · ${h.sqft ? Number(h.sqft).toLocaleString() + " sq ft" : "sq ft not set"}</span>
+      <span class="total" data-total="${h.id}">${money(t)}</span>
+      <span class="bar"><i style="width:${(t / max) * 100}%"></i></span>
+      <span class="range"><span class="num">${money(lo)} – ${money(hi)}</span> budget to upper · ${count} item${count === 1 ? "" : "s"}${psf ? ` · <span class="num">${usd0.format(psf)}</span>/sq ft` : ""}</span>
+    </button>`;
+  }).join("") + (state.homes.length < 3 ? `<button type="button" class="add-home" id="addHome">+ Add a home to compare</button>` : "");
+}
+
+// ─── RENDER: SCOPE EDITOR ────────────────────────────────────────────────────
+const chevron = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+
+function renderEditor() {
+  const h = activeHome();
+  const el = document.getElementById("editor");
+  el.innerHTML = `
+    <div class="editor-head">
+      <label class="ctl grow" for="hName"><span>Home</span><input class="field" id="hName" value="${esc(h.name)}" placeholder="e.g. 123 Main St"></label>
+      <label class="ctl grow" for="hAddr"><span>Area or address</span><input class="field" id="hAddr" value="${esc(h.address)}" placeholder="City, ZIP"></label>
+      <label class="ctl" for="hSqft"><span>Finished sq ft</span><input class="field num" id="hSqft" type="number" min="0" inputmode="numeric" value="${h.sqft ?? ""}"></label>
+      <button type="button" class="linkbtn" id="copyScope">Copy scope to other homes</button>
+      ${state.homes.length > 1 ? `<button type="button" class="linkbtn danger" id="removeHome">Remove this home</button>` : ""}
+    </div>
+    ${CATEGORIES.map(cat => {
+      const items = ITEMS.filter(i => i.cat === cat.id);
+      return `<div class="group">
+        <div class="group-head"><h3>${cat.name}</h3><span class="num" data-cat="${cat.id}"></span></div>
+        <div class="row colhead"><span>Item</span><span>Qty</span><span>Blended rate</span><span>Line total</span><span></span></div>
+        ${items.map(item => rowHtml(item, h)).join("")}
+      </div>`;
+    }).join("")}`;
+  updateNumbers();
+}
+
+function rowHtml(item, h) {
+  const q = h.qty[item.id] ?? "";
+  const open = !!state.open[item.id];
+  return `<div class="row${Number(q) > 0 ? " has-qty" : ""}" data-row="${item.id}">
+      <div class="item-name"><b>${item.name}</b><span class="unit">${item.unitLong}</span></div>
+      <div class="qty"><input class="field num" type="number" min="0" step="any" inputmode="decimal" id="q-${item.id}" data-qty="${item.id}" value="${q}" placeholder="0" aria-label="${item.name} quantity, ${item.unit}"></div>
+      <div class="rate"><span class="num" data-rate="${item.id}"></span><span data-chip="${item.id}"></span></div>
+      <div class="line"><span class="num" data-line="${item.id}"></span></div>
+      <button type="button" class="expand" data-expand="${item.id}" aria-expanded="${open}" aria-controls="d-${item.id}" aria-label="Show sources for ${item.name}">${chevron}</button>
+    </div>
+    <div class="detail" id="d-${item.id}" ${open ? "" : "hidden"}>${open ? detailHtml(item) : ""}</div>`;
+}
+
+function detailHtml(item) {
+  const vals = sourceValues(item);
+  const loc = localValue(item);
+  const b = blended(item);
+  // spread meter across low–high of every source, plus local bid and the blended average
+  const pts = vals.filter(v => v.value != null);
+  const lo = Math.min(...pts.map(v => v.low), loc ?? Infinity, b ?? Infinity);
+  const hi = Math.max(...pts.map(v => v.high), loc ?? -Infinity, b ?? -Infinity);
+  const pos = x => hi > lo ? ((x - lo) / (hi - lo)) * 100 : 50;
+  const meter = pts.length ? `<div class="spread" aria-hidden="true"><div class="track"></div>
+      ${pts.map(v => `<div class="seg-r" style="left:${pos(v.low)}%;width:${Math.max(1, pos(v.high) - pos(v.low))}%;background:${SRC_COLORS[v.idx]}"></div>`).join("")}
+      ${pts.map(v => `<div class="dot" style="left:${pos(v.value)}%;background:${SRC_COLORS[v.idx]}"></div>`).join("")}
+      ${loc != null ? `<div class="dot" style="left:${pos(loc)}%;background:var(--ink)"></div>` : ""}
+      ${b != null ? `<div class="avg" style="left:${pos(b)}%"></div>` : ""}
+    </div>
+    <div class="legend">${pts.map(v => `<span><i style="background:${SRC_COLORS[v.idx]}"></i>${esc(v.source.name)}</span>`).join("")}${loc != null ? `<span><i style="background:var(--ink)"></i>Agent bid</span>` : ""}<span><i style="background:var(--ink);border-radius:0;width:2px"></i>Blended rate</span><span class="num">${rate(lo)} – ${rate(hi)}</span></div>` : "";
+  return `
+    ${meter}
+    <div class="src-table-wrap"><table class="src-table">
+      <thead><tr><th>Source</th><th class="r">Published range</th><th class="r">Adjusted range</th><th class="r">Used (${{ low: "budget", mid: "mid", high: "upper" }[state.level]})</th><th>Notes</th></tr></thead>
+      <tbody>
+        ${vals.map(v => v.value == null
+          ? `<tr><td>${esc(v.source.name)}</td><td class="r muted" colspan="3">No published figure</td><td class="note"></td></tr>`
+          : `<tr><td>${v.raw.url ? `<a href="${esc(v.raw.url)}" target="_blank" rel="noopener">${esc(v.source.name)}</a>` : esc(v.source.name)}</td>
+               <td class="r num">${rate(v.raw.low)} – ${rate(v.raw.high)}</td>
+               <td class="r num">${v.source.localized ? "local, not scaled" : `${rate(v.low)} – ${rate(v.high)}`}</td>
+               <td class="r num">${rate(v.value)}</td>
+               <td class="note">${esc(v.raw.note || "")}</td></tr>`).join("")}
+        <tr><td>Agent / local bid</td><td class="r muted" colspan="2">${loc != null ? (state.useLocal ? "included in average" : "entered, not included") : "none entered"}</td><td class="r num">${loc != null ? rate(loc) : "—"}</td><td></td></tr>
+        <tr class="blend"><td>Blended rate</td><td></td><td></td><td class="r num">${rate(b)}</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <div class="local-entry">
+      <label for="l-${item.id}">What are you seeing locally?</label>
+      <input class="field num" id="l-${item.id}" data-local="${item.id}" type="number" min="0" step="any" inputmode="decimal" value="${state.local[item.id] ?? ""}" placeholder="$ / ${item.unit}">
+      <span class="small muted">$ per ${item.unit}, from a recent bid or invoice. Applies to every home.</span>
+    </div>`;
+}
+
+// Refresh every number without rebuilding inputs, so typing keeps focus.
+function updateNumbers() {
+  const h = activeHome();
+  const catTotals = {};
+  for (const item of ITEMS) {
+    const q = Number(h.qty[item.id]) || 0;
+    const b = blended(item);
+    const line = q && b != null ? q * b : 0;
+    catTotals[item.cat] = (catTotals[item.cat] || 0) + line;
+    const r = document.querySelector(`[data-rate="${item.id}"]`);
+    if (!r) continue;
+    r.textContent = b == null ? "—" : `${rate(b)} / ${item.unit}`;
+    const ag = agreement(item);
+    const usingLocal = state.useLocal && localValue(item) != null;
+    document.querySelector(`[data-chip="${item.id}"]`).innerHTML =
+      `<span class="chip ${ag.cls}" title="${ag.spread != null ? `Source midpoints differ by ${Math.round(ag.spread * 100)}%` : ""}">${ag.label}</span>${usingLocal ? ' <span class="chip local">+ agent bid</span>' : ""}`;
+    document.querySelector(`[data-line="${item.id}"]`).textContent = q ? money(line) : "—";
+    document.querySelector(`[data-row="${item.id}"]`).classList.toggle("has-qty", q > 0);
+  }
+  for (const cat of CATEGORIES) {
+    const el = document.querySelector(`[data-cat="${cat.id}"]`);
+    if (el) el.textContent = catTotals[cat.id] ? money(catTotals[cat.id]) : "";
+  }
+  renderHomes();
+}
+
+function renderDetail(id) {
+  const item = ITEMS.find(i => i.id === id);
+  const d = document.getElementById("d-" + id);
+  if (d && state.open[id]) d.innerHTML = detailHtml(item);
+}
+
+function renderControls() {
+  document.querySelectorAll("#level button").forEach(b => b.setAttribute("aria-pressed", b.dataset.level === state.level));
+  document.getElementById("factor").value = factor().toFixed(2);
+  document.getElementById("useLocal").checked = state.useLocal;
+  document.getElementById("localDouble").checked = state.localDouble;
+  document.getElementById("localDouble").disabled = !state.useLocal;
+  document.getElementById("source-list").innerHTML = DATA.sources.map((s, i) =>
+    `<li><i style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${SRC_COLORS[i]};margin-right:6px"></i><a href="${esc(s.home)}" target="_blank" rel="noopener">${esc(s.name)}</a>: ${esc(s.summary)}</li>`).join("") +
+    `<li>Idaho Falls factor: ${esc(DATA.locationFactor?.basis || "")}</li>`;
+  document.getElementById("data-note").textContent = DATA.asOf ? `Data collected ${DATA.asOf}. ${DATA.note || ""}` : "";
+}
+
+function renderAll() { renderControls(); renderEditor(); }
+
+// ─── EVENTS ──────────────────────────────────────────────────────────────────
+document.addEventListener("click", e => {
+  const lv = e.target.closest("#level button");
+  if (lv) { state.level = lv.dataset.level; save(); renderControls(); refreshOpenDetails(); updateNumbers(); return; }
+  const home = e.target.closest("[data-home]");
+  if (home) { state.active = home.dataset.home; save(); renderEditor(); return; }
+  if (e.target.closest("#addHome")) {
+    const id = "h" + Date.now().toString(36);
+    state.homes.push({ id, name: "", address: "", sqft: null, qty: {} });
+    state.active = id; save(); renderEditor();
+    document.getElementById("hName").focus();
+    return;
+  }
+  if (e.target.closest("#removeHome")) {
+    const h = activeHome();
+    const btn = e.target.closest("#removeHome");
+    if (btn.dataset.confirm !== "1") { btn.dataset.confirm = "1"; btn.textContent = "Click again to remove " + (h.name || "this home"); return; }
+    state.homes = state.homes.filter(x => x.id !== h.id);
+    state.active = state.homes[0].id; save(); renderEditor(); return;
+  }
+  if (e.target.closest("#copyScope")) {
+    const h = activeHome();
+    state.homes.forEach(o => { if (o.id !== h.id) o.qty = { ...h.qty }; });
+    save(); updateNumbers();
+    const btn = e.target.closest("#copyScope"); btn.textContent = "Scope copied";
+    setTimeout(() => { if (btn.isConnected) btn.textContent = "Copy scope to other homes"; }, 1600);
+    return;
+  }
+  const ex = e.target.closest("[data-expand]");
+  if (ex) {
+    const id = ex.dataset.expand;
+    state.open[id] = !state.open[id];
+    ex.setAttribute("aria-expanded", state.open[id]);
+    const d = document.getElementById("d-" + id);
+    d.hidden = !state.open[id];
+    if (state.open[id]) d.innerHTML = detailHtml(ITEMS.find(i => i.id === id));
+  }
+});
+
+function refreshOpenDetails() { Object.keys(state.open).forEach(id => state.open[id] && renderDetail(id)); }
+
+document.addEventListener("input", e => {
+  const t = e.target;
+  const h = activeHome();
+  if (t.dataset.qty) {
+    if (t.value === "") delete h.qty[t.dataset.qty]; else h.qty[t.dataset.qty] = Number(t.value);
+    if (h.example) h.example = false;
+    save(); updateNumbers(); return;
+  }
+  if (t.dataset.local) {
+    if (t.value === "") delete state.local[t.dataset.local]; else state.local[t.dataset.local] = Number(t.value);
+    save(); updateNumbers();
+    // rebuild the detail table but keep focus in the local input
+    const id = t.dataset.local, pos = t.selectionStart;
+    renderDetail(id);
+    const ni = document.getElementById("l-" + id);
+    if (ni) { ni.focus(); try { ni.setSelectionRange(pos, pos); } catch (_) {} }
+    return;
+  }
+  if (t.id === "hName") { h.name = t.value; h.example = false; save(); renderHomes(); return; }
+  if (t.id === "hAddr") { h.address = t.value; save(); renderHomes(); return; }
+  if (t.id === "hSqft") { h.sqft = t.value === "" ? null : Number(t.value); save(); renderHomes(); return; }
+  if (t.id === "factor") {
+    const v = Number(t.value);
+    if (v >= 0.5 && v <= 1.5) { state.factor = v; save(); refreshOpenDetails(); updateNumbers(); }
+    return;
+  }
+});
+document.addEventListener("change", e => {
+  if (e.target.id === "useLocal") { state.useLocal = e.target.checked; save(); renderControls(); refreshOpenDetails(); updateNumbers(); }
+  if (e.target.id === "localDouble") { state.localDouble = e.target.checked; save(); refreshOpenDetails(); updateNumbers(); }
+});
+
+renderAll();
+</script>
+</body>
+</html>
