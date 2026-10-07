@@ -920,6 +920,15 @@ export class Renderer3D {
       else this.putRod([e.x, e.y, hz], [e.x + Math.cos(e.heading + swing) * reach, e.y + Math.sin(e.heading + swing) * reach, hz + 0.1 + swing * 0.15], 0.025, big ? 0x3b3b3b : 0xd0d0d0)
     }
 
+    // Barred gates: a beam across the door, both faces.
+    for (const i of game.gateLocks.keys()) {
+      const w = game.world
+      const x = (i % w.w) + 0.5
+      const y = ((i / w.w) | 0) + 0.5
+      const alongX = this.connects(w, x - 0.5, y - 0.5, 1, 0) || this.connects(w, x - 0.5, y - 0.5, -1, 0) || !(this.connects(w, x - 0.5, y - 0.5, 0, 1) || this.connects(w, x - 0.5, y - 0.5, 0, -1))
+      const z = w.minGround(i) + 0.45
+      this.put('box', new THREE.Vector3(x, z, y), new THREE.Quaternion(), alongX ? new THREE.Vector3(0.5, 0.09, 0.2) : new THREE.Vector3(0.2, 0.09, 0.5), 0x4a4038)
+    }
     for (const l of game.ladders) {
       const g = game.ladderGeom(l)
       this.ladder([g.fx, g.fy, g.fz], [g.tx, g.ty, g.tz])

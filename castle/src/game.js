@@ -10,6 +10,9 @@ const SPAWN_INTERVAL = 0.75
 const THINK = 0.4 // seconds between unit decisions
 const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+// Gates are barred while an enemy is this close (tiles), before your
+// swordsmen guarding nearby would charge out at it.
+const GATE_BAR_RANGE = 3.2
 
 const SAVE_VERSION = 1
 // Wall strengths, weakest first. Painting a stronger one over a weaker one
@@ -37,6 +40,7 @@ export class Game {
     this.ladders = [] // ladders standing against walls
     this.fallen = [] // ladders pushed off, lying where they fell
     this.intruders = [] // attackers inside the keep, climbing to the lord
+    this.gateLocks = new Map() // gate tile -> seconds it stays barred
     this.effects = [] // dust puffs and the like, purely visual
     this.floaters = []
     this.spawnQueue = []
@@ -580,7 +584,28 @@ export class Game {
   // into the keep by its door, and walk along connected ramparts up there.
   troopPassable(i) {
     const t = this.world.tiles[i].type
-    return this.world.isWalkable(i) || t === 'gate'
+    return this.world.isWalkable(i) || (t === 'gate' && !this.gateLocks.has(i))
+  }
+
+  // Gates are barred while enemies are at them (and a moment after), so
+  // your swordsmen don't throw them open and charge out into the attack.
+  updateGateLocks(dt) {
+    const { world } = this
+    for (const [i, t] of this.gateLocks) {
+      if (t - dt <= 0 || world.tiles[i].type !== 'gate') this.gateLocks.delete(i)
+      else this.gateLocks.set(i, t - dt)
+    }
+    for (const e of this.enemies) {
+      if (e.dead || e.gone || this.elevated(e)) continue
+      const R = GATE_BAR_RANGE
+      for (let y = Math.floor(e.y - R); y <= Math.floor(e.y + R); y++)
+        for (let x = Math.floor(e.x - R); x <= Math.floor(e.x + R); x++) {
+          if (!world.inBounds(x, y)) continue
+          const i = world.idx(x, y)
+          if (world.tiles[i].type !== 'gate') continue
+          if (Math.hypot(x + 0.5 - e.x, y + 0.5 - e.y) <= R) this.gateLocks.set(i, 1.5)
+        }
+    }
   }
 
   stairFace(i) {
@@ -805,6 +830,11 @@ export class Game {
     // Follow the route tile by tile (up stairs, along walls), then close in
     // on the target or post at the same level.
     const speed = SWORDSMAN.speed * (s.up ? 1 : world.slow(here))
+    const next = s.path[0]
+    if (next !== undefined && !(next & 1) && next >> 1 !== here && this.gateLocks.has(next >> 1)) {
+      s.path = [] // barred: wait for a new route
+      s.think = Math.min(s.think, 0.1)
+    }
     if (s.path.length) {
       const [tx, ty] = this.center(s.path[0] >> 1)
       const dx = tx - s.x
@@ -927,6 +957,7 @@ export class Game {
     this.effects = this.effects.filter((fx) => fx.t < fx.life)
     if (this.world.dirty) this.repath()
 
+    this.updateGateLocks(dt)
     for (const a of this.archers) this.updateArcher(a, dt)
     for (const s of this.swordsmen) this.updateSwordsman(s, dt)
     this.reapDefenders()
@@ -1001,6 +1032,7 @@ export class Game {
     this.ladders = []
     this.fallen = []
     this.intruders = []
+    this.gateLocks.clear()
     this.world.keep.doorHp = this.world.keep.doorMax
     this.world.keep.inside = 0
     this.world.dirty = true
@@ -1023,7 +1055,7 @@ export class Game {
 
   // `mode`: 'troop' (your swordsmen, through gates), 'troopUp' (your
   // swordsmen on the ramparts), 'climb' (foot soldiers, up ladders) or null.
-  blockedAt(x, y, r, mode = null) {
+  blockedAt(x, y, r, mode = null, from = -1) {
     const { world } = this
     // >= so a unit flush with the far edge never reads past the grid.
     if (x - r < 0 || y - r < 0 || x + r >= world.w || y + r >= world.h) return true
@@ -1036,7 +1068,7 @@ export class Game {
         const i = world.idx(tx, ty)
         if (mode === 'troopUp') {
           if (!world.isRampart(i)) return true
-        } else if (mode === 'troop' ? !this.troopPassable(i) : !world.isWalkable(i) && !(mode === 'climb' && world.tiles[i].ladder)) return true
+        } else if (mode === 'troop' ? !this.troopPassable(i) && i !== from : !world.isWalkable(i) && !(mode === 'climb' && world.tiles[i].ladder)) return true
       }
     return false
   }
@@ -1045,8 +1077,9 @@ export class Game {
   tryMove(u, dx, dy) {
     const cr = u.r * 0.8
     const mode = u.kind === 'swordsman' ? (u.up ? 'troopUp' : 'troop') : u.kind === 'archer' ? null : this.climbs(u) ? 'climb' : null
-    if (dx && !this.blockedAt(u.x + dx, u.y, cr, mode)) u.x += dx
-    if (dy && !this.blockedAt(u.x, u.y + dy, cr, mode)) u.y += dy
+    const from = this.world.idxAt(u.x, u.y)
+    if (dx && !this.blockedAt(u.x + dx, u.y, cr, mode, from)) u.x += dx
+    if (dy && !this.blockedAt(u.x, u.y + dy, cr, mode, from)) u.y += dy
   }
 
   nearestDefender(x, y, range) {

@@ -781,3 +781,35 @@ test('swordsmen posted on the keep shield the lord', () => {
   assert.ok(lordAfter(2) > lordAfter(0))
   assert.equal(lordAfter(2), 1000, 'the guards took the blows')
 })
+
+test('a gate stays barred while enemies are at it, so swordsmen stay inside', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const { world } = game
+  const tiles = ring(game, 3)
+  const gate = tiles[3] // middle of the north side
+  for (const i of tiles) game.place(i, i === gate ? 'gate' : 'wall')
+  game.archers = []
+  const gx = gate % world.w
+  const gy = (gate / world.w) | 0
+  // Guard post just inside the gate: the raider outside is within reach.
+  game.place(world.idx(gx, gy + 1), 'swordsman')
+  const s = game.swordsmen[0]
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'brute', spawn: { x: gx, y: gy - 6 }, hpMult: 20 })
+  let wentOut = false
+  for (let t = 0; t < 16; t += 1 / 60) {
+    game.update(1 / 60)
+    if (s.y < gy) wentOut = true
+  }
+  assert.ok(game.gateLocks.has(gate), 'gate is barred')
+  assert.ok(e.attacking, 'the brute is battering the gate')
+  assert.equal(wentOut, false, 'the swordsman stayed inside')
+  // Once the enemy is gone the gate opens again.
+  e.dead = true
+  game.enemies = []
+  step(game, 2)
+  assert.ok(!game.gateLocks.has(gate))
+  assert.ok(game.troopPath(world.idx(gx, gy + 1), world.idx(gx, gy - 2)), 'route out reopens')
+})

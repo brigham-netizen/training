@@ -69,6 +69,9 @@ and it's still there if the wall falls.
 Paint a stronger wall over a weaker one (stone over palisade, thick over
 either) to upgrade it in place for the difference in price.
 A gate can be dropped into any wall the same way.
+Gates are barred while an enemy is within about 3 tiles of them (a beam
+shows across the door), so swordsmen guarding nearby hold inside instead of
+charging out. They open again a moment after the attackers are gone.
 
 Stairs (4) go against a wall, gate, tower or the keep. Swordsmen use them to
 climb onto the ramparts, walk along connected walls, and fight raiders coming

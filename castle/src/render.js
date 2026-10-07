@@ -333,6 +333,7 @@ export class Renderer {
     for (const s of game.swordsmen) addUnit(s, 2)
     // Gates swing open while your troops pass through.
     this.openGates = new Set(game.swordsmen.map((s) => world.idxAt(s.x, s.y)))
+    this.barred = game.gateLocks
 
     const order = []
     for (let i = 0; i < world.tiles.length; i++) {
@@ -1084,6 +1085,13 @@ export class Renderer {
     }
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
+    if (this.barred?.has(i) && !this.openGates?.has(i)) {
+      // Barred: a heavy beam across the door on both faces.
+      const bz = fz + 0.42
+      parts.push(alongX
+        ? [x + 0.26, y + 0.38, x + 0.74, y + 0.62, bz, bz + 0.1, [70, 64, 58], [96, 90, 82]]
+        : [x + 0.38, y + 0.26, x + 0.62, y + 0.74, bz, bz + 0.1, [70, 64, 58], [96, 90, 82]])
+    }
     for (const p of parts) this.box(...p, 0, true, p[6] === side ? 'stone' : null)
     if (world.tiles[i].hoard) {
       if (alongX) this.edgeRails(x, y + 0.12, x + 1, y + 0.88, z + h, 5)

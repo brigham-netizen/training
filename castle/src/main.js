@@ -555,7 +555,7 @@ const HELP = `
   <ul>
     <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can. Soldiers on foot can't break stone: they hack through gates and wood, or climb over with ladders.</li>
     <li><b>Towers and archers</b>: drag to aim, release to place. Archers stand on walls, towers and the keep, and walk along connected stone to reach attackers. Height adds range: towers most, then thick walls and hills.</li>
-    <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates; enemies have to break gates down. Send them out to kill catapults. Drop a gate into an existing wall for the difference in price.</li>
+    <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates, which are barred while attackers are at them; enemies have to break gates down. Send them out to kill catapults. Drop a gate into an existing wall for the difference in price.</li>
     <li><b>Stairs</b>: build them against a wall, tower or the keep and swordsmen can climb up to fight raiders coming over on ladders. Post swordsmen on the keep (it has its own stairs inside the door) to guard your lord.</li>
     <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
     <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
