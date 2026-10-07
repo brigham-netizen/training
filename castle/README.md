@@ -122,6 +122,16 @@ on each device.
 (https://creativecommons.org/licenses/by/4.0/). Re-encoded to mono 80 kbps in
 `public/music/`. Sound effects are synthesized in `src/audio.js`.
 
+## Ground textures
+
+Photographic CC0 textures, shrunk to 256 px tiles in `src/tex/`:
+grass, grassLight and meadow from ambientCG (Grass001, Grass004, Ground037);
+hill, marsh, earth and bed from Poly Haven (rocky_terrain_02,
+brown_mud_leaves_01, forest_ground_04, grass_path_2). `src/terrain.js` paints
+them across the map with organic, noise-roughened edges, plus baked sunlight
+on hillsides for the classic view; the 3D view drapes the same painting over
+its terrain mesh.
+
 ## Code map
 
 - `src/config.js`: every balance number (costs, HP, enemy stats, wave sizes)

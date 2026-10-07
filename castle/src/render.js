@@ -1,5 +1,6 @@
 import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN } from './config.js'
 import { stoneTexture, flagstoneTexture, woodTexture, TEXTURE_PX, TEXTURE_LUM } from './textures.js'
+import { paintTerrain, terrainReady, GROUND_PX } from './terrain.js'
 
 const COLORS = {
   grass: [[76, 114, 53], [80, 119, 56], [73, 109, 51], [83, 123, 58]],
@@ -432,7 +433,7 @@ export class Renderer {
     // The ground is baked once into a world-space texture (terrain detail,
     // soft shadows and contact shading), then drawn with the camera's
     // ground-plane transform each frame.
-    const sig = world.tiles.map((t) => t.terrain[0] + t.type + (t.rock ? 'r' : '')).join(',')
+    const sig = (terrainReady() ? 'T' : 'F') + world.tiles.map((t) => t.terrain[0] + t.type + (t.rock ? 'r' : '')).join(',')
     if (sig !== this.groundSig) {
       this.groundSig = sig
       this.bakeGround(world)
@@ -538,13 +539,26 @@ export class Renderer {
   }
 
   bakeGround(world) {
-    const S = 24 // texture pixels per tile
+    const painted = terrainReady()
+    const S = painted ? GROUND_PX : 24 // texture pixels per tile
     const { w, h } = world
     this.groundW = w
     const cv = (this.groundCanvas ||= document.createElement('canvas'))
     cv.width = w * S
     cv.height = h * S
     const g = cv.getContext('2d')
+    if (painted) {
+      // Photographic ground, repainted only when the landscape or moats
+      // change; shadows go on a fresh copy every bake.
+      const key = world.tiles.map((t) => t.terrain[0] + (t.type === 'moat' ? 'm' : '')).join('')
+      if (key !== this.terrainKey) {
+        this.terrainKey = key
+        this.terrainCanvas = paintTerrain(world, { shade: true })
+      }
+      g.drawImage(this.terrainCanvas, 0, 0)
+      this.bakeShadows(world, g, S)
+      return
+    }
     // Deterministic per-tile noise so the texture doesn't shimmer on rebake.
     let seed = 1
     const rnd = () => {
@@ -613,8 +627,13 @@ export class Renderer {
       g.fillRect(x0 * S, y0 * S, (x1 - x0) * S, (y1 - y0) * S)
     }
 
-    // Shadows cast away from the sun, plus a little contact darkening, drawn
-    // into their own layer and softened by stacking offset copies.
+    this.bakeShadows(world, g, S)
+  }
+
+  // Shadows cast away from the sun, plus a little contact darkening, drawn
+  // into their own layer and softened by stacking offset copies.
+  bakeShadows(world, g, S) {
+    const cv = g.canvas
     const sh = (this.shadowCanvas ||= document.createElement('canvas'))
     sh.width = cv.width
     sh.height = cv.height
@@ -634,7 +653,8 @@ export class Renderer {
     }
     g.save()
     g.globalAlpha = 0.045
-    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) g.drawImage(sh, dx * 2, dy * 2)
+    const blur = Math.max(1, Math.round(S / 12))
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) g.drawImage(sh, dx * blur, dy * blur)
     g.restore()
   }
 
@@ -765,7 +785,8 @@ export class Renderer {
       ny = -ny
     }
     const lit = ((nx * SUN[0] + ny * SUN[1]) / nl) * 0.9
-    if (Math.abs(lit) > 0.01) {
+    // Painted ground has smooth sunlight baked in; only the fallback needs it.
+    if (!terrainReady() && Math.abs(lit) > 0.01) {
       ctx.fillStyle = lit > 0 ? `rgba(255,248,220,${(lit * 0.35).toFixed(3)})` : `rgba(12,18,8,${(-lit * 0.75).toFixed(3)})`
       ctx.fill()
     }

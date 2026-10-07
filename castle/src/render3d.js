@@ -9,6 +9,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { STRUCTURES, KEEP } from './config.js'
 import { stoneTexture, woodTexture, TEXTURE_LUM } from './textures.js'
+import { paintTerrain, terrainReady } from './terrain.js'
 
 const C = {
   grass: [0x58823c, 0x5d8a40, 0x537c39, 0x618f44],
@@ -182,7 +183,7 @@ export class Renderer3D {
     this.sun.position.set(cx - 14, 26, cy + 18)
     this.sun.target.position.set(cx, 0, cy)
 
-    const mapSig = world.tiles.map((t) => t.terrain[0] + (t.type === 'moat' ? 'm' : '')).join('')
+    const mapSig = (terrainReady() ? 'T' : 'F') + world.tiles.map((t) => t.terrain[0] + (t.type === 'moat' ? 'm' : '')).join('')
     if (mapSig !== this.mapSig) {
       this.mapSig = mapSig
       this.buildTerrain(world)
@@ -336,10 +337,14 @@ export class Renderer3D {
         const c = L(cx, cy)
         for (let k = 0; k < 8; k++) index.push(c, ring[(k + 1) % 8], ring[k])
       }
+    // With painted ground the texture carries the colour; vertices stay white.
+    const painted = terrainReady()
+    const uvs = []
     for (let gy = 0; gy < GH; gy++)
       for (let gx = 0; gx < GW; gx++) {
         positions.push(gx / 2, vh[L(gx, gy)], gy / 2)
-        const c = vc[L(gx, gy)]
+        uvs.push(gx / 2 / w, 1 - gy / 2 / h)
+        const c = painted ? new THREE.Color(1, 1, 1) : vc[L(gx, gy)]
         colors.push(c.r, c.g, c.b)
       }
     // Skirt round the map edge so it reads as a slab of land.
@@ -352,6 +357,7 @@ export class Renderer3D {
         for (const [px, py, top] of [[ax, ay, true], [bx, by, true], [bx, by, false], [ax, ay, false]]) {
           positions.push(px / 2, top ? vh[L(px, py)] : -0.8, py / 2)
           colors.push(col.r, col.g, col.b)
+          uvs.push(-1, -1) // off the painted ground: see skirt material below
         }
         index.push(a, a + 1, a + 2, a, a + 2, a + 3)
       }
@@ -364,13 +370,30 @@ export class Renderer3D {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
     geo.setIndex(index)
     geo.computeVertexNormals()
+    // The skirt is the last part of the index; draw it with its own plain
+    // earth material so it doesn't sample the painted ground.
+    const skirtStart = 8 * 3 * w * h
+    geo.addGroup(0, skirtStart, 0)
+    geo.addGroup(skirtStart, index.length - skirtStart, 1)
     for (const child of [...this.terrain.children]) {
       this.terrain.remove(child)
       child.geometry.dispose()
     }
-    const land = new THREE.Mesh(geo, this.mat('land', 0xffffff, { vertexColors: true, roughness: 1 }))
+    if (painted) {
+      this.groundTex?.dispose()
+      const tex = new THREE.CanvasTexture(paintTerrain(world, { water: false }))
+      tex.colorSpace = THREE.SRGBColorSpace
+      tex.anisotropy = 8
+      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
+      this.groundTex = tex
+      this.mats.landPainted?.dispose()
+      this.mats.landPainted = new THREE.MeshStandardMaterial({ map: tex, vertexColors: true, roughness: 1, metalness: 0 })
+    }
+    const top = painted ? this.mats.landPainted : this.mat('land', 0xffffff, { vertexColors: true, roughness: 1 })
+    const land = new THREE.Mesh(geo, [top, this.mat('skirt', C.dirt, { roughness: 1 })])
     land.receiveShadow = true
     this.terrain.add(land)
     // One sheet of water over the whole map; land columns poke through it.

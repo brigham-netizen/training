@@ -6,6 +6,10 @@ import { Renderer3D } from './render3d.js'
 import { Input } from './input.js'
 import { Audio, BUILD_TRACKS } from './audio.js'
 import { Saves } from './saves.js'
+import { loadTerrain } from './terrain.js'
+
+// Ground textures load in the background; both renderers repaint when ready.
+loadTerrain()
 import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, waveComposition } from './config.js'
 
 const ICONS = {
@@ -569,7 +573,7 @@ const HELP = `
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
   The camera tilts to 3D when a wave starts so you can watch it play out, and returns to 2D for building.</p>`
 
-const CREDITS = `<p class="credits">Music: “Castle Chamber” by brigham773. “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0.</p>`
+const CREDITS = `<p class="credits">Music: “Castle Chamber” by brigham773. “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0. Ground textures from ambientCG and Poly Haven (CC0).</p>`
 
 // ---- feedback ---------------------------------------------------------------
 
