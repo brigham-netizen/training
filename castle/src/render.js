@@ -1,6 +1,7 @@
 import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN } from './config.js'
 import { stoneTexture, flagstoneTexture, woodTexture, TEXTURE_PX, TEXTURE_LUM } from './textures.js'
 import { paintTerrain, terrainReady, GROUND_PX } from './terrain.js'
+import { floraReady, floraSprites, treeSpec, rockSpec } from './flora.js'
 
 const COLORS = {
   grass: [[76, 114, 53], [80, 119, 56], [73, 109, 51], [83, 123, 58]],
@@ -518,11 +519,18 @@ export class Renderer {
         case 'keep':
           if (x === k.x && y === k.y) out.push([x, y, x + 3, y + 3, KEEP.height])
           break
-        case 'tree':
-          r(0.25, 0.25, 0.75, 0.75, 1.3)
+        case 'tree': {
+          // Round shadows sized to each tree's own canopy.
+          const sp = treeSpec(t.v, x, y, t.terrain === 'hill')
+          const rr = sp.radius * 0.8
+          out.push([x + sp.cx - rr, y + sp.cy - rr, x + sp.cx + rr, y + sp.cy + rr, sp.height, true])
           break
+        }
         case 'rock':
-          r(0.15, 0.2, 0.85, 0.85, 0.5)
+          for (const b of rockSpec(t.v, x, y)) {
+            const rr = b.size * 0.45
+            out.push([x + b.dx - rr, y + b.dy - rr, x + b.dx + rr, y + b.dy + rr, b.height, true])
+          }
           break
         case 'cottage':
           r(0.18, 0.24, 0.82, 0.76, 0.8)
@@ -642,7 +650,18 @@ export class Renderer {
     s.fillStyle = '#000'
     const ox = -SUN[0] * 0.45
     const oy = -SUN[1] * 0.45
-    for (const [x0, y0, x1, y1, hgt] of this.shadowCasters(world)) {
+    for (const [x0, y0, x1, y1, hgt, round] of this.shadowCasters(world)) {
+      if (round) {
+        // Canopies and boulders: a soft oval thrown away from the sun.
+        const rx = ((x1 - x0) / 2) * S
+        const ry = ((y1 - y0) / 2) * S
+        for (let f = 0.3; f <= 1.001; f += 0.35) {
+          s.beginPath()
+          s.ellipse(((x0 + x1) / 2 + ox * hgt * f) * S, ((y0 + y1) / 2 + oy * hgt * f) * S, rx, ry, 0, 0, Math.PI * 2)
+          s.fill()
+        }
+        continue
+      }
       for (let f = 0; f <= 1.001; f += 0.2) {
         const dx = ox * hgt * f
         const dy = oy * hgt * f
@@ -970,58 +989,97 @@ export class Renderer {
           }
         break
       }
-      case 'tree': {
-        const v = t.v
-        const cx = x + 0.5 + (v - 0.5) * 0.2
-        const cy = y + 0.5 + (((v * 7) % 1) - 0.5) * 0.2
-        this.ellipse(cx, cy, z, 0.42, 'rgba(0,0,0,0.25)')
-        this.box(cx - 0.07, cy - 0.07, cx + 0.07, cy + 0.07, z, z + 0.55, COLORS.trunk, COLORS.trunk, 0, false)
-        this.ball(cx, cy, z + 0.95, 0.42, rgb(COLORS.leaf, 0.9 + v * 0.2), 'rgba(10,30,10,0.5)')
-        this.ball(cx - 0.08, cy - 0.08, z + 1.25, 0.26, rgb(COLORS.leafHi, 0.9 + v * 0.2))
+      case 'tree':
+        if (floraReady()) this.drawTree(treeSpec(t.v, x, y, t.terrain === 'hill'), x, y, world)
+        else {
+          const v = t.v
+          const cx = x + 0.5 + (v - 0.5) * 0.2
+          const cy = y + 0.5 + (((v * 7) % 1) - 0.5) * 0.2
+          this.box(cx - 0.07, cy - 0.07, cx + 0.07, cy + 0.07, z, z + 0.55, COLORS.trunk, COLORS.trunk, 0, false)
+          this.ball(cx, cy, z + 0.95, 0.42, rgb(COLORS.leaf, 0.9 + v * 0.2), 'rgba(10,30,10,0.5)')
+        }
         break
-      }
-      case 'rock': {
-        const c = COLORS.rock
-        const h = 0.35 + t.v * 0.3
-        this.box(x + 0.12, y + 0.16, x + 0.88, y + 0.86, z, z + h, c.side, c.top)
+      case 'rock':
+        if (floraReady()) this.drawRocks(rockSpec(t.v, x, y), x, y, world)
+        else {
+          const c = COLORS.rock
+          this.box(x + 0.12, y + 0.16, x + 0.88, y + 0.86, z, z + 0.35 + t.v * 0.3, c.side, c.top)
+        }
         break
-      }
     }
   }
 
-  // A flight of stone steps rising to the rampart it's built against.
-  drawStair(world, i, x, y) {
-    const f = world.stairFace(i)
-    const cx = x + 0.5
-    const cy = y + 0.5
-    const n = 4
-    let dx = 0
-    let dy = 1
-    let top = world.elev(i) + 0.4
-    if (f >= 0) {
-      dx = (f % world.w) - x
-      dy = ((f / world.w) | 0) - y
-      top = world.surfaceAt(f, cx + dx * 0.5, cy + dy * 0.5)
+  // A tree: bark trunk, then leaf clumps (or fir tiers) back to front. Seen
+  // from straight above, firs show their star of needles instead.
+  drawTree(spec, x, y, world) {
+    const { ctx, cam } = this
+    const sp = floraSprites()
+    const bx = x + spec.cx
+    const by = y + spec.cy
+    const z = world.heightAt(bx, by)
+    const k = cam.k
+    const fromAbove = cam.sinE > 0.86
+    if (!fromAbove) {
+      const top = spec.clumps[0]
+      cam.P(bx, by, z)
+      const x0 = cam.sx
+      const y0 = cam.sy
+      cam.P(bx + (top?.dx || 0) * 0.5, by + (top?.dy || 0) * 0.5, z + spec.trunk)
+      ctx.lineCap = 'round'
+      ctx.strokeStyle = spec.species === 'pine' ? '#4a2f1c' : '#5a3d24'
+      ctx.lineWidth = Math.max(1.5, spec.trunkR * 2 * k)
+      ctx.beginPath()
+      ctx.moveTo(x0, y0)
+      ctx.lineTo(cam.sx, cam.sy)
+      ctx.stroke()
+      ctx.strokeStyle = 'rgba(255,230,190,0.18)'
+      ctx.lineWidth = Math.max(0.6, spec.trunkR * 0.7 * k)
+      ctx.beginPath()
+      ctx.moveTo(x0 - spec.trunkR * 0.4 * k, y0)
+      ctx.lineTo(cam.sx - spec.trunkR * 0.4 * k, cam.sy)
+      ctx.stroke()
     }
-    const c = COLORS.wall
-    const steps = []
-    for (let k = 0; k < n; k++) {
-      // Step k spans [a, b] along the climb direction, measured from the far edge.
-      const a = -0.5 + k / n
-      const b = -0.5 + (k + 1) / n
-      const hw = 0.3
-      const x0 = dx ? cx + Math.min(a * dx, b * dx) : cx - hw
-      const x1 = dx ? cx + Math.max(a * dx, b * dx) : cx + hw
-      const y0 = dy ? cy + Math.min(a * dy, b * dy) : cy - hw
-      const y1 = dy ? cy + Math.max(a * dy, b * dy) : cy + hw
-      steps.push([x0, y0, x1, y1, (k + 1) / n])
+    if (spec.species === 'pine') {
+      if (fromAbove) {
+        for (const [n, c] of spec.clumps.entries()) {
+          if (n % 2) continue
+          cam.P(bx + c.dx, by + c.dy, z + c.dz)
+          const s = c.size * k * 1.05
+          ctx.drawImage(sp.pineTop[c.variant], cam.sx - s / 2, cam.sy - s / 2, s, s)
+        }
+        return
+      }
+      for (const c of spec.clumps) {
+        cam.P(bx + c.dx, by + c.dy, z + c.dz)
+        const w = c.size * k
+        const h = w * 0.75
+        ctx.drawImage(sp.pineSide[c.variant], cam.sx - w / 2, cam.sy - h * 0.55, w, h)
+      }
+      return
     }
-    const cam = this.cam
-    steps.sort((p, q) => cam.depth((p[0] + p[2]) / 2, (p[1] + p[3]) / 2) - cam.depth((q[0] + q[2]) / 2, (q[1] + q[3]) / 2))
-    const ground = (px, py) => world.heightAt(px, py)
-    for (const [x0, y0, x1, y1, h] of steps) {
-      const g = world.heightAt((x0 + x1) / 2, (y0 + y1) / 2)
-      this.box(x0, y0, x1, y1, ground, g + (top - g) * h, c.side, c.top, 0, true, 'stone')
+    const set = spec.species === 'oak' ? sp.oak : sp.beech
+    const order = spec.clumps.map((c) => ({ c, d: cam.depth(bx + c.dx, by + c.dy) + c.dz * 0.35 }))
+    order.sort((a, b) => a.d - b.d)
+    for (const { c } of order) {
+      cam.P(bx + c.dx, by + c.dy, z + c.dz)
+      const s = c.size * k
+      ctx.drawImage(set[c.variant], cam.sx - s / 2, cam.sy - s / 2, s, s)
+    }
+  }
+
+  // A rock outcrop: boulders and stones, back to front.
+  drawRocks(list, x, y, world) {
+    const { ctx, cam } = this
+    const sp = floraSprites()
+    const sorted = [...list].sort((a, b) => cam.depth(x + a.dx, y + a.dy) - cam.depth(x + b.dx, y + b.dy))
+    for (const r of sorted) {
+      const px = x + r.dx
+      const py = y + r.dy
+      cam.P(px, py, world.heightAt(px, py))
+      const w = r.size * cam.k
+      // Taller when seen from the side, a rounder footprint from above.
+      const h = w * (0.62 + (1 - cam.sinE) * 0.35 + r.height * 0.3)
+      ctx.drawImage(sp.rocks[r.variant], cam.sx - w / 2, cam.sy - h * 0.82, w, h)
     }
   }
 

@@ -6,10 +6,11 @@
 // Coordinates: game (x, y, height z) -> three (X = x, Y = z, Z = y).
 
 import * as THREE from 'three'
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { STRUCTURES, KEEP } from './config.js'
 import { stoneTexture, woodTexture, TEXTURE_LUM } from './textures.js'
 import { paintTerrain, terrainReady } from './terrain.js'
+import { floraReady, floraSprites, treeSpec, rockSpec, FLORA_URLS } from './flora.js'
 
 const C = {
   grass: [0x58823c, 0x5d8a40, 0x537c39, 0x618f44],
@@ -137,7 +138,9 @@ export class Renderer3D {
 
     this.terrain = new THREE.Group()
     this.structures = new THREE.Group()
-    this.scene.add(this.terrain, this.structures)
+    // Leaf clumps: camera-facing sprites, rebuilt with the structures.
+    this.foliage = new THREE.Group()
+    this.scene.add(this.terrain, this.structures, this.foliage)
 
     this.mats = {}
     this.mapSig = ''
@@ -188,10 +191,19 @@ export class Renderer3D {
       this.mapSig = mapSig
       this.buildTerrain(world)
     }
-    const structSig = mapSig + (world.keep.doorHp > 0 ? 'D' : 'd') + world.tiles.map((t) => `${t.type}${t.hoard ? 'h' : ''}${t.rock ? 'r' : ''}${t.plot || ''}`).join(',')
+    const structSig = mapSig + (floraReady() ? 'L' : 'l') + (world.keep.doorHp > 0 ? 'D' : 'd') + world.tiles.map((t) => `${t.type}${t.hoard ? 'h' : ''}${t.rock ? 'r' : ''}${t.plot || ''}`).join(',')
     if (structSig !== this.structSig) {
       this.structSig = structSig
       this.buildStructures(world)
+    }
+    // Firs show their needle star when seen from straight above.
+    const above = cam.sinE > 0.86
+    if (this.pineMats && above !== this.pineAbove) {
+      this.pineAbove = above
+      for (const m of this.pineMats) {
+        m.map = above ? m.userData.top : m.userData.side
+        m.needsUpdate = true
+      }
     }
     this.drawUnits(game)
     this.renderer.render(this.scene, this.camera)
@@ -433,6 +445,20 @@ export class Renderer3D {
     return this.mats[key]
   }
 
+  // A material showing one of the bundled photo textures (rock, bark).
+  photoMat(key, tex) {
+    if (!this.mats[key]) {
+      const t = new THREE.TextureLoader().load(FLORA_URLS[tex])
+      t.wrapS = t.wrapT = THREE.RepeatWrapping
+      t.colorSpace = THREE.SRGBColorSpace
+      t.anisotropy = 4
+      // The lichen photo is much darker than the others; lift it.
+      const color = new THREE.Color(1, 1, 1).multiplyScalar(tex === 'rockLichen' ? 1.7 : tex === 'rockMoss' ? 1.15 : 1)
+      this.mats[key] = new THREE.MeshStandardMaterial({ map: t, color, roughness: 0.95, metalness: 0 })
+    }
+    return this.mats[key]
+  }
+
   materials() {
     return {
       stone: this.texMat('stone', C.stone, 'stone'),
@@ -443,9 +469,14 @@ export class Renderer3D {
       door: this.mat('door', C.door),
       roof: this.mat('roof', C.roof),
       plaster: this.mat('plaster', C.plaster),
-      rock: this.mat('rock', C.rock, { flatShading: true }),
+      rock: this.photoMat('rock', 'rock'),
+      rockLichen: this.photoMat('rockLichen', 'rockLichen'),
+      rockMoss: this.photoMat('rockMoss', 'rockMoss'),
       moss: this.mat('moss', C.moss, { flatShading: true }),
       trunk: this.mat('trunk', C.trunk),
+      bark: this.photoMat('bark', 'bark'),
+      barkPine: this.photoMat('barkPine', 'barkPine'),
+      canopyShadow: this.mat('canopyShadow', 0x000000, { colorWrite: false, depthWrite: false }),
       pine: this.mat('pine', C.pine, { flatShading: true }),
       leaf: this.mat('leaf', C.leaf, { flatShading: true }),
       soil: this.mat('soil', C.soil),
@@ -482,6 +513,9 @@ export class Renderer3D {
 
   buildStructures(world) {
     this.begin()
+    for (const child of [...this.foliage.children]) this.foliage.remove(child)
+    this.pineMats = null
+    this.pineAbove = null
     const k = world.keep
     for (let i = 0; i < world.tiles.length; i++) {
       const t = world.tiles[i]
@@ -519,10 +553,12 @@ export class Renderer3D {
           for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) this.cone('iron', x + 0.25 + a * 0.25, y + 0.25 + b * 0.25, z + 0.04, 0.16, 0.04, 4)
           break
         case 'tree':
-          this.tree(x, y, z, t.v)
+          if (floraReady()) this.photoTree(world, x, y, treeSpec(t.v, x, y, t.terrain === 'hill'))
+          else this.tree(x, y, z, t.v)
           break
         case 'rock':
-          this.rock(x, y, z, t.v)
+          if (floraReady()) this.boulders(world, x, y, rockSpec(t.v, x, y))
+          else this.rock(x, y, z, t.v)
           break
         case 'cottage':
           this.cottage(x, y, z, 'plaster', 'roof')
@@ -562,6 +598,90 @@ export class Renderer3D {
     const m = new THREE.DodecahedronGeometry(0.2, 0)
     m.translate(x + 0.5 + (v - 0.5) * 0.3, z + 0.45 + v * 0.2, y + 0.45)
     this.add('moss', m)
+  }
+
+  // A lumpy boulder: an icosphere pushed in and out by smooth noise,
+  // squashed, turned and sunk a little into the ground.
+  boulder(key, x, y, z, size, height, seed) {
+    const ico = new THREE.IcosahedronGeometry(1, 2)
+    ico.deleteAttribute('normal')
+    ico.deleteAttribute('uv')
+    const g = mergeVertices(ico)
+    const p = g.attributes.position
+    const a = seed * 40
+    for (let i = 0; i < p.count; i++) {
+      const vx = p.getX(i)
+      const vy = p.getY(i)
+      const vz = p.getZ(i)
+      const n =
+        Math.sin(vx * 2.3 + a) * Math.sin(vy * 2.9 + a * 1.3) * Math.sin(vz * 2.1 + a * 0.7) * 0.28 +
+        Math.sin(vx * 5.1 + a * 2) * Math.sin(vy * 4.7) * Math.sin(vz * 5.3 + a) * 0.08
+      const f = 1 + n
+      p.setXYZ(i, vx * f, vy * f * (vy < 0 ? 0.6 : 1), vz * f)
+    }
+    g.computeVertexNormals()
+    // Placeholder UVs (merged geometries need matching attributes); world
+    // UVs are worked out after the merge.
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(p.count * 2), 2))
+    g.scale(size / 2, height * 0.75, (size / 2) * (0.75 + (seed % 0.3)))
+    g.rotateY(seed * 17)
+    g.translate(x, z + height * 0.55, y)
+    this.add(key, g)
+  }
+
+  boulders(world, x, y, list) {
+    const keys = ['rock', 'rockLichen', 'rockMoss']
+    for (const r of list) {
+      const px = x + r.dx
+      const py = y + r.dy
+      this.boulder(keys[r.variant % 3], px, py, world.heightAt(px, py), r.size, r.height, r.seed)
+    }
+  }
+
+  // A tree with a bark trunk and leaf-clump sprites (or fir tiers).
+  photoTree(world, x, y, spec) {
+    const sp = floraSprites()
+    const bx = x + spec.cx
+    const by = y + spec.cy
+    const z = world.heightAt(bx, by)
+    const top = spec.clumps[spec.species === 'pine' ? spec.clumps.length - 1 : 0]
+    this.rod(spec.species === 'pine' ? 'barkPine' : 'bark', [bx, by, z - 0.1], [bx + top.dx * 0.5, by + top.dy * 0.5, z + spec.trunk], spec.trunkR, 7)
+    // An invisible blob that casts the canopy's shadow.
+    const blob = new THREE.IcosahedronGeometry(1, 1)
+    blob.scale(spec.radius * 0.85, (spec.height - spec.trunk) * 0.55, spec.radius * 0.85)
+    blob.translate(bx, z + (spec.height + spec.trunk) / 2, by)
+    this.add('canopyShadow', blob)
+    this.spriteMats ||= {}
+    const mat = (name, n) => {
+      const id = `${name}${n}`
+      if (!this.spriteMats[id]) {
+        const tex = (c) => {
+          const t = new THREE.CanvasTexture(c)
+          t.colorSpace = THREE.SRGBColorSpace
+          return t
+        }
+        const m = new THREE.SpriteMaterial({ map: tex(name === 'pine' ? sp.pineSide[n] : sp[name][n]), alphaTest: 0.45, transparent: false, color: 0xe6e6e6 })
+        if (name === 'pine') m.userData = { side: m.map, top: tex(sp.pineTop[n]) }
+        this.spriteMats[id] = m
+      }
+      return this.spriteMats[id]
+    }
+    if (spec.species === 'pine') {
+      for (const c of spec.clumps) {
+        const s = new THREE.Sprite(mat('pine', c.variant))
+        s.scale.set(c.size, c.size * 0.75, 1)
+        s.position.set(bx + c.dx, z + c.dz + c.size * 0.12, by + c.dy)
+        this.foliage.add(s)
+      }
+      this.pineMats = [0, 1, 2].map((n) => mat('pine', n))
+      return
+    }
+    for (const c of spec.clumps) {
+      const s = new THREE.Sprite(mat(spec.species, c.variant))
+      s.scale.set(c.size, c.size, 1)
+      s.position.set(bx + c.dx, z + c.dz, by + c.dy)
+      this.foliage.add(s)
+    }
   }
 
   tree(x, y, z, v) {

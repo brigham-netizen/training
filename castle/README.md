@@ -132,6 +132,19 @@ them across the map with organic, noise-roughened edges, plus baked sunlight
 on hillsides for the classic view; the 3D view drapes the same painting over
 its terrain mesh.
 
+## Trees and rocks
+
+`src/flora.js` builds them from photographs: leaves from ambientCG leaf sets
+(LeafSet004, 014, 024, 007; packed into `src/tex/leaves.webp`) are scattered
+by the hundred into shaded canopy clumps at load time; firs get needle tiers
+(and a needle star seen from above); rocks use Poly Haven's rock_boulder_dry,
+lichen_rock and mossy_rock, trunks bark_brown_02 and pine_bark. Each tile
+gets its own seeded layout: species (more firs on hills), size, lean and
+clump arrangement for trees; a main boulder plus a few stones for rocks.
+The classic view draws clump and faceted-boulder sprites; the 3D view uses
+camera-facing leaf sprites (with hidden blobs to cast canopy shadows),
+bark-textured trunks and noise-displaced 3D boulders.
+
 ## Code map
 
 - `src/config.js`: every balance number (costs, HP, enemy stats, wave sizes)
