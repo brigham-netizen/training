@@ -137,3 +137,40 @@ export function computeRamFlow(world) {
 export function computeLadderFlow(world) {
   return computeFlow(world, 'ladder')
 }
+
+// Flow toward village buildings that can be reached without breaking
+// anything: easy pickings for raiders. Solid buildings (cottages, markets)
+// are the goal tiles; farms are walked onto and trampled.
+export function computeVillageFlow(world) {
+  const { w, h } = world
+  const n = w * h
+  const dist = new Float64Array(n).fill(Infinity)
+  const next = new Int32Array(n).fill(-1)
+  const heap = new MinHeap()
+  const isGoal = (i) => world.tiles[i].type === 'cottage' || world.tiles[i].type === 'market' || world.tiles[i].type === 'farm'
+  const enter = (i, step) => (isGoal(i) ? step : world.isWalkable(i) ? step / world.slow(i) : Infinity)
+  for (let i = 0; i < n; i++) if (isGoal(i)) {
+    dist[i] = 0
+    heap.push(i, 0)
+  }
+  while (heap.size) {
+    const [d, u] = heap.pop()
+    if (d > dist[u]) continue
+    const ux = u % w
+    const uy = (u / w) | 0
+    for (const [dx, dy, step] of DIRS) {
+      const vx = ux - dx
+      const vy = uy - dy
+      if (vx < 0 || vy < 0 || vx >= w || vy >= h) continue
+      const v = world.idx(vx, vy)
+      if (!world.isWalkable(v) || !diagonalOk(world, vx, vy, dx, dy)) continue
+      const nd = d + enter(u, step)
+      if (nd < dist[v]) {
+        dist[v] = nd
+        next[v] = u
+        heap.push(v, nd)
+      }
+    }
+  }
+  return { dist, next }
+}

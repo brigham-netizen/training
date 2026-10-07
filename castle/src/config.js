@@ -20,8 +20,8 @@ export const STRUCTURES = {
   palisade: { label: 'Palisade', cost: 1, hp: 120, height: 0.9, solid: true, thin: 0.3, upgrade: 'wall' },
   wall: { label: 'Wall', cost: 2, hp: 300, height: 1.0, solid: true, thin: 0.6, rampart: true, slots: 1, perch: 0.5, upgrade: 'thick' },
   thick: { label: 'Thick wall', cost: 5, hp: 750, height: 1.35, solid: true, rampart: true, slots: 2, perch: 1 },
-  // Weaker than stone on purpose: attackers go for gates first.
-  gate: { label: 'Gate', cost: 15, hp: 240, height: 1.25, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
+  // The one way in for foot soldiers who don't bring ladders.
+  gate: { label: 'Gate', cost: 15, hp: 400, height: 1.25, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
   tower: { label: 'Tower', cost: 60, hp: 550, height: 2.2, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1 },
   moat: { label: 'Moat', cost: 3, slow: 0.35, flatOnly: true },
   // Built against a wall, tower or the keep: lets swordsmen climb up and
@@ -53,6 +53,16 @@ export const GATE_LURE = 0.5
 export const RAM_GATE_LURE = 0.12
 
 export const ARCHER = { label: 'Archer', cost: 20, hp: 50, range: 4, fireRate: 0.9, damage: 10, speed: 2.4 }
+// Chance an arrow hits: sure shots at the foot of the wall (within `near`
+// tiles), falling to `far` at the edge of an archer's range.
+export const AIM = { near: 1.5, close: 0.9, far: 0.45 }
+
+// Raiders break off to plunder village buildings they can reach without
+// breaking anything, if one is within this many tiles' walk.
+export const PLUNDER_RANGE = 8
+// An army marches together at this pace until it's close to your castle,
+// then charges.
+export const ARMY = { pace: 0.95, charge: 6 }
 
 // Melee troops: guard a spot, charge enemies within `guard` tiles of it.
 export const SWORDSMAN = { label: 'Swordsman', cost: 25, hp: 130, dps: 20, speed: 1.9, guard: 4, r: 0.22 }
@@ -60,9 +70,10 @@ export const SWORDSMAN = { label: 'Swordsman', cost: 25, hp: 130, dps: 20, speed
 export const ZONE_MARGIN = 0.75
 
 // The keep's `hp` is the lord's life. Attackers must batter the door
-// (doorHp) and then fight their way up to him; his guard fights back,
-// splitting `guard` damage per second among whoever is inside.
-export const KEEP = { size: 3, hp: 1000, height: 2.6, slots: 2, perch: 1.5, archers: 2, doorHp: 260, guard: 22, climb: 2.5 }
+// (doorHp) and then fight their way up to him. The stair is narrow: only
+// `stair` attackers reach the top at a time, the rest queue below. His
+// guard fights back, splitting `guard` damage per second among them.
+export const KEEP = { size: 3, hp: 1000, height: 2.6, slots: 2, perch: 1.5, archers: 2, doorHp: 260, guard: 30, climb: 2.5, stair: 2 }
 
 // Foot soldiers can't hurt stone. They break gates and wooden things, and
 // get over stone walls with ladders carried by a crew of two.
@@ -116,5 +127,5 @@ export function waveComposition(n) {
 }
 
 export function waveBonus(n) {
-  return 50 + n * 12
+  return 60 + n * 14
 }

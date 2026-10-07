@@ -57,8 +57,15 @@ off, throwing down anyone on it. Soldiers stuck at a wall pick up fallen
 ladders, or after a while lash a new one together. Only rams and catapults
 break stone.
 
+Archers hit 90% of shots at the foot of the wall, falling to 45% at the edge
+of their range. Each wave arrives at once: an army masses at each banner
+(siege engines at the back) and marches together until it's close to your
+castle, then charges. Raiders break off to sack cottages, farms and markets
+they can reach without breaking anything.
+
 The goal is your lord. Attackers who reach the keep batter its door (south
-face), then climb inside to fight him and his guard (the Lord bar). Catapults
+face), then climb the keep's narrow stair, two at a time, to fight him and his guard
+(the Lord bar). Catapults
 no longer bombard the keep. The door and the lord recover between waves.
 
 Walls, gates, towers and pikes can be built over marsh (×2 cost), fords (×3),

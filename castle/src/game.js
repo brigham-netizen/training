@@ -1,12 +1,11 @@
 import { World, mulberry32 } from './world.js'
-import { computeFlow, computeRamFlow, computeLadderFlow } from './pathing.js'
+import { computeFlow, computeRamFlow, computeLadderFlow, computeVillageFlow } from './pathing.js'
 import {
   START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
-  HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST, LADDER, STONE,
+  HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST, LADDER, STONE, AIM, PLUNDER_RANGE, ARMY,
   waveComposition, waveBonus,
 } from './config.js'
 
-const SPAWN_INTERVAL = 0.75
 const THINK = 0.4 // seconds between unit decisions
 const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
@@ -559,7 +558,7 @@ export class Game {
       a.heading = Math.atan2(target.y - a.y, target.x - a.x)
       if (a.cd <= 0) {
         a.cd = 1 / ARCHER.fireRate
-        this.shoot(a.x, a.y, a.z + 0.5, target, ARCHER.damage, false)
+        this.shoot(a.x, a.y, a.z + 0.5, target, ARCHER.damage, false, this.hitChance(a, target))
         this.sfx('bow', a.x, a.y)
       }
       return
@@ -889,23 +888,51 @@ export class Game {
     sprinkle('ram', comp.ram, half)
     sprinkle('catapult', comp.catapult, half)
 
-    // Each gate spawns its share in parallel.
-    this.spawnQueue = list.map((type, k) => ({
-      type,
-      spawn: spawns[k % spawns.length],
-      t: Math.floor(k / spawns.length) * SPAWN_INTERVAL * Math.min(2, spawns.length) + 1,
-      hpMult: comp.hpMult,
-    }))
+    // Each gate's share arrives as one army, all at once.
+    const groups = spawns.map(() => [])
+    list.forEach((type, k) => groups[k % spawns.length].push(type))
+    this.spawnQueue = []
+    groups.forEach((g, n) => {
+      // Siege engines at the back by the banner, raiders in the front rows.
+      const order = { raider: 4, ladder: 3, brute: 3, bowman: 2, ram: 1, catapult: 0 }
+      g.sort((a, b) => order[a] - order[b])
+      g.forEach((type, k) => this.spawnQueue.push({ type, spawn: spawns[n], t: 1 + n * 0.5, rank: k, hpMult: comp.hpMult }))
+    })
     this.spawnQueue.sort((a, b) => a.t - b.t)
     this.waveTime = 0
     this.phase = 'attack'
     this.emit('waveStart', { wave: n, spawns: spawns.map((s) => s.name) })
   }
 
-  spawnEnemy({ type, spawn, hpMult }) {
-    const e = this.makeEnemy(type, spawn.x + 0.5 + (this.rnd() - 0.5) * 0.4, spawn.y + 0.5 + (this.rnd() - 0.5) * 0.4, hpMult)
+  spawnEnemy({ type, spawn, hpMult, rank = null }) {
+    let x = spawn.x + 0.5 + (this.rnd() - 0.5) * 0.4
+    let y = spawn.y + 0.5 + (this.rnd() - 0.5) * 0.4
+    if (rank !== null) [x, y] = this.formationSpot(spawn, rank)
+    const e = this.makeEnemy(type, x, y, hpMult)
+    // Armies march together until they're close, then charge.
+    if (rank !== null && !ENEMIES[type].siegeEngine) e.march = true
     this.enemies.push(e)
     return e
+  }
+
+  // The rank-th spot of an army massing at a spawn banner: rows of five
+  // along the map edge, each row a step further into the map.
+  formationSpot(spawn, rank) {
+    const { world } = this
+    const inX = spawn.x === 0 ? 1 : spawn.x === world.w - 1 ? -1 : 0
+    const inY = spawn.y === 0 ? 1 : spawn.y === world.h - 1 ? -1 : 0
+    const perRow = 5
+    const row = Math.floor(rank / perRow)
+    const col = (rank % perRow) - (perRow - 1) / 2
+    const deep = 0.1 + row * 0.6
+    let x = spawn.x + 0.5 + inX * deep + (inY ? col * 0.6 : 0)
+    let y = spawn.y + 0.5 + inY * deep + (inX ? col * 0.6 : 0)
+    for (let tries = 0; tries < 10 && this.blockedAt(x, y, 0.2); tries++) {
+      x += (this.rnd() - 0.5) * 0.8 + inX * 0.25
+      y += (this.rnd() - 0.5) * 0.8 + inY * 0.25
+    }
+    if (this.blockedAt(x, y, 0.2)) return [spawn.x + 0.5, spawn.y + 0.5]
+    return [x, y]
   }
 
   makeEnemy(type, x, y, hpMult = 1) {
@@ -1006,6 +1033,17 @@ export class Game {
     this.flow = computeFlow(this.world)
     this.ladderFlow = computeLadderFlow(this.world)
     this.ramFlow = computeRamFlow(this.world)
+    this.villageFlow = computeVillageFlow(this.world)
+    // How far out from the keep door your castle reaches (walls, towers).
+    const { world } = this
+    const k = world.keep
+    let reach = 3
+    for (let i = 0; i < world.tiles.length; i++) {
+      const t = world.tiles[i].type
+      if (!STRUCTURES[t]?.solid || STRUCTURES[t].village) continue
+      reach = Math.max(reach, Math.hypot((i % world.w) + 0.5 - (k.x + 1.5), ((i / world.w) | 0) + 0.5 - (k.y + KEEP.size)))
+    }
+    this.castleReach = reach
     this.world.dirty = false
   }
 
@@ -1192,6 +1230,31 @@ export class Game {
     const k = world.keep
     const doorX = k.x + 1.5
     const doorY = k.y + KEEP.size
+    // Marching armies keep pace until the castle is near.
+    if (e.march && Math.hypot(e.x - doorX, e.y - doorY) < this.castleReach + ARMY.charge) e.march = false
+    // Easy pickings: an undefended village building within reach.
+    if (this.plunders(e, ci)) {
+      const vt = this.villageFlow.next[ci]
+      if (vt < 0) {
+        // Standing in a field: trample it.
+        e.attacking = true
+        e.walk += dt * 6
+        this.damageStructure(ci, (STRUCTURES[world.tiles[ci].type]?.trample || 0) * dt)
+        return
+      }
+      const [vx, vy] = this.center(vt)
+      if (world.isSolid(vt)) {
+        if (Math.max(Math.abs(vx - e.x), Math.abs(vy - e.y)) <= 0.5 + e.r + 0.08) {
+          e.attacking = true
+          e.heading = Math.atan2(vy - e.y, vx - e.x)
+          e.walk += dt * 6
+          this.damageStructure(vt, e.dps * e.siege * dt)
+          return
+        }
+      }
+      this.walkToward(e, vx, vy, ci, dt)
+      return
+    }
     const flow = this.flowFor(e)
     let target = flow.next[ci]
     if (ci === k.step || target < 0) {
@@ -1256,11 +1319,19 @@ export class Game {
     if (trample) this.damageStructure(under, trample * dt)
   }
 
+  // Foot soldiers break off to loot village buildings they can walk to
+  // without breaking anything.
+  plunders(e, ci) {
+    if (!this.climbs(e) || e.type === 'bowman' || !this.villageFlow) return false
+    return this.villageFlow.dist[ci] <= PLUNDER_RANGE
+  }
+
   walkToward(e, tx, ty, ci, dt) {
     const dx = tx - e.x
     const dy = ty - e.y
     const len = Math.hypot(dx, dy) || 1
-    const speed = e.speed * (this.world.tiles[ci].ladder ? LADDER.climb : this.world.slow(ci))
+    const base = e.march ? Math.min(e.speed, ARMY.pace) : e.speed
+    const speed = base * (this.world.tiles[ci].ladder ? LADDER.climb : this.world.slow(ci))
     const step = Math.min(len, speed * dt)
     e.heading = Math.atan2(dy, dx)
     e.walk += dt * speed * 6
@@ -1363,7 +1434,9 @@ export class Game {
   // Inside the keep: climb the stairs, then fight the lord and his guard.
   updateIntruders(dt) {
     const k = this.world.keep
-    const up = this.intruders.filter((u) => (u.climb -= dt) <= 0)
+    // Climbing the stair in single file; only the first few reach the lord.
+    for (const u of this.intruders) u.climb -= dt
+    const up = this.intruders.filter((u) => u.climb <= 0).slice(0, KEEP.stair)
     if (up.length) {
       // Swordsmen posted on the keep fight beside the lord's guard and take
       // the blows meant for him.
@@ -1460,13 +1533,27 @@ export class Game {
     return this.world.tiles[u.tile]?.hoard ? HOARDING.cover : COVER
   }
 
-  shoot(x, y, z, target, dmg, hostile) {
+  // Odds an archer's arrow finds its mark: near-certain at the foot of the
+  // wall, a long shot at the edge of range.
+  hitChance(a, target) {
+    const d = Math.hypot(target.x - a.x, target.y - a.y)
+    const range = this.range(a.tile)
+    const f = Math.max(0, Math.min(1, (d - AIM.near) / Math.max(0.5, range - AIM.near)))
+    return AIM.close + (AIM.far - AIM.close) * f
+  }
+
+  shoot(x, y, z, target, dmg, hostile, chance = 1) {
     const dist = Math.hypot(target.x - x, target.y - y)
+    // A miss flies at where the target was, a little off, and doesn't follow.
+    const miss = this.rnd() >= chance
+    const off = miss ? 0.35 + this.rnd() * 0.5 : 0
+    const ang = this.rnd() * Math.PI * 2
     this.projectiles.push({
+      miss,
       kind: 'arrow',
       hostile,
       sx: x, sy: y, sz: z,
-      tx: target.x, ty: target.y, tz: target.z + 0.4,
+      tx: target.x + Math.cos(ang) * off, ty: target.y + Math.sin(ang) * off, tz: miss ? this.world.heightAt(target.x, target.y) : target.z + 0.4,
       x, y, z,
       px: x, py: y, pz: z,
       target,
@@ -1495,7 +1582,7 @@ export class Game {
 
   updateProjectiles(dt) {
     for (const p of this.projectiles) {
-      if (p.kind === 'arrow' && !p.target.dead) {
+      if (p.kind === 'arrow' && !p.miss && !p.target.dead) {
         p.tx = p.target.x
         p.ty = p.target.y
         p.tz = p.target.z + 0.4
@@ -1519,6 +1606,8 @@ export class Game {
         }
         this.effects.push({ type: 'dust', x: p.tx, y: p.ty, z: p.tz, t: 0, life: 0.7, size: 0.8 })
         this.sfx('impact', p.tx, p.ty)
+      } else if (p.miss) {
+        // Thunk into the dirt.
       } else if (!p.target.dead) {
         if (p.hostile) {
           p.target.hp -= p.dmg * this.coverFor(p.target)

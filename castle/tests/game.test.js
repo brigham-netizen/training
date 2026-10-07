@@ -84,9 +84,9 @@ test('cannot build on reserved spawn tiles or with too little gold', () => {
   assert.equal(game.place(ring(game, 4)[0], 'wall'), false)
 })
 
-test('an undefended keep falls by wave 2', () => {
+test('an undefended keep falls by wave 3', () => {
   const game = new Game()
-  for (let w = 0; w < 2 && game.phase === 'build'; w++) {
+  for (let w = 0; w < 3 && game.phase === 'build'; w++) {
     game.startWave()
     run(game, 300)
   }
@@ -812,4 +812,61 @@ test('a gate stays barred while enemies are at it, so swordsmen stay inside', ()
   step(game, 2)
   assert.ok(!game.gateLocks.has(gate))
   assert.ok(game.troopPath(world.idx(gx, gy + 1), world.idx(gx, gy - 2)), 'route out reopens')
+})
+
+// ---- stage 7: aim, plunder, armies ----------------------------------------------
+
+test('archers rarely miss at the foot of the wall and often miss at long range', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  const i = ring(game, 3)[3]
+  world.build(i, 'wall')
+  const a = game.addArcher(i)
+  const near = game.hitChance(a, { x: a.x, y: a.y - 1 })
+  const far = game.hitChance(a, { x: a.x, y: a.y - game.range(i) })
+  assert.ok(near >= 0.85, `near ${near}`)
+  assert.ok(far <= 0.5, `far ${far}`)
+  // Over many shots the misses really happen.
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'raider', spawn: { x: a.x - 0.5, y: a.y - 4.5 }, hpMult: 1 })
+  let misses = 0
+  for (let n = 0; n < 200; n++) {
+    game.shoot(a.x, a.y, a.z, e, 0, false, far)
+    if (game.projectiles[game.projectiles.length - 1].miss) misses++
+  }
+  assert.ok(misses > 60 && misses < 150, `misses ${misses}`)
+})
+
+test('raiders break off to plunder an undefended cottage', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  game.archers = []
+  const k = world.keep
+  const cottage = world.idx(k.x - 6, k.y + 4)
+  world.build(cottage, 'cottage')
+  world.dirty = true
+  skirmish(game)
+  game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 9, y: k.y + 2 }, hpMult: 1 })
+  game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 9, y: k.y + 3 }, hpMult: 1 })
+  step(game, 20)
+  assert.notEqual(world.tiles[cottage].type, 'cottage', 'the cottage was sacked')
+})
+
+test('a wave arrives as one army per gate, all at once', () => {
+  const game = new Game()
+  game.wave = 4
+  game.startWave()
+  const bySpawn = new Map()
+  for (const q of game.spawnQueue) {
+    if (!bySpawn.has(q.spawn.name)) bySpawn.set(q.spawn.name, new Set())
+    bySpawn.get(q.spawn.name).add(q.t)
+  }
+  assert.ok(bySpawn.size >= 2)
+  for (const times of bySpawn.values()) assert.equal(times.size, 1, 'one arrival time per army')
+  step(game, 2.5)
+  assert.equal(game.spawnQueue.length, 0, 'everyone is on the field')
+  assert.ok(game.enemies.filter((e) => e.march).length > 10, 'foot soldiers march together')
 })
