@@ -682,3 +682,102 @@ test('hills slope smoothly into the ground around them', () => {
   assert.ok(world.heightAt(hx + 1.5, hy + 0.5) === 0, 'neighbour centre stays level')
   assert.ok(world.heightAt(hx + 1, hy + 0.5) > 0 && world.heightAt(hx + 1, hy + 0.5) < top, 'edge in between')
 })
+
+// ---- stage 6: gates in walls, stairs, swordsmen on the ramparts ----------------
+
+test('a gate drops into an existing wall for the difference in price', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const i = ring(game, 4)[3]
+  game.place(i, 'thick')
+  game.addArcher(i)
+  game.addArcher(i)
+  const before = game.gold
+  assert.ok(game.canPlace(i, 'gate'))
+  assert.ok(game.place(i, 'gate'))
+  assert.equal(world.tiles[i].type, 'gate')
+  assert.equal(game.gold, before - (STRUCTURES.gate.cost - STRUCTURES.thick.cost))
+  assert.ok(game.archers.filter((a) => a.tile === i && !a.path.length).length <= world.slots(i), 'extra archer moved off')
+  assert.equal(game.layOverCost(i, 'wall'), null, 'no going back down to a wall by painting')
+})
+
+test('stairs must touch a rampart, and let swordsmen up onto the wall', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const tiles = ring(game, 3)
+  for (const i of tiles) game.place(i, 'wall')
+  const k = world.keep
+  const wall = world.idx(k.x - 2, k.y + 1)
+  const inside = world.idx(k.x - 1, k.y + 1)
+  const loose = world.idx(k.x - 1, k.y)
+  assert.equal(game.canPlace(world.idx(k.x - 6, k.y), 'stair'), false, 'nothing to climb')
+  assert.equal(game.troopRoute(inside * 2, wall * 2 + 1), null, 'no way up without stairs')
+  assert.ok(game.place(inside, 'stair'))
+  assert.equal(game.stairFace(inside), wall)
+  const route = game.troopRoute(loose * 2, wall * 2 + 1)
+  assert.ok(route && route.includes(inside * 2) && route[route.length - 1] === wall * 2 + 1)
+  // Up there they can walk the wall all the way round.
+  const far = world.idx(k.x + 4, k.y + 1)
+  assert.ok(game.troopRoute(wall * 2 + 1, far * 2 + 1))
+})
+
+test('a swordsman climbs the stairs to his post on the wall', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  for (const i of ring(game, 3)) game.place(i, 'wall')
+  const k = world.keep
+  const wall = world.idx(k.x - 2, k.y + 1)
+  game.place(world.idx(k.x - 1, k.y + 1), 'stair')
+  game.place(world.idx(k.x - 1, k.y - 1), 'swordsman')
+  const s = game.swordsmen[0]
+  assert.equal(s.up, false)
+  game.orderSwordsmen([s.id], null, wall)
+  step(game, 6)
+  assert.equal(world.idxAt(s.x, s.y), wall)
+  assert.ok(s.up && s.z > 0.9, `up on the wall (z=${s.z})`)
+})
+
+test('swordsmen on the wall cut down raiders coming up a ladder', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const tiles = ring(game, 3)
+  for (const i of tiles) game.place(i, 'wall')
+  game.archers = []
+  const wall = world.idx(world.keep.x - 2, world.keep.y + 1)
+  game.place(wall, 'swordsman')
+  assert.ok(game.swordsmen[0].up)
+  skirmish(game)
+  const l = { id: 1, tile: wall, dir: [1, 0], hp: 1e9, maxHp: 1e9 }
+  game.ladders.push(l)
+  world.tiles[wall].ladder = l
+  world.dirty = true
+  const e = game.spawnEnemy({ type: 'raider', spawn: { x: world.keep.x - 3, y: world.keep.y + 1 }, hpMult: 1 })
+  step(game, 10)
+  assert.ok(e.dead, 'the climber was killed')
+  assert.ok(game.swordsmen[0].hp > 0)
+})
+
+test('swordsmen posted on the keep shield the lord', () => {
+  const lordAfter = (guards) => {
+    const game = new Game()
+    clearMap(game)
+    game.gold = 1000
+    const k = game.world.keep
+    for (let n = 0; n < guards; n++) game.place(game.world.idx(k.x + 1, k.y + 1), 'swordsman')
+    skirmish(game)
+    k.doorHp = 0
+    for (let n = 0; n < 4; n++) game.intruders.push({ type: 'raider', hp: 40, maxHp: 40, dps: 8, gold: 3, climb: 0 })
+    step(game, 6)
+    return k.hp
+  }
+  assert.ok(lordAfter(2) > lordAfter(0))
+  assert.equal(lordAfter(2), 1000, 'the guards took the blows')
+})

@@ -95,6 +95,7 @@ export class Game {
     const over = this.layOverCost(i, type)
     if (over !== null) return this.gold >= over
     if (!this.world.canBuild(i, type)) return false
+    if (STRUCTURES[type].stair && this.stairFace(i) < 0) return false
     if (this.gold < this.costAt(i, type)) return false
     if (STRUCTURES[type].solid && (this.enemyOnTile(i) || this.swordsmanOnTile(i))) return false
     return true
@@ -123,10 +124,11 @@ export class Game {
 
   // Cost to turn the wall on tile i into a stronger `type`, or null if
   // that isn't a lay-over (empty tile, not a wall, or not stronger).
+  // A gate can also be dropped into any wall.
   layOverCost(i, type) {
     const from = this.world.tiles[i].type
     const a = WALL_TIERS.indexOf(from)
-    const b = WALL_TIERS.indexOf(type)
+    const b = type === 'gate' ? WALL_TIERS.length : WALL_TIERS.indexOf(type)
     if (a < 0 || b <= a || this.phase === 'won' || this.phase === 'lost') return null
     return Math.max(1, this.costAt(i, type) - this.costAt(i, from))
   }
@@ -143,6 +145,13 @@ export class Game {
     t.weakened = false
     if (!HOARDING.on.includes(type)) t.hoard = false
     this.world.dirty = true
+    // Archers who no longer fit (a gate holds fewer) move along the wall.
+    const here = this.archers.filter((a) => a.tile === i && !a.path.length)
+    for (const a of here.slice(this.world.slots(i))) {
+      const path = this.rampartPath(a, (j) => this.hasRoom(j, a))
+      if (path) a.path = path
+      else this.rehouse(a)
+    }
     const [x, y] = this.center(i)
     this.floaters.push({ x, y, z: this.world.surface(i), text: `-${cost}`, t: 0, color: 'cost' })
     this.sfx('build', x, y)
@@ -566,22 +575,88 @@ export class Game {
 
   // ---- swordsmen ------------------------------------------------------------
 
-  // Your troops walk on open ground and through gates.
+  // Your troops walk on open ground and through gates. They can also go
+  // up onto the ramparts (walls, gates, towers, the keep) by stairs, or
+  // into the keep by its door, and walk along connected ramparts up there.
   troopPassable(i) {
     const t = this.world.tiles[i].type
     return this.world.isWalkable(i) || t === 'gate'
   }
 
+  stairFace(i) {
+    return this.world.stairFace(i)
+  }
+
+  // Troop routes run over nodes: tile * 2 + (1 if up on the ramparts).
+  troopNext(node) {
+    const { world } = this
+    const u = node >> 1
+    const up = node & 1
+    const k = world.keep
+    const ux = u % world.w
+    const uy = (u / world.w) | 0
+    const out = []
+    for (const [dx, dy] of N4) {
+      const vx = ux + dx
+      const vy = uy + dy
+      if (!world.inBounds(vx, vy)) continue
+      const v = world.idx(vx, vy)
+      if (up) {
+        if (world.isRampart(v)) out.push(v * 2 + 1)
+        else if (world.tiles[v].type === 'stair' && this.stairFace(v) === u) out.push(v * 2)
+        else if (u === k.door && v === k.step) out.push(v * 2)
+      } else {
+        if (this.troopPassable(v)) out.push(v * 2)
+        if (world.isRampart(v) && ((world.tiles[u].type === 'stair' && this.stairFace(u) === v) || (u === k.step && v === k.door))) out.push(v * 2 + 1)
+      }
+    }
+    return out
+  }
+
+  // Shortest route between two nodes (excluding the start), or null.
+  troopRoute(a, b, limit = 900) {
+    if (a === b) return []
+    const prev = new Map([[a, -1]])
+    const queue = [a]
+    for (let q = 0; q < queue.length && q < limit; q++) {
+      const u = queue[q]
+      if (u === b) {
+        const path = []
+        for (let v = u; v !== a; v = prev.get(v)) path.push(v)
+        return path.reverse()
+      }
+      for (const v of this.troopNext(u)) {
+        if (prev.has(v)) continue
+        prev.set(v, u)
+        queue.push(v)
+      }
+    }
+    return null
+  }
+
+  // Ground-level route from tile a to tile b, as tiles.
+  troopPath(a, b, limit = 900) {
+    const r = this.troopRoute(a * 2, b * 2, limit)
+    return r && r.map((n) => n >> 1)
+  }
+
+  // Is this unit up on a wall (or a ladder) rather than on the ground?
+  elevated(u) {
+    return u.z - this.world.heightAt(u.x, u.y) > 0.5
+  }
+
   swordsmanOnTile(i) {
     const x = i % this.world.w
     const y = (i / this.world.w) | 0
-    return this.swordsmen.some((s) => s.x > x && s.x < x + 1 && s.y > y && s.y < y + 1)
+    return this.swordsmen.some((s) => !s.up && s.x > x && s.x < x + 1 && s.y > y && s.y < y + 1)
   }
 
   canPlaceSwordsman(i) {
+    const { world } = this
     return (
       this.phase !== 'won' && this.phase !== 'lost' &&
-      this.gold >= SWORDSMAN.cost && this.world.isWalkable(i) && !this.world.reserved[i]
+      this.gold >= SWORDSMAN.cost &&
+      ((world.isWalkable(i) && !world.reserved[i]) || world.isRampart(i))
     )
   }
 
@@ -589,13 +664,16 @@ export class Game {
     if (!this.canPlaceSwordsman(i)) return false
     this.gold -= SWORDSMAN.cost
     const [x, y] = this.center(i)
-    this.swordsmen.push({
+    const up = !this.world.isWalkable(i)
+    const s = {
       id: this.nextId++,
       kind: 'swordsman',
       post: i,
+      postUp: up,
+      up,
       x: x + (this.rnd() - 0.5) * 0.3,
       y: y + (this.rnd() - 0.5) * 0.3,
-      z: this.world.elev(i),
+      z: 0,
       hp: SWORDSMAN.hp,
       maxHp: SWORDSMAN.hp,
       r: SWORDSMAN.r,
@@ -607,9 +685,30 @@ export class Game {
       walk: 0,
       fighting: false,
       flash: 0,
-    })
+    }
+    s.z = this.troopZ(s)
+    this.swordsmen.push(s)
     this.sfx('recruit', x, y)
     return true
+  }
+
+  // Where a swordsman's feet are: on the rampart, partway up a stair, or
+  // on the ground.
+  troopZ(s) {
+    const { world } = this
+    const i = world.idxAt(s.x, s.y)
+    if (s.up && world.isRampart(i)) return world.surfaceAt(i, s.x, s.y)
+    const ground = world.heightAt(s.x, s.y)
+    if (world.tiles[i].type === 'stair') {
+      const f = this.stairFace(i)
+      if (f >= 0) {
+        const [cx, cy] = this.center(i)
+        const [fx, fy] = this.center(f)
+        const p = Math.max(0, Math.min(1, (s.x - cx) * (fx - cx) + (s.y - cy) * (fy - cy) + 0.5))
+        return ground + p * (world.surfaceAt(f, cx + (fx - cx) / 2, cy + (fy - cy) / 2) - ground)
+      }
+    }
+    return ground
   }
 
   covers(s, e) {
@@ -623,7 +722,7 @@ export class Game {
   }
 
   // Give a group of swordsmen orders: cover a zone (tiles, inclusive), or
-  // with no zone, stand guard at `post`. Posts spread across the zone.
+  // with no zone, stand guard at `post` (on the ground or up on a rampart).
   orderSwordsmen(ids, zone, post = null) {
     const { world } = this
     const group = this.swordsmen.filter((s) => ids.includes(s.id))
@@ -637,51 +736,28 @@ export class Game {
         }
       // Spread them out evenly over the zone.
       spots.sort((a, b) => (a % world.w) - (b % world.w) || a - b)
-    } else if (post !== null && world.isWalkable(post)) spots = [post]
+    } else if (post !== null && (world.isWalkable(post) || world.isRampart(post))) spots = [post]
     if (!spots.length) return false
     group.forEach((s, k) => {
       s.zone = zone
       s.post = spots[Math.floor(((k + 0.5) / group.length) * spots.length)]
+      s.postUp = !world.isWalkable(s.post)
       s.think = 0
     })
     return true
-  }
-
-  // Shortest 4-way path for troops from tile a to tile b (excluding a).
-  troopPath(a, b, limit = 500) {
-    if (a === b) return []
-    const { world } = this
-    const prev = new Map([[a, -1]])
-    const queue = [a]
-    for (let q = 0; q < queue.length && q < limit; q++) {
-      const u = queue[q]
-      if (u === b) {
-        const path = []
-        for (let v = u; v !== a; v = prev.get(v)) path.push(v)
-        return path.reverse()
-      }
-      const ux = u % world.w
-      const uy = (u / world.w) | 0
-      for (const [dx, dy] of N4) {
-        const nx = ux + dx
-        const ny = uy + dy
-        if (!world.inBounds(nx, ny)) continue
-        const v = world.idx(nx, ny)
-        if (prev.has(v) || !this.troopPassable(v)) continue
-        prev.set(v, u)
-        queue.push(v)
-      }
-    }
-    return null
   }
 
   updateSwordsman(s, dt) {
     const { world } = this
     s.flash = Math.max(0, s.flash - dt)
     s.think -= dt
-    const here = world.idxAt(s.x, s.y)
-    s.z += (world.heightAt(s.x, s.y) - s.z) * Math.min(1, dt * 8)
+    let here = world.idxAt(s.x, s.y)
+    // The rampart came down under them: they're on the ground now.
+    if (s.up && !world.isRampart(here)) s.up = false
+    s.z += (this.troopZ(s) - s.z) * Math.min(1, dt * 8)
     const [px, py] = this.center(s.post)
+    const node = here * 2 + (s.up ? 1 : 0)
+    const postNode = s.post * 2 + (s.postUp ? 1 : 0)
 
     if (s.think <= 0) {
       s.think = THINK
@@ -690,7 +766,7 @@ export class Game {
         // Charge the closest enemy inside their zone (or near their post).
         let best = Infinity
         for (const e of this.enemies) {
-          if (e.dead || !this.covers(s, e)) continue
+          if (e.dead || e.gone || !this.covers(s, e)) continue
           const d = Math.hypot(e.x - s.x, e.y - s.y)
           if (d < best) {
             best = d
@@ -698,19 +774,24 @@ export class Game {
           }
         }
       }
-      let path = s.target ? this.troopPath(here, world.idxAt(s.target.x, s.target.y)) : null
+      let path = null
+      if (s.target) {
+        const e = s.target
+        const ei = world.idxAt(e.x, e.y)
+        path = this.troopRoute(node, ei * 2 + (this.elevated(e) && world.isRampart(ei) ? 1 : 0))
+      }
       if (!path) {
         // Unreachable (say, outside a wall with no gate): hold the post.
         s.target = null
-        path = this.troopPath(here, s.post)
+        path = this.troopRoute(node, postNode)
       }
       s.path = path || []
     }
 
     const e = s.target
-    if (e && !e.dead) {
+    if (e && !e.dead && !e.gone) {
       const d = Math.hypot(e.x - s.x, e.y - s.y)
-      if (d <= s.r + e.r + 0.3) {
+      if (d <= s.r + e.r + 0.3 && Math.abs(e.z - s.z) < 0.6) {
         s.fighting = true
         s.heading = Math.atan2(e.y - s.y, e.x - s.x)
         s.walk += dt * 8
@@ -721,24 +802,37 @@ export class Game {
     }
     s.fighting = false
 
-    // Walk the path tile by tile, then straight at the target or post.
-    let tx
-    let ty
+    // Follow the route tile by tile (up stairs, along walls), then close in
+    // on the target or post at the same level.
+    const speed = SWORDSMAN.speed * (s.up ? 1 : world.slow(here))
     if (s.path.length) {
-      ;[tx, ty] = this.center(s.path[0])
-      if (Math.hypot(tx - s.x, ty - s.y) < 0.3) s.path.shift()
-    } else if (e && !e.dead) {
+      const [tx, ty] = this.center(s.path[0] >> 1)
+      const dx = tx - s.x
+      const dy = ty - s.y
+      const d = Math.hypot(dx, dy)
+      const step = Math.min(d, speed * dt)
+      if (d > 1e-6) {
+        s.heading = Math.atan2(dy, dx)
+        s.x += (dx / d) * step
+        s.y += (dy / d) * step
+        s.walk += step * 6
+      }
+      here = world.idxAt(s.x, s.y)
+      if (here === s.path[0] >> 1) s.up = !!(s.path[0] & 1)
+      if (d - step < 0.3) s.path.shift()
+      return
+    }
+    let tx = px
+    let ty = py
+    if (e && !e.dead && !e.gone) {
       tx = e.x
       ty = e.y
-    } else {
-      tx = px
-      ty = py
     }
     const dx = tx - s.x
     const dy = ty - s.y
     const d = Math.hypot(dx, dy)
     if (d < 0.05) return
-    const step = Math.min(d, SWORDSMAN.speed * world.slow(here) * dt)
+    const step = Math.min(d, speed * dt)
     s.heading = Math.atan2(dy, dx)
     s.walk += step * 6
     this.tryMove(s, (dx / d) * step, (dy / d) * step)
@@ -927,8 +1021,8 @@ export class Game {
     this.emit('waveEnd', { wave: this.wave, bonus, village, plots })
   }
 
-  // `mode`: 'troop' (your swordsmen, through gates), 'climb' (foot
-  // soldiers, up ladders) or null.
+  // `mode`: 'troop' (your swordsmen, through gates), 'troopUp' (your
+  // swordsmen on the ramparts), 'climb' (foot soldiers, up ladders) or null.
   blockedAt(x, y, r, mode = null) {
     const { world } = this
     // >= so a unit flush with the far edge never reads past the grid.
@@ -940,7 +1034,9 @@ export class Game {
     for (let ty = y0; ty <= y1; ty++)
       for (let tx = x0; tx <= x1; tx++) {
         const i = world.idx(tx, ty)
-        if (mode === 'troop' ? !this.troopPassable(i) : !world.isWalkable(i) && !(mode === 'climb' && world.tiles[i].ladder)) return true
+        if (mode === 'troopUp') {
+          if (!world.isRampart(i)) return true
+        } else if (mode === 'troop' ? !this.troopPassable(i) : !world.isWalkable(i) && !(mode === 'climb' && world.tiles[i].ladder)) return true
       }
     return false
   }
@@ -948,7 +1044,7 @@ export class Game {
   // Move with axis-separated sliding so units glide along walls.
   tryMove(u, dx, dy) {
     const cr = u.r * 0.8
-    const mode = u.kind === 'swordsman' ? 'troop' : u.kind === 'archer' ? null : this.climbs(u) ? 'climb' : null
+    const mode = u.kind === 'swordsman' ? (u.up ? 'troopUp' : 'troop') : u.kind === 'archer' ? null : this.climbs(u) ? 'climb' : null
     if (dx && !this.blockedAt(u.x + dx, u.y, cr, mode)) u.x += dx
     if (dy && !this.blockedAt(u.x, u.y + dy, cr, mode)) u.y += dy
   }
@@ -1038,7 +1134,7 @@ export class Game {
     // the wall once they're up a ladder.
     if (!def.noMelee && def.dps > 0) {
       for (const s of this.swordsmen) {
-        if (s.dead || Math.hypot(s.x - e.x, s.y - e.y) > e.r + s.r + 0.3) continue
+        if (s.dead || Math.hypot(s.x - e.x, s.y - e.y) > e.r + s.r + 0.3 || Math.abs(s.z - e.z) > 0.6) continue
         e.attacking = true
         e.heading = Math.atan2(s.y - e.y, s.x - e.x)
         e.walk += dt * 6
@@ -1236,9 +1332,17 @@ export class Game {
     const k = this.world.keep
     const up = this.intruders.filter((u) => (u.climb -= dt) <= 0)
     if (up.length) {
-      const guard = (KEEP.guard / up.length) * dt
-      for (const u of up) {
-        k.hp = Math.max(0, k.hp - u.dps * dt)
+      // Swordsmen posted on the keep fight beside the lord's guard and take
+      // the blows meant for him.
+      const keepers = this.swordsmen.filter((s) => !s.dead && s.up && this.world.tiles[this.world.idxAt(s.x, s.y)].type === 'keep')
+      const guard = ((KEEP.guard + keepers.length * SWORDSMAN.dps) / up.length) * dt
+      for (const [n, u] of up.entries()) {
+        const s = keepers[n % (keepers.length || 1)]
+        if (s) {
+          s.hp -= u.dps * dt
+          s.flash = 0.1
+          s.fighting = true
+        } else k.hp = Math.max(0, k.hp - u.dps * dt)
         u.hp -= guard
         if (u.hp <= 0) {
           u.dead = true
@@ -1269,6 +1373,7 @@ export class Game {
       for (let b = a + 1; b < us.length; b++) {
         const A = us[a]
         const B = us[b]
+        if (Math.abs(A.z - B.z) > 0.5) continue // one is up on the wall
         const dx = B.x - A.x
         const dy = B.y - A.y
         const min = (A.r + B.r) * 0.85

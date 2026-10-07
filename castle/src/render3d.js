@@ -488,6 +488,9 @@ export class Renderer3D {
         case 'pikes':
           this.pikes(world, x, y, foot)
           break
+        case 'stair':
+          this.stair(world, i, x, y)
+          break
         case 'trap':
           this.box('soil', x + 0.08, y + 0.08, z, x + 0.92, y + 0.92, z + 0.04)
           for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) this.cone('iron', x + 0.25 + a * 0.25, y + 0.25 + b * 0.25, z + 0.04, 0.16, 0.04, 4)
@@ -685,6 +688,33 @@ export class Renderer3D {
         const my = cy + Math.sin(ang) * 0.4
         this.box('stoneDark', mx - 0.08, my - 0.08, top, mx + 0.08, my + 0.08, top + 0.2)
       }
+    }
+  }
+
+  // Stone steps rising to the rampart the stair is built against.
+  stair(world, i, x, y) {
+    const f = world.stairFace(i)
+    const cx = x + 0.5
+    const cy = y + 0.5
+    let dx = 0
+    let dy = 1
+    let top = world.elev(i) + 0.4
+    if (f >= 0) {
+      dx = (f % world.w) - x
+      dy = ((f / world.w) | 0) - y
+      top = world.surfaceAt(f, cx + dx * 0.5, cy + dy * 0.5)
+    }
+    const n = 4
+    const hw = 0.3
+    for (let k = 0; k < n; k++) {
+      const a = -0.5 + k / n
+      const b = -0.5 + (k + 1) / n
+      const x0 = dx ? cx + Math.min(a * dx, b * dx) : cx - hw
+      const x1 = dx ? cx + Math.max(a * dx, b * dx) : cx + hw
+      const y0 = dy ? cy + Math.min(a * dy, b * dy) : cy - hw
+      const y1 = dy ? cy + Math.max(a * dy, b * dy) : cy + hw
+      const g = world.heightAt((x0 + x1) / 2, (y0 + y1) / 2)
+      this.box('stone', x0, y0, g - 0.3, x1, y1, g + (top - g) * ((k + 1) / n))
     }
   }
 

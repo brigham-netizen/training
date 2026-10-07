@@ -217,6 +217,24 @@ export class World {
     const hp = STRUCTURES[type]?.hp || 0
     return Math.round(hp * (this.tiles[i].rock ? ROCK_FOUNDATION.hp : 1))
   }
+  // The rampart a stair tile climbs to, or -1. Walls first, then the rest.
+  stairFace(i) {
+    const x = i % this.w
+    const y = (i / this.w) | 0
+    let best = -1
+    let rank = 9
+    for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      if (!this.inBounds(x + dx, y + dy)) continue
+      const j = this.idx(x + dx, y + dy)
+      if (!this.isRampart(j)) continue
+      const r = ['wall', 'thick', 'gate', 'tower', 'keep'].indexOf(this.tiles[j].type)
+      if (r < rank) {
+        rank = r
+        best = j
+      }
+    }
+    return best
+  }
   isRampart(i) {
     const t = this.tiles[i]
     return t.type === 'keep' || STRUCTURES[t.type]?.rampart === true

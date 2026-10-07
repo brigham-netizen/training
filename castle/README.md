@@ -68,6 +68,17 @@ and it's still there if the wall falls.
 
 Paint a stronger wall over a weaker one (stone over palisade, thick over
 either) to upgrade it in place for the difference in price.
+A gate can be dropped into any wall the same way.
+
+Stairs (4) go against a wall, gate, tower or the keep. Swordsmen use them to
+climb onto the ramparts, walk along connected walls, and fight raiders coming
+over on ladders. Tap a wall or the keep with the Swordsman tool to post one up
+there directly. The keep has stairs inside its door: swordsmen posted on the
+keep fight beside the lord's guard and take the blows meant for him.
+
+The speech-bubble button (top right, also in the menu) sends a bug report or
+idea: it opens the phone's share sheet with the note, a screenshot, and the
+build, map number, wave and device, or posts it as a GitHub issue.
 
 Terrain: hills (+1 archer range, slow to climb), marsh and fords (slow, no
 building), rivers and lakes (impassable). Hills slope smoothly into the

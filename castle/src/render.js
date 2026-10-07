@@ -917,6 +917,9 @@ export class Renderer {
       case 'pikes':
         this.drawPikes(world, x, y, this.footZ ?? z, f)
         break
+      case 'stair':
+        this.drawStair(world, i, x, y)
+        break
       case 'gate':
         this.drawGate(world, i, x, y, z, f)
         break
@@ -961,6 +964,42 @@ export class Renderer {
         this.box(x + 0.12, y + 0.16, x + 0.88, y + 0.86, z, z + h, c.side, c.top)
         break
       }
+    }
+  }
+
+  // A flight of stone steps rising to the rampart it's built against.
+  drawStair(world, i, x, y) {
+    const f = world.stairFace(i)
+    const cx = x + 0.5
+    const cy = y + 0.5
+    const n = 4
+    let dx = 0
+    let dy = 1
+    let top = world.elev(i) + 0.4
+    if (f >= 0) {
+      dx = (f % world.w) - x
+      dy = ((f / world.w) | 0) - y
+      top = world.surfaceAt(f, cx + dx * 0.5, cy + dy * 0.5)
+    }
+    const c = COLORS.wall
+    const steps = []
+    for (let k = 0; k < n; k++) {
+      // Step k spans [a, b] along the climb direction, measured from the far edge.
+      const a = -0.5 + k / n
+      const b = -0.5 + (k + 1) / n
+      const hw = 0.3
+      const x0 = dx ? cx + Math.min(a * dx, b * dx) : cx - hw
+      const x1 = dx ? cx + Math.max(a * dx, b * dx) : cx + hw
+      const y0 = dy ? cy + Math.min(a * dy, b * dy) : cy - hw
+      const y1 = dy ? cy + Math.max(a * dy, b * dy) : cy + hw
+      steps.push([x0, y0, x1, y1, (k + 1) / n])
+    }
+    const cam = this.cam
+    steps.sort((p, q) => cam.depth((p[0] + p[2]) / 2, (p[1] + p[3]) / 2) - cam.depth((q[0] + q[2]) / 2, (q[1] + q[3]) / 2))
+    const ground = (px, py) => world.heightAt(px, py)
+    for (const [x0, y0, x1, y1, h] of steps) {
+      const g = world.heightAt((x0 + x1) / 2, (y0 + y1) / 2)
+      this.box(x0, y0, x1, y1, ground, g + (top - g) * h, c.side, c.top, 0, true, 'stone')
     }
   }
 

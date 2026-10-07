@@ -594,3 +594,58 @@ canvas#game3d {
   display: block;
   pointer-events: none;
 }
+
+/* ---- feedback ---- */
+.fb-text,
+.fb-row input:not([type]),
+.fb-copy {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  background: #120f0b;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* 16px stops iOS zooming on focus */
+  user-select: text;
+  -webkit-user-select: text;
+}
+.fb-text {
+  display: block;
+  resize: none;
+}
+.fb-text:focus,
+.fb-row input:not([type]):focus {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+.fb-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.fb-row input:not([type]) {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+}
+.fb-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.fb-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--gold);
+}
+.fb-note {
+  margin: 8px 0 0 !important;
+}
+.fb-kind {
+  margin-bottom: 8px;
+}

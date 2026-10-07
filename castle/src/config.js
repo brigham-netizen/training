@@ -24,6 +24,9 @@ export const STRUCTURES = {
   gate: { label: 'Gate', cost: 15, hp: 240, height: 1.25, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
   tower: { label: 'Tower', cost: 60, hp: 550, height: 2.2, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1 },
   moat: { label: 'Moat', cost: 3, slow: 0.35, flatOnly: true },
+  // Built against a wall, tower or the keep: lets swordsmen climb up and
+  // fight on the ramparts. Enemies just walk over it.
+  stair: { label: 'Stairs', cost: 4, stair: true },
   pikes: { label: 'Pikes', cost: 3, hp: 110, height: 0.6, solid: true, thorns: 18 },
   trap: { label: 'Spikes', cost: 20, dps: 22 },
   // Village buildings: proposed by the village, built by you, pay out each wave.

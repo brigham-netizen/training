@@ -32,6 +32,8 @@ const ICONS = {
   settle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 11l9-7 9 7M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>',
   fsOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
   fsOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>',
+  stair: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 21h18V4h-4v4.25h-4.5v4.25H8v4.25H3z"/></svg>',
+  feedback: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M12 8v3M12 13.5v.01"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
@@ -45,6 +47,7 @@ const TOOL_LABELS = {
   moat: 'Moat',
   pikes: 'Pikes',
   gate: 'Gate',
+  stair: 'Stairs',
   swordsman: 'Swordsman',
   upgrade: 'Upgrade',
   hoard: 'Hoarding',
@@ -59,8 +62,9 @@ const TOOL_HINTS = {
   thick: 'Very tough, holds 2 archers.',
   tower: 'Comes with an archer. Height adds range.',
   archer: 'Tap a wall, tower or the keep.',
-  gate: 'Your troops walk through. Enemies must break it.',
-  swordsman: 'Guards a spot and charges nearby enemies.',
+  gate: 'Your troops walk through; enemies must break it. Drop one into a wall for the difference.',
+  stair: 'Build against a wall, tower or keep so swordsmen can climb up.',
+  swordsman: 'Guards a spot. Tap a wall or the keep to post one up top.',
   hoard: 'Wooden shields on a stone wall, gate or tower. Archers behind it are much safer.',
   orders: 'Tell swordsmen which area to cover.',
   upgrade: 'Palisade to stone, stone to thick; repairs damage.',
@@ -72,7 +76,7 @@ const TOOL_HINTS = {
 // Toolbar groups; multi-tool groups open a flyout.
 const GROUPS = [
   { id: 'look', tools: ['look'] },
-  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate', 'hoard'] },
+  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate', 'stair', 'hoard'] },
   { id: 'defend', tools: ['tower', 'archer', 'swordsman', 'orders'] },
   { id: 'obstacles', tools: ['moat', 'pikes', 'trap'] },
   { id: 'improve', tools: ['settle', 'upgrade'] },
@@ -352,6 +356,8 @@ function selectTool(id) {
 }
 
 $('menu-btn').innerHTML = ICONS.menu
+$('feedback-btn').innerHTML = ICONS.feedback
+$('feedback-btn').addEventListener('click', () => captureScreen((blob) => showFeedback(blob)))
 const soundBtn = $('sound-btn')
 function refreshSoundBtn() {
   const on = audio.musicOn || audio.sfxOn
@@ -549,7 +555,8 @@ const HELP = `
   <ul>
     <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can. Soldiers on foot can't break stone: they hack through gates and wood, or climb over with ladders.</li>
     <li><b>Towers and archers</b>: drag to aim, release to place. Archers stand on walls, towers and the keep, and walk along connected stone to reach attackers. Height adds range: towers most, then thick walls and hills.</li>
-    <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates; enemies have to break gates down. Send them out to kill catapults.</li>
+    <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates; enemies have to break gates down. Send them out to kill catapults. Drop a gate into an existing wall for the difference in price.</li>
+    <li><b>Stairs</b>: build them against a wall, tower or the keep and swordsmen can climb up to fight raiders coming over on ladders. Post swordsmen on the keep (it has its own stairs inside the door) to guard your lord.</li>
     <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
     <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
     <li><b>Enemies</b>: raiders and brutes hack at gates, palisades and pikes. Pairs of raiders carry <b>ladders</b> to stone walls and climb over; archers on or next to that wall push the ladder off. Rams smash gates and stone, bowmen shoot your troops, and catapults throw boulders from beyond archer range.</li>
@@ -563,6 +570,103 @@ const HELP = `
 
 const CREDITS = `<p class="credits">Music: “Castle Chamber” by brigham773. “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0.</p>`
 
+// ---- feedback ---------------------------------------------------------------
+
+let pendingCapture = null
+function captureScreen(cb) {
+  pendingCapture = cb
+}
+
+const REPO_ISSUES = 'https://github.com/brigham-netizen/training/issues/new'
+let fbDraft = { kind: 'bug', text: '', name: '' }
+try {
+  fbDraft.name = localStorage.getItem('htk-name') || ''
+} catch {
+  // ignore
+}
+
+function reportText(kind, text, name) {
+  const w = game.phase === 'won' ? game.wave : game.nextWave
+  const lines = [
+    `Hold the Keep: ${kind === 'bug' ? 'bug report' : 'idea'}`,
+    '',
+    text.trim() || '(no description)',
+    '',
+    name.trim() ? `From: ${name.trim()}` : null,
+    `Build ${__BUILD__} · map ${game.seed} · wave ${w}/${TOTAL_WAVES} (${game.phase}) · ${game.gold} gold`,
+    `${gfx === '3d' ? '3D' : 'Classic'} graphics · ${window.innerWidth}×${window.innerHeight} · ${navigator.userAgent}`,
+  ]
+  return lines.filter((l) => l !== null).join('\n')
+}
+
+function showFeedback(shot) {
+  const k = fbDraft.kind
+  modal('Send feedback', `
+    <div class="toggles fb-kind">
+      <button data-kind="bug" class="${k === 'bug' ? 'on' : ''}">Something's wrong</button>
+      <button data-kind="idea" class="${k === 'idea' ? 'on' : ''}">I have an idea</button>
+    </div>
+    <textarea id="fb-text" class="fb-text" rows="3" maxlength="2000" placeholder="What happened, or what would make it better?">${escapeHtml(fbDraft.text)}</textarea>
+    <div class="fb-row">
+      <input id="fb-name" maxlength="40" placeholder="Your name (optional)" value="${escapeHtml(fbDraft.name)}" />
+      ${shot ? '<label class="fb-check"><input type="checkbox" id="fb-shot" checked /> Screenshot</label>' : ''}
+    </div>
+    <p class="save-note fb-note">Includes the map number, wave and device so it can be replayed.</p>`, [
+    { label: 'Cancel', run: readDraft },
+    { label: 'Post on GitHub', run: () => sendFeedback(shot, 'github') },
+    { label: 'Send', primary: true, run: () => sendFeedback(shot, 'share') },
+  ])
+  for (const b of document.querySelectorAll('.fb-kind button'))
+    b.addEventListener('click', () => {
+      fbDraft.kind = b.dataset.kind
+      for (const o of document.querySelectorAll('.fb-kind button')) o.classList.toggle('on', o === b)
+    })
+  $('fb-text').focus()
+}
+
+function readDraft() {
+  fbDraft.text = $('fb-text')?.value ?? fbDraft.text
+  fbDraft.name = $('fb-name')?.value ?? fbDraft.name
+  try {
+    localStorage.setItem('htk-name', fbDraft.name)
+  } catch {
+    // ignore
+  }
+}
+
+async function sendFeedback(shot, how) {
+  readDraft()
+  const withShot = shot && $('fb-shot')?.checked !== false
+  const text = reportText(fbDraft.kind, fbDraft.text, fbDraft.name)
+  const title = `${fbDraft.kind === 'bug' ? 'Bug' : 'Idea'}: ${fbDraft.text.trim().split('\n')[0].slice(0, 60) || 'feedback'}`
+  if (how === 'github') {
+    window.open(`${REPO_ISSUES}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`, '_blank')
+    fbDraft.text = ''
+    return
+  }
+  // The phone's share sheet: text it, email it, whatever's handy.
+  const data = { title: 'Hold the Keep feedback', text }
+  if (withShot) {
+    const file = new File([shot], 'hold-the-keep.jpg', { type: 'image/jpeg' })
+    if (navigator.canShare?.({ files: [file] })) data.files = [file]
+  }
+  try {
+    if (!navigator.share) throw new Error('no share')
+    await navigator.share(data)
+    fbDraft.text = ''
+    banner('Thanks!<small>Your feedback is on its way.</small>', 2000)
+  } catch (err) {
+    if (err?.name === 'AbortError') return // they closed the share sheet
+    try {
+      await navigator.clipboard.writeText(text)
+      fbDraft.text = ''
+      banner('Copied to your clipboard<small>Paste it in a message to whoever sent you the game.</small>', 4200)
+    } catch {
+      modal('Send feedback', `<p>Copy this and send it to whoever sent you the game:</p><textarea class="fb-copy" rows="8" readonly>${escapeHtml(text)}</textarea>`, [{ label: 'Done', primary: true }])
+    }
+  }
+}
+
 function showMenu() {
   const toggles = `<div class="toggles">
     <button id="music-toggle" class="${audio.musicOn ? 'on' : ''}">Music: ${audio.musicOn ? 'on' : 'off'}</button>
@@ -570,6 +674,7 @@ function showMenu() {
     <button id="build-track">Build music: ${BUILD_TRACKS[audio.buildTrack].label}</button>
     <button id="test-sound">Test sound</button>
     <button id="gfx-toggle" class="${gfx === '3d' ? 'on' : ''}">Graphics: ${gfx === '3d' ? '3D (preview)' : 'Classic'}</button>
+    <button id="menu-feedback">Report a bug / suggest an idea</button>
   </div><p class="save-note" id="sound-note"></p>`
   const savesRow = `<div class="toggles">
     <button id="save-game">Save game</button>
@@ -602,6 +707,11 @@ document.addEventListener('click', async (e) => {
     if (!data) return note('No saved game yet.')
     closeModal()
     loadGame(data)
+    return
+  }
+  if (id === 'menu-feedback') {
+    closeModal()
+    captureScreen((blob) => showFeedback(blob))
     return
   }
   if (id === 'gfx-toggle') {
@@ -793,7 +903,7 @@ function handleEvents() {
 // ---- keyboard (desktop testing) -----------------------------------------------
 
 window.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
   const n = '1234567890'.indexOf(e.key)
   if (n >= 0) selectTool(KEYS[n])
   else if (e.key === 'v') setView(camera.mode === 'top' ? 'iso' : 'top')
@@ -854,6 +964,23 @@ function frame(now) {
     renderer3d.render(game, camera)
     renderer.renderOverlay(game, ui)
   } else renderer.render(game, ui)
+  if (pendingCapture) {
+    // Grab the frame now, while the WebGL buffer still holds it.
+    const done = pendingCapture
+    pendingCapture = null
+    try {
+      const scale = Math.min(1, 1280 / canvas.width)
+      const out = document.createElement('canvas')
+      out.width = Math.round(canvas.width * scale)
+      out.height = Math.round(canvas.height * scale)
+      const g = out.getContext('2d')
+      if (gfx === '3d' && renderer3d) g.drawImage(canvas3d, 0, 0, out.width, out.height)
+      g.drawImage(canvas, 0, 0, out.width, out.height)
+      out.toBlob((b) => done(b), 'image/jpeg', 0.82)
+    } catch {
+      done(null)
+    }
+  }
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)
