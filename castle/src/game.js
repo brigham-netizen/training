@@ -8,6 +8,8 @@ import {
 
 const THINK = 0.4 // seconds between unit decisions
 const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
+const BREACH_SEARCH = 140 // ...and how far they'll hurry to reach a breach
+const CATAPULT_DECAY = 6 // seconds an abandoned catapult takes to fall apart
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 // Gates are barred while an enemy is this close (tiles), before your
 // swordsmen guarding nearby would charge out at it.
@@ -487,13 +489,20 @@ export class Game {
     return this.enemies.some((e) => !e.dead && (e.x - x) ** 2 + (e.y - y) ** 2 <= r2)
   }
 
+  // Is an enemy on the wall or inside it within range of rampart tile i?
+  breachInRange(i) {
+    const [x, y] = this.center(i)
+    const r2 = this.range(i) ** 2
+    return this.enemies.some((e) => !e.dead && !e.gone && (e.x - x) ** 2 + (e.y - y) ** 2 <= r2 && this.threat(e) === 0)
+  }
+
   // Breadth-first search along connected ramparts. Returns the path to the
   // first tile satisfying `goal`, excluding the start.
-  rampartPath(a, goal) {
+  rampartPath(a, goal, limit = ARCHER_SEARCH) {
     const { world } = this
     const prev = new Map([[a.tile, -1]])
     const queue = [a.tile]
-    for (let q = 0; q < queue.length && q < ARCHER_SEARCH; q++) {
+    for (let q = 0; q < queue.length && q < limit; q++) {
       const u = queue[q]
       if (u !== a.tile && goal(u)) {
         const path = []
@@ -554,6 +563,16 @@ export class Game {
     a.z += (world.surfaceAt(a.tile, a.x, a.y) - a.z) * Math.min(1, dt * 10)
 
     const target = this.pickTarget(a.x, a.y, this.range(a.tile))
+    // A breach somewhere: archers who can't shoot at it hurry along the
+    // walls to where they can, rather than plinking at stragglers.
+    if (this.phase === 'attack' && a.think <= 0 && this.breaching && (!target || this.threat(target) > 0)) {
+      a.think = THINK
+      const path = this.rampartPath(a, (i) => this.hasRoom(i, a) && this.breachInRange(i), BREACH_SEARCH)
+      if (path && path.length) {
+        a.path = path
+        return
+      }
+    }
     if (target) {
       a.heading = Math.atan2(target.y - a.y, target.x - a.x)
       if (a.cd <= 0) {
@@ -985,6 +1004,7 @@ export class Game {
     if (this.world.dirty) this.repath()
 
     this.updateGateLocks(dt)
+    this.breaching = this.phase === 'attack' && this.enemies.some((e) => !e.dead && !e.gone && this.threat(e) === 0)
     for (const a of this.archers) this.updateArcher(a, dt)
     for (const s of this.swordsmen) this.updateSwordsman(s, dt)
     this.reapDefenders()
@@ -1044,7 +1064,52 @@ export class Game {
       reach = Math.max(reach, Math.hypot((i % world.w) + 0.5 - (k.x + 1.5), ((i / world.w) | 0) + 0.5 - (k.y + KEEP.size)))
     }
     this.castleReach = reach
+    this.inside = this.insideMask()
     this.world.dirty = false
+  }
+
+  // Tiles enclosed by your walls: everything the outside can't reach
+  // without going through something solid (water and woods don't count).
+  insideMask() {
+    const { world } = this
+    const { w, h } = world
+    const seen = new Uint8Array(w * h)
+    const queue = []
+    for (let i = 0; i < w * h; i++) {
+      const x = i % w
+      const y = (i / w) | 0
+      if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && !world.isSolid(i)) {
+        seen[i] = 1
+        queue.push(i)
+      }
+    }
+    while (queue.length) {
+      const i = queue.pop()
+      const x = i % w
+      const y = (i / w) | 0
+      for (const [dx, dy] of N4) {
+        const nx = x + dx
+        const ny = y + dy
+        if (!world.inBounds(nx, ny)) continue
+        const j = world.idx(nx, ny)
+        if (seen[j] || world.isSolid(j)) continue
+        seen[j] = 1
+        queue.push(j)
+      }
+    }
+    const inside = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i++) if (!seen[i] && !world.isSolid(i)) inside[i] = 1
+    return inside
+  }
+
+  // How urgently archers should shoot an enemy: 0 for anyone on a wall or
+  // already inside it, 1 for anyone breaking in (or a siege engine), 2 for
+  // everyone else.
+  threat(e) {
+    const i = this.world.idxAt(e.x, e.y)
+    if (this.world.tiles[i].ladder || this.elevated(e) || this.inside?.[i]) return 0
+    if (e.attacking || e.type === 'catapult' || e.type === 'ram') return 1
+    return 2
   }
 
   // Which flow field an enemy follows. Foot soldiers with no way in (stone
@@ -1184,7 +1249,17 @@ export class Game {
         }
         return
       }
-    } else if (e.type === 'catapult' && e.ammo > 0) {
+    } else if (e.type === 'catapult' && e.ammo <= 0) {
+      // Out of boulders: the crew abandons it where it stands and it
+      // falls apart rather than rolling forward to be shot.
+      e.abandoned = true
+      this.hurt(e, (e.maxHp / CATAPULT_DECAY) * dt, false)
+      if (e.dead) {
+        this.effects.push({ type: 'dust', x: e.x, y: e.y, z: e.z + 0.2, t: 0, life: 0.9, size: 0.9 })
+        this.sfx('crumble', e.x, e.y)
+      }
+      return
+    } else if (e.type === 'catapult') {
       const ti = this.catapultTarget(e, def.range)
       if (ti >= 0) {
         e.shooting = true
@@ -1518,7 +1593,8 @@ export class Game {
       // Shoot whoever is closest to breaking in; siege engines first.
       let d = this.flowFor(e).dist[world.idxAt(e.x, e.y)]
       if (!isFinite(d)) d = 1e6
-      if (e.type === 'catapult') d -= 20
+      // Breaches first, then whoever is breaking in, then the rest.
+      d += this.threat(e) * 1e7
       if (d < bestDist) {
         bestDist = d
         best = e

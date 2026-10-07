@@ -870,3 +870,61 @@ test('a wave arrives as one army per gate, all at once', () => {
   assert.equal(game.spawnQueue.length, 0, 'everyone is on the field')
   assert.ok(game.enemies.filter((e) => e.march).length > 10, 'foot soldiers march together')
 })
+
+// ---- stage 8: abandoned catapults, breach-first archers ----------------------
+
+test('a catapult out of boulders stays put and falls apart', () => {
+  const game = new Game()
+  clearMap(game)
+  game.archers = []
+  const { world } = game
+  skirmish(game)
+  const cat = game.spawnEnemy({ type: 'catapult', spawn: { x: world.keep.x - 10, y: world.keep.y + 1 }, hpMult: 1 })
+  cat.ammo = 0
+  const x = cat.x
+  const y = cat.y
+  step(game, 3)
+  assert.ok(Math.hypot(cat.x - x, cat.y - y) < 0.05, 'did not roll forward')
+  assert.ok(cat.hp < cat.maxHp, 'falling apart')
+  step(game, 5)
+  assert.ok(!game.enemies.includes(cat), 'gone within a few seconds')
+})
+
+test('archers shoot whoever is inside the walls before anyone outside', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  const tiles = ring(game, 4)
+  for (const i of tiles) game.place(i, 'wall')
+  const k = world.keep
+  const post = world.idx(k.x - 3, k.y + 1)
+  game.archers = []
+  const a = game.addArcher(post)
+  skirmish(game)
+  game.repath()
+  const outside = game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 4, y: k.y + 1 }, hpMult: 1 })
+  const inside = game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 1, y: k.y + 4 }, hpMult: 1 })
+  assert.equal(game.threat(inside), 0)
+  assert.equal(game.threat(outside), 2)
+  assert.equal(game.pickTarget(a.x, a.y, game.range(post)), inside)
+})
+
+test('archers hurry along the walls to a breach out of their range', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  const { world } = game
+  for (const i of ring(game, 4)) game.place(i, 'wall')
+  const k = world.keep
+  game.archers = []
+  const a = game.addArcher(world.idx(k.x + 5, k.y + 1)) // east wall
+  skirmish(game)
+  game.repath()
+  // A raider already inside, by the west wall, out of the archer's reach.
+  const e = game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 2, y: k.y + 3 }, hpMult: 50 })
+  e.speed = 0
+  const d0 = Math.hypot(a.x - e.x, a.y - e.y)
+  step(game, 4)
+  assert.ok(Math.hypot(a.x - e.x, a.y - e.y) < d0 - 1.5, 'moved toward the breach')
+})

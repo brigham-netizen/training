@@ -47,7 +47,12 @@ archers in place, and repairs damaged top-tier structures for the cost of the da
 
 Enemies: raiders, brutes, ladder crews, rams (heavy siege), bowmen (shoot your
 archers and swordsmen, from wave 3) and catapults (boulders from beyond archer
-range, from wave 5; after 10 boulders they roll forward into range).
+range, from wave 5; after 10 boulders the crew abandons the catapult and it
+falls apart where it stands).
+
+Archers shoot anyone on a wall or already inside your walls first, then
+anyone breaking in (and siege engines), then the rest. When there's a breach
+out of their reach, archers hurry along the walls to where they can shoot it.
 
 Soldiers on foot can't damage stone (walls, thick walls, towers). They break
 gates, palisades, pikes and village buildings, or get over stone with ladders:
