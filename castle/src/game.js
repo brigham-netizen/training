@@ -1,9 +1,9 @@
 import { World, mulberry32 } from './world.js'
-import { computeFlow, computeRamFlow, computeLadderFlow, computeVillageFlow } from './pathing.js'
+import { computeFlow, computeRamFlow, computeLadderFlow, computeVillageFlow, computeFootNav } from './pathing.js'
 import {
   START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
   HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST, LADDER, STONE, AIM, PLUNDER_RANGE, ARMY,
-  UNIT_SCALE, DROPS, MOAT, RENOWN, TERRAIN,
+  UNIT_SCALE, DROPS, MOAT, RENOWN, TERRAIN, RESEARCH,
   waveComposition, waveBonus,
 } from './config.js'
 
@@ -11,6 +11,7 @@ const THINK = 0.4 // seconds between unit decisions
 const ARCHER_SEARCH = 60 // max rampart tiles an archer will consider walking to
 const BREACH_SEARCH = 140 // ...and how far they'll hurry to reach a breach
 const CATAPULT_DECAY = 6 // seconds an abandoned catapult takes to fall apart
+const MELEE_REACH = 0.42 // how far past touching a sword or axe reaches
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 // Gates are barred while an enemy is this close (tiles), before your
 // swordsmen guarding nearby would charge out at it.
@@ -23,15 +24,17 @@ const WALL_TIERS = ['palisade', 'wall', 'thick']
 
 export class Game {
   // `map` is a saved landscape (World.snapshotMap); otherwise `seed` generates one.
-  constructor(seed = 20261006, map = null) {
+  constructor(seed = 20261006, map = null, style = 'random') {
     this.seed = seed
-    this.reset(seed, map)
+    this.reset(seed, map, style)
   }
 
-  reset(seed = this.seed, map = this.map) {
+  reset(seed = this.seed, map = this.map, style = this.style || 'random') {
     this.seed = seed
     this.map = map
-    this.world = new World(seed, map)
+    this.style = style
+    this.world = new World(seed, map, style)
+    this.research = new Set() // armory upgrades bought
     this.gold = START_GOLD
     this.renown = 0 // the score
     this.wave = 0 // waves completed
@@ -137,8 +140,10 @@ export class Game {
   // A gate can also be dropped into any wall.
   layOverCost(i, type) {
     const from = this.world.tiles[i].type
-    const a = WALL_TIERS.indexOf(from)
-    const b = type === 'gate' ? WALL_TIERS.length : WALL_TIERS.indexOf(type)
+    // Wall tiers, then gate, then gatehouse: each can go over the ones before.
+    const rank = (k) => (k === 'gatehouse' ? WALL_TIERS.length + 1 : k === 'gate' ? WALL_TIERS.length : WALL_TIERS.indexOf(k))
+    const a = rank(from)
+    const b = rank(type)
     if (a < 0 || b <= a || this.phase === 'won' || this.phase === 'lost') return null
     return Math.max(1, this.costAt(i, type) - this.costAt(i, from))
   }
@@ -153,6 +158,7 @@ export class Game {
     t.type = type
     t.hp = t.maxHp = this.world.maxHpFor(i, type)
     t.weakened = false
+    t.broken = false
     if (!HOARDING.on.includes(type)) t.hoard = false
     this.world.dirty = true
     // Archers who no longer fit (a gate holds fewer) move along the wall.
@@ -207,8 +213,10 @@ export class Game {
       t.weakened = false
       this.world.dirty = true
     } else {
+      // Repairs also hang a new door on a broken gate.
       t.hp = t.maxHp
       t.weakened = false
+      t.broken = false
       this.world.dirty = true
     }
     this.floaters.push({ x: (i % this.world.w) + 0.5, y: ((i / this.world.w) | 0) + 0.5, z: this.world.surface(i), text: `-${info.cost}`, t: 0, color: 'cost' })
@@ -589,7 +597,38 @@ export class Game {
   }
 
   range(i) {
-    return ARCHER.range + this.world.perch(i)
+    return ARCHER.range + this.world.perch(i) + (this.research.has('longbow') ? 1 : 0)
+  }
+
+  // ---- armory -----------------------------------------------------------------
+
+  // Share of damage your troops take (chainmail cuts it).
+  armour() {
+    return this.research.has('mail') ? 0.65 : 1
+  }
+
+  swordDps() {
+    return SWORDSMAN.dps * (this.research.has('steel') ? 1.4 : 1)
+  }
+
+  canResearch(id) {
+    return this.phase === 'build' && RESEARCH[id] && !this.research.has(id) && this.gold >= RESEARCH[id].cost
+  }
+
+  buyResearch(id) {
+    if (!this.canResearch(id)) return false
+    this.gold -= RESEARCH[id].cost
+    this.research.add(id)
+    if (id === 'guard') this.applyKeepResearch()
+    this.sfx('build', this.world.keep.x + 1.5, this.world.keep.y + 1.5)
+    return true
+  }
+
+  // A stronger keep door with the lord's guard researched.
+  applyKeepResearch() {
+    const k = this.world.keep
+    k.doorMax = KEEP.doorHp * (this.research.has('guard') ? 1.5 : 1)
+    k.doorHp = k.doorMax
   }
 
   enemyInRange(i) {
@@ -685,8 +724,8 @@ export class Game {
     if (target) {
       a.heading = Math.atan2(target.y - a.y, target.x - a.x)
       if (a.cd <= 0) {
-        a.cd = 1 / ARCHER.fireRate
-        this.shoot(a.x, a.y, a.z + 0.5 * UNIT_SCALE, target, ARCHER.damage, false, this.hitChance(a, target))
+        a.cd = 1 / (ARCHER.fireRate * (this.research.has('fletchers') ? 1.25 : 1))
+        this.shoot(a.x, a.y, a.z + 0.5 * UNIT_SCALE, target, ARCHER.damage * (this.research.has('bodkin') ? 1.4 : 1), false, this.hitChance(a, target))
         this.sfx('bow', a.x, a.y)
       }
       return
@@ -711,7 +750,7 @@ export class Game {
   // into the keep by its door, and walk along connected ramparts up there.
   troopPassable(i) {
     const t = this.world.tiles[i].type
-    return this.world.isWalkable(i) || (t === 'gate' && !this.gateLocks.has(i))
+    return this.world.isWalkable(i) || (STRUCTURES[t]?.gate === true && !this.gateLocks.has(i))
   }
 
   // Gates are barred while enemies are at them (and a moment after), so
@@ -719,7 +758,7 @@ export class Game {
   updateGateLocks(dt) {
     const { world } = this
     for (const [i, t] of this.gateLocks) {
-      if (t - dt <= 0 || world.tiles[i].type !== 'gate') this.gateLocks.delete(i)
+      if (t - dt <= 0 || !world.isGate(i) || world.tiles[i].broken) this.gateLocks.delete(i)
       else this.gateLocks.set(i, t - dt)
     }
     for (const e of this.enemies) {
@@ -729,7 +768,7 @@ export class Game {
         for (let x = Math.floor(e.x - R); x <= Math.floor(e.x + R); x++) {
           if (!world.inBounds(x, y)) continue
           const i = world.idx(x, y)
-          if (world.tiles[i].type !== 'gate') continue
+          if (!world.isGate(i) || world.tiles[i].broken) continue
           if (Math.hypot(x + 0.5 - e.x, y + 0.5 - e.y) <= R) this.gateLocks.set(i, 1.5)
         }
     }
@@ -748,18 +787,38 @@ export class Game {
     const ux = u % world.w
     const uy = (u / world.w) | 0
     const out = []
+    // Towers and gatehouses open onto the ground diagonally too (a corner
+    // tower's inner door faces the courtyard).
+    if (STRUCTURES[world.tiles[u].type]?.stairs) {
+      for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        if (!world.inBounds(ux + dx, uy + dy)) continue
+        const v = world.idx(ux + dx, uy + dy)
+        if (up && this.troopPassable(v)) out.push(v * 2)
+      }
+    }
+    if (!up) {
+      for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        if (!world.inBounds(ux + dx, uy + dy)) continue
+        const v = world.idx(ux + dx, uy + dy)
+        if (STRUCTURES[world.tiles[v].type]?.stairs) out.push(v * 2 + 1)
+      }
+    }
     for (const [dx, dy] of N4) {
       const vx = ux + dx
       const vy = uy + dy
       if (!world.inBounds(vx, vy)) continue
       const v = world.idx(vx, vy)
+      // Towers and gatehouses have stairs inside, reached from the ground
+      // at their foot.
+      const inside = (j) => STRUCTURES[world.tiles[j].type]?.stairs
       if (up) {
         if (world.isRampart(v)) out.push(v * 2 + 1)
         else if (world.tiles[v].type === 'stair' && this.stairFace(v) === u) out.push(v * 2)
         else if (u === k.door && v === k.step) out.push(v * 2)
+        else if (inside(u) && this.troopPassable(v)) out.push(v * 2)
       } else {
         if (this.troopPassable(v)) out.push(v * 2)
-        if (world.isRampart(v) && ((world.tiles[u].type === 'stair' && this.stairFace(u) === v) || (u === k.step && v === k.door))) out.push(v * 2 + 1)
+        if (world.isRampart(v) && ((world.tiles[u].type === 'stair' && this.stairFace(u) === v) || (u === k.step && v === k.door) || inside(v))) out.push(v * 2 + 1)
       }
     }
     return out
@@ -943,11 +1002,11 @@ export class Game {
     const e = s.target
     if (e && !e.dead && !e.gone) {
       const d = Math.hypot(e.x - s.x, e.y - s.y)
-      if (d <= s.r + e.r + 0.3 && Math.abs(e.z - s.z) < 0.6) {
+      if (d <= s.r + e.r + MELEE_REACH && Math.abs(e.z - s.z) < 0.6) {
         s.fighting = true
         s.heading = Math.atan2(e.y - s.y, e.x - s.x)
         s.walk += dt * 8
-        this.hurt(e, SWORDSMAN.dps * dt, false)
+        this.hurt(e, this.swordDps() * dt, false)
         if (Math.random() < dt * 2) this.sfx('clash', s.x, s.y)
         return
       }
@@ -957,6 +1016,8 @@ export class Game {
     // Follow the route tile by tile (up stairs, along walls), then close in
     // on the target or post at the same level.
     const speed = SWORDSMAN.speed * (s.up ? 1 : world.slow(here))
+    // Close by and on the same level: go straight at them.
+    if (e && !e.dead && !e.gone && Math.hypot(e.x - s.x, e.y - s.y) < 1.6 && Math.abs(e.z - s.z) < 0.6) s.path = []
     const next = s.path[0]
     if (next !== undefined && !(next & 1) && next >> 1 !== here && this.gateLocks.has(next >> 1)) {
       s.path = [] // barred: wait for a new route
@@ -1165,6 +1226,7 @@ export class Game {
     this.ramFlow = computeRamFlow(this.world)
     this.ramWaitFlow = computeFlow(this.world, 'ramWait')
     this.villageFlow = computeVillageFlow(this.world)
+    this.footNav = computeFootNav(this.world)
     // How far out from the keep door your castle reaches (walls, towers).
     const { world } = this
     const k = world.keep
@@ -1311,7 +1373,7 @@ export class Game {
   // Move with axis-separated sliding so units glide along walls.
   tryMove(u, dx, dy) {
     const cr = u.r * 0.8
-    const mode = u.kind === 'swordsman' ? (u.up ? 'troopUp' : 'troop') : u.kind === 'archer' ? null : this.climbs(u) ? 'climb' : null
+    const mode = u.kind === 'swordsman' ? (u.up ? 'troopUp' : 'troop') : null
     const from = this.world.idxAt(u.x, u.y)
     if (dx && !this.blockedAt(u.x + dx, u.y, cr, mode, from)) u.x += dx
     if (dy && !this.blockedAt(u.x, u.y + dy, cr, mode, from)) u.y += dy
@@ -1363,9 +1425,9 @@ export class Game {
     e.flash = Math.max(0, e.flash - dt)
     e.cd -= dt
     const ci = world.idxAt(e.x, e.y)
-    // Up a ladder they stand on the wall; otherwise on the (smooth) ground.
-    const ground = world.tiles[ci].ladder ? world.surfaceAt(ci, e.x, e.y) : world.heightAt(e.x, e.y)
-    e.z += (ground - e.z) * Math.min(1, dt * 8)
+    // Up on the wall walk, partway down a stair, or on the (smooth) ground.
+    if (e.up && !world.isRampart(ci)) e.up = false // the wall came down
+    e.z += (this.troopZ(e) - e.z) * Math.min(1, dt * 8)
     e.attacking = false
     e.shooting = false
 
@@ -1412,21 +1474,21 @@ export class Game {
     // the wall once they're up a ladder.
     if (!def.noMelee && def.dps > 0) {
       for (const s of this.swordsmen) {
-        if (s.dead || Math.hypot(s.x - e.x, s.y - e.y) > e.r + s.r + 0.3 || Math.abs(s.z - e.z) > 0.6) continue
+        if (s.dead || Math.hypot(s.x - e.x, s.y - e.y) > e.r + s.r + MELEE_REACH || Math.abs(s.z - e.z) > 0.6) continue
         e.attacking = true
         e.heading = Math.atan2(s.y - e.y, s.x - e.x)
         e.walk += dt * 6
-        s.hp -= e.dps * dt
+        s.hp -= e.dps * dt * this.armour()
         s.flash = 0.1
         return
       }
-      if (world.tiles[ci].ladder) {
+      if (e.up) {
         for (const a of this.archers) {
           if (a.dead || Math.hypot(a.x - e.x, a.y - e.y) > e.r + 0.4) continue
           e.attacking = true
           e.heading = Math.atan2(a.y - e.y, a.x - e.x)
           e.walk += dt * 6
-          a.hp -= e.dps * dt
+          a.hp -= e.dps * dt * this.armour()
           a.flash = 0.1
           return
         }
@@ -1440,7 +1502,7 @@ export class Game {
     // Marching armies keep pace until the castle is near.
     if (e.march && Math.hypot(e.x - doorX, e.y - doorY) < this.castleReach + ARMY.charge) e.march = false
     // Easy pickings: an undefended village building within reach.
-    if (this.plunders(e, ci)) {
+    if (!e.up && this.plunders(e, ci)) {
       const vt = this.villageFlow.next[ci]
       if (vt < 0) {
         // Standing in a field: trample it.
@@ -1462,8 +1524,33 @@ export class Game {
       this.walkToward(e, vx, vy, ci, dt)
       return
     }
-    const flow = this.flowFor(e)
-    let target = flow.next[ci]
+    // Foot soldiers find their way on two levels: the ground and the walls.
+    let target = -2
+    if (this.climbs(e) && this.footNav) {
+      const node = ci * 2 + (e.up ? 1 : 0)
+      if (isFinite(this.footNav.dist[node])) {
+        const nx = this.footNav.next[node]
+        if (nx < 0 && e.up) {
+          // On a wall beside the keep: in through a window, after the lord.
+          e.gone = true
+          this.intruders.push({ type: e.type, hp: e.hp, maxHp: e.maxHp, dps: e.dps, gold: e.gold, climb: KEEP.climb })
+          k.inside = this.intruders.length
+          return
+        }
+        if (nx >= 0) {
+          const tgt = nx >> 1
+          const lvl = nx & 1
+          if (e.up || lvl === 1) return this.walkWalls(e, ci, tgt, lvl, dt)
+          target = tgt
+        } else target = -1
+      } else if (e.up) {
+        // Stranded on the wall with no way down: hold here and fight.
+        e.stuck += dt
+        return
+      }
+    }
+    const flow = target === -2 ? this.flowFor(e) : null
+    if (target === -2) target = flow.next[ci]
     if (ci === k.step || target < 0) {
       const d = Math.hypot(doorX - e.x, doorY - e.y)
       if (d <= e.r + (k.doorHp > 0 ? 0.3 : 0.7)) {
@@ -1529,6 +1616,36 @@ export class Game {
     const under = world.idxAt(e.x, e.y)
     const trample = STRUCTURES[world.tiles[under].type]?.trample
     if (trample) this.damageStructure(under, trample * dt)
+  }
+
+  // Moving on the walls: along the wall walk, onto a ladder, or down by
+  // stairs. With nothing but the ladder to get down by, they first haul it
+  // over the wall, which takes a while.
+  walkWalls(e, ci, tgt, lvl, dt) {
+    const { world } = this
+    const t = world.tiles[ci]
+    if (e.up && lvl === 0 && t.ladder && world.tiles[tgt].type !== 'stair' && !STRUCTURES[t.type]?.stairs) {
+      e.haul = (e.haul || 0) + dt
+      if (e.haul < LADDER.haul) {
+        e.attacking = true
+        return
+      }
+    }
+    const [tx, ty] = this.center(tgt)
+    const dx = tx - e.x
+    const dy = ty - e.y
+    const d = Math.hypot(dx, dy) || 1
+    const speed = e.speed * (lvl !== (e.up ? 1 : 0) ? LADDER.climb : 0.9)
+    const step = Math.min(d, speed * dt)
+    e.heading = Math.atan2(dy, dx)
+    e.walk += step * 6
+    e.x += (dx / d) * step
+    e.y += (dy / d) * step
+    e.stuck = 0
+    if (world.idxAt(e.x, e.y) === tgt) {
+      e.up = lvl === 1
+      e.haul = 0
+    }
   }
 
   // Foot soldiers break off to loot village buildings they can walk to
@@ -1615,6 +1732,7 @@ export class Game {
         if (e.dead || e.gone || world.idxAt(e.x, e.y) !== l.tile) continue
         e.x = g.fx - l.dir[0] * 0.2
         e.y = g.fy - l.dir[1] * 0.2
+        e.up = false
         this.hurt(e, 25)
       }
     }
@@ -1653,11 +1771,11 @@ export class Game {
       // Swordsmen posted on the keep fight beside the lord's guard and take
       // the blows meant for him.
       const keepers = this.swordsmen.filter((s) => !s.dead && s.up && this.world.tiles[this.world.idxAt(s.x, s.y)].type === 'keep')
-      const guard = ((KEEP.guard + keepers.length * SWORDSMAN.dps) / up.length) * dt
+      const guard = ((KEEP.guard * (this.research.has('guard') ? 1.6 : 1) + keepers.length * this.swordDps()) / up.length) * dt
       for (const [n, u] of up.entries()) {
         const s = keepers[n % (keepers.length || 1)]
         if (s) {
-          s.hp -= u.dps * dt
+          s.hp -= u.dps * dt * this.armour()
           s.flash = 0.1
           s.fighting = true
         } else k.hp = Math.max(0, k.hp - u.dps * dt)
@@ -1751,7 +1869,8 @@ export class Game {
       if (e.dead) continue
       if ((e.x - x) ** 2 + (e.y - y) ** 2 > range * range) continue
       // Shoot whoever is closest to breaking in; siege engines first.
-      let d = this.flowFor(e).dist[world.idxAt(e.x, e.y)]
+      const ei = world.idxAt(e.x, e.y)
+      let d = this.climbs(e) && this.footNav ? this.footNav.dist[ei * 2 + (e.up ? 1 : 0)] : this.flowFor(e).dist[ei]
       if (!isFinite(d)) d = 1e6
       // Breaches first, then whoever is breaking in, then the rest.
       d += this.threat(e) * 1e7
@@ -1837,7 +1956,7 @@ export class Game {
         this.damageStructure(p.tile, p.dmg)
         // Archers on or next to the impact get knocked about.
         for (const a of this.archers) if (Math.hypot(a.x - p.tx, a.y - p.ty) < 0.9) {
-          a.hp -= p.splash * (this.world.tiles[a.tile].hoard ? HOARDING.splash : 1)
+          a.hp -= p.splash * (this.world.tiles[a.tile].hoard ? HOARDING.splash : 1) * this.armour()
           a.flash = 0.15
         }
         this.effects.push({ type: 'dust', x: p.tx, y: p.ty, z: p.tz, t: 0, life: 0.7, size: 0.8 })
@@ -1846,7 +1965,7 @@ export class Game {
         // Thunk into the dirt.
       } else if (!p.target.dead) {
         if (p.hostile) {
-          p.target.hp -= p.dmg * this.coverFor(p.target)
+          p.target.hp -= p.dmg * this.coverFor(p.target) * this.armour()
           p.target.flash = 0.12
         } else this.hurt(p.target, p.dmg)
         this.sfx('hit', p.tx, p.ty)
@@ -1872,6 +1991,8 @@ export class Game {
       oil: world.tiles.flatMap((t, i) => (t.oil ? [i] : [])),
       rocks: world.tiles.flatMap((t, i) => (t.rocks ? [i] : [])),
       renown: this.renown,
+      style: this.style,
+      research: [...this.research],
       plots: world.tiles.flatMap((t, i) => (t.type === 'plot' ? [[i, t.plot]] : [])),
       archers: this.archers.map((a) => a.post),
       swordsmen: this.swordsmen.map((s) => ({ post: s.post, zone: s.zone })),
@@ -1895,6 +2016,9 @@ export class Game {
     for (const i of data.oil || []) world.tiles[i].oil = true
     for (const i of data.rocks || []) world.tiles[i].rocks = true
     g.renown = data.renown || 0
+    g.style = data.style || 'random'
+    g.research = new Set(data.research || [])
+    g.applyKeepResearch()
     for (const [i, kind] of data.plots) {
       world.tiles[i].type = 'plot'
       world.tiles[i].plot = kind

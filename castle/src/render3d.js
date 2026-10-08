@@ -102,7 +102,7 @@ function worldUVs(g) {
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
 }
 
-const WALLISH = new Set(['palisade', 'wall', 'thick', 'gate', 'tower', 'keep'])
+const WALLISH = new Set(['palisade', 'wall', 'thick', 'gate', 'gatehouse', 'tower', 'keep'])
 
 export class Renderer3D {
   constructor(canvas) {
@@ -191,7 +191,7 @@ export class Renderer3D {
       this.mapSig = mapSig
       this.buildTerrain(world)
     }
-    const structSig = mapSig + (floraReady() ? 'L' : 'l') + (world.keep.doorHp > 0 ? 'D' : 'd') + world.tiles.map((t) => `${t.type}${t.hoard ? 'h' : ''}${t.rock ? 'r' : ''}${t.plot || ''}`).join(',')
+    const structSig = mapSig + (floraReady() ? 'L' : 'l') + (world.keep.doorHp > 0 ? 'D' : 'd') + world.tiles.map((t) => `${t.type}${t.hoard ? 'h' : ''}${t.rock ? 'r' : ''}${t.broken ? 'b' : ''}${t.plot || ''}`).join(',')
     if (structSig !== this.structSig) {
       this.structSig = structSig
       this.buildStructures(world)
@@ -532,12 +532,15 @@ export class Renderer3D {
           break
         case 'wall':
           this.thinWall(world, x, y, z, foot, t.hoard)
+          this.waterArch(world, i, x, y, STRUCTURES.wall.thin / 2)
           break
         case 'thick':
           this.thickWall(world, x, y, z, foot, t.hoard)
+          this.waterArch(world, i, x, y, 0.5)
           break
         case 'gate':
-          this.gate(world, x, y, z, foot, t.hoard)
+        case 'gatehouse':
+          this.gate(world, i, x, y, z, foot, t.hoard)
           break
         case 'tower':
           this.tower(world, x, y, z, foot, t.hoard)
@@ -768,25 +771,119 @@ export class Renderer3D {
     }
   }
 
-  gate(world, x, y, z, foot, hoard) {
-    const h = z + STRUCTURES.gate.height
+  // Gates and gatehouses. Their passage is a real opening; a broken gate
+  // keeps its stonework and loses only the door, left in splinters.
+  gate(world, i, x, y, z, foot, hoard) {
+    const t = world.tiles[i]
+    const big = t.type === 'gatehouse'
+    const h = z + STRUCTURES[t.type].height
     const alongX = this.connects(world, x, y, 1, 0) || this.connects(world, x, y, -1, 0) || !(this.connects(world, x, y, 0, 1) || this.connects(world, x, y, 0, -1))
-    if (alongX) {
-      this.box('stone', x, y + 0.1, foot, x + 0.3, y + 0.9, h)
-      this.box('stone', x + 0.7, y + 0.1, foot, x + 1, y + 0.9, h)
-      this.box('stone', x + 0.3, y + 0.1, z + 0.85, x + 0.7, y + 0.9, h)
-      this.box('door', x + 0.3, y + 0.45, foot, x + 0.7, y + 0.55, z + 0.85)
-      if (hoard) for (const sy of [y + 0.12, y + 0.84]) this.box('wood', x, sy, h, x + 1, sy + 0.05, h + 0.3)
-      else for (const sy of [y + 0.18, y + 0.82]) this.merlonRun('stoneDark', x + 0.1, sy, x + 0.9, sy, h, 3)
-    } else {
-      this.box('stone', x + 0.1, y, foot, x + 0.9, y + 0.3, h)
-      this.box('stone', x + 0.1, y + 0.7, foot, x + 0.9, y + 1, h)
-      this.box('stone', x + 0.1, y + 0.3, z + 0.85, x + 0.9, y + 0.7, h)
-      this.box('door', x + 0.45, y + 0.3, foot, x + 0.55, y + 0.7, z + 0.85)
-      if (hoard) for (const sx of [x + 0.12, x + 0.84]) this.box('wood', sx, y, h, sx + 0.05, y + 1, h + 0.3)
-      else for (const sx of [x + 0.18, x + 0.82]) this.merlonRun('stoneDark', sx, y + 0.1, sx, y + 0.9, h, 3)
+    // Work in the gate's frame: u along the wall, v through the passage.
+    const B = (key, u0, v0, zz0, u1, v1, zz1) => (alongX ? this.box(key, x + u0, y + v0, zz0, x + u1, y + v1, zz1) : this.box(key, x + v0, y + u0, zz0, x + v1, y + u1, zz1))
+    const at = (u, v) => (alongX ? [x + u, y + v] : [x + v, y + u])
+    const arch = z + (big ? 1.15 : 0.85)
+    const u0 = big ? 0.36 : 0.3
+    const u1 = big ? 0.64 : 0.7
+    const v0 = big ? 0.1 : 0.1
+    const v1 = big ? 0.9 : 0.9
+    B('stone', big ? 0.06 : 0, v0, foot, u0, v1, h)
+    B('stone', u1, v0, foot, big ? 0.94 : 1, v1, h)
+    B('stone', u0, v0, arch, u1, v1, h)
+    if (!t.broken) B('door', u0, 0.45, foot, u1, 0.55, arch)
+    else this.splinters(at, z, i)
+    if (big) {
+      // Four round turrets, one at each corner of the gatehouse, rising
+      // over the passage roof, and a portcullis in each arch.
+      const top = h + 0.4
+      for (const tu of [0.14, 0.86])
+        for (const tv of [0.2, 0.8]) {
+          const [px, py] = at(tu, tv)
+          this.cyl('stone', px, py, foot, top, 0.22, 12)
+          this.cyl('stoneDark', px, py, top - 0.08, top, 0.23, 12)
+          if (hoard) this.cone('roof', px, py, top, 0.4, 0.27, 12)
+          else
+            for (let a = 0; a < 5; a++) {
+              const ang = (a / 5) * Math.PI * 2 + tu * 3
+              const mx = px + Math.cos(ang) * 0.17
+              const my = py + Math.sin(ang) * 0.17
+              this.box('stoneDark', mx - 0.05, my - 0.05, top, mx + 0.05, my + 0.05, top + 0.16)
+            }
+        }
+      for (const pv of [v0 + 0.03, v1 - 0.03]) {
+        const low = t.broken ? arch - 0.28 : foot
+        for (let k = 1; k < 5; k++) {
+          const u = u0 + ((u1 - u0) * k) / 5
+          B('iron', u - 0.012, pv - 0.012, low, u + 0.012, pv + 0.012, arch)
+        }
+        for (let zz = Math.max(low, z) + 0.18; zz < arch - 0.05; zz += 0.26) B('iron', u0, pv - 0.012, zz, u1, pv + 0.012, zz + 0.025)
+      }
+      const key = hoard ? 'wood' : 'stoneDark'
+      for (const sv of [v0 + 0.06, v1 - 0.06]) {
+        const [ax, ay] = at(0.3, sv)
+        const [bx, by] = at(0.7, sv)
+        if (hoard) B('wood', 0.3, sv - 0.03, h, 0.7, sv + 0.03, h + 0.3)
+        else this.merlonRun(key, ax, ay, bx, by, h, 3)
+      }
+      return
+    }
+    if (hoard) for (const sv of [0.12, 0.84]) B('wood', 0, sv, h, 1, sv + 0.05, h + 0.3)
+    else
+      for (const sv of [0.18, 0.82]) {
+        const [ax, ay] = at(0.1, sv)
+        const [bx, by] = at(0.9, sv)
+        this.merlonRun('stoneDark', ax, ay, bx, by, h, 3)
+      }
+  }
+
+  // Planks of a smashed door strewn through the gateway.
+  splinters(at, z, i) {
+    const ang = [0.4, -0.7, 1.3, 2.2]
+    const spots = [[0.42, 0.3], [0.58, 0.62], [0.47, 0.78], [0.55, 0.22]]
+    for (let k = 0; k < 4; k++) {
+      const [px, py] = at(...spots[k])
+      const a = ang[k] + i
+      const dx = Math.cos(a) * 0.16
+      const dy = Math.sin(a) * 0.16
+      this.rod('door', [px - dx, py - dy, z + 0.03], [px + dx, py + dy, z + 0.05], 0.035, 4)
     }
   }
+
+  // Where a wall stands in water, an arch at its foot lets the water
+  // through, shut by an iron grate running down into the water.
+  waterArch(world, i, x, y, hw) {
+    const axis = world.waterArch(i)
+    if (!axis) return
+    const cx = x + 0.5
+    const cy = y + 0.5
+    const zw = world.heightAt(cx, cy)
+    const B = (key, u0, n0, zz0, u1, n1, zz1) => (axis === 'x' ? this.box(key, x + u0, cy + n0, zz0, x + u1, cy + n1, zz1) : this.box(key, cx + n0, y + u0, zz0, cx + n1, y + u1, zz1))
+    const r = 0.26
+    const spring = zw + 0.32
+    for (const s of [-1, 1]) {
+      const n0 = s * hw - 0.012
+      const n1 = s * hw + 0.012
+      // The dark opening, its round head built from narrowing courses.
+      B('hole', 0.5 - r, n0, zw - 0.3, 0.5 + r, n1, spring)
+      for (let k = 0; k < 4; k++) {
+        const z0 = spring + (r * k) / 4
+        const half = Math.sqrt(r * r - ((r * (k + 0.5)) / 4) ** 2)
+        B('hole', 0.5 - half, n0, z0, 0.5 + half, n1, z0 + r / 4)
+      }
+      // The grate, standing just proud of the face.
+      const g0 = s * (hw + 0.03) - 0.014
+      const g1 = s * (hw + 0.03) + 0.014
+      for (let k = 1; k < 6; k++) {
+        const u = 0.5 - r + (2 * r * k) / 6
+        const top = spring + Math.sqrt(Math.max(0, r * r - (u - 0.5) ** 2))
+        B('iron', u - 0.014, g0, zw - 0.35, u + 0.014, g1, top)
+      }
+      for (const zz of [zw + 0.16, spring + 0.08]) {
+        const half = Math.sqrt(Math.max(0, r * r - Math.max(0, zz - spring) ** 2))
+        B('iron', 0.5 - half, g0, zz, 0.5 + half, g1, zz + 0.03)
+      }
+    }
+  }
+
 
   // Round tower with a ring of merlons (or a wooden hoarding ring).
   tower(world, x, y, z, foot, hoard) {
@@ -802,7 +899,7 @@ export class Renderer3D {
       if (type === 'tower' || type === 'keep') continue
       // Meet the neighbour's top where it touches this tile's edge.
       const H = STRUCTURES[type].height
-      const hgt = type === 'gate'
+      const hgt = STRUCTURES[type].gate
         ? Math.min(world.elev(n) + H, top)
         : (px, py) => Math.min(top, (dx ? world.heightAt(px, cy) : world.heightAt(cx, py)) + H)
       if (type === 'palisade') {
@@ -812,7 +909,7 @@ export class Renderer3D {
         }
         continue
       }
-      const hw = type === 'thick' ? 0.5 : type === 'gate' ? 0.4 : STRUCTURES.wall.thin / 2
+      const hw = type === 'thick' ? 0.5 : STRUCTURES[type].gate ? 0.4 : STRUCTURES.wall.thin / 2
       const x0 = dx ? (dx > 0 ? cx : x) : cx - hw
       const x1 = dx ? (dx > 0 ? x + 1 : cx) : cx + hw
       const y0 = dy ? (dy > 0 ? cy : y) : cy - hw
@@ -1073,6 +1170,7 @@ export class Renderer3D {
     // Barred gates: a beam across the door, both faces.
     for (const i of game.gateLocks.keys()) {
       const w = game.world
+      if (w.tiles[i].broken) continue
       const x = (i % w.w) + 0.5
       const y = ((i / w.w) | 0) + 0.5
       const alongX = this.connects(w, x - 0.5, y - 0.5, 1, 0) || this.connects(w, x - 0.5, y - 0.5, -1, 0) || !(this.connects(w, x - 0.5, y - 0.5, 0, 1) || this.connects(w, x - 0.5, y - 0.5, 0, -1))

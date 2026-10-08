@@ -59,7 +59,7 @@ const SUN = (() => {
 
 const N4 = [[0, -1], [1, 0], [0, 1], [-1, 0]] // N E S W, matching box() skip bits
 
-const WALL_FAMILY = new Set(['palisade', 'wall', 'thick', 'gate', 'tower', 'keep'])
+const WALL_FAMILY = new Set(['palisade', 'wall', 'thick', 'gate', 'gatehouse', 'tower', 'keep'])
 
 function rgb(c, f = 1, a = 1) {
   const r = Math.min(255, c[0] * f) | 0
@@ -535,6 +535,9 @@ export class Renderer {
         case 'gate':
           r(0, 0, 1, 1, STRUCTURES[t.type].height)
           break
+        case 'gatehouse':
+          r(0, 0, 1, 1, STRUCTURES.gatehouse.height + 0.35)
+          break
         case 'tower':
           r(0.04, 0.04, 0.96, 0.96, STRUCTURES.tower.height)
           break
@@ -925,6 +928,7 @@ export class Renderer {
       case 'wall': {
         const d = STRUCTURES.wall
         this.thinWall(world, x, y, z, d.height, d.thin, COLORS.wall, f, t.hoard, 'stone')
+        this.drawWaterArch(world, i, x, y, d.thin / 2)
         break
       }
       case 'thick': {
@@ -941,6 +945,7 @@ export class Renderer {
         for (let s = 0; s < 4; s++) if (!this.connects(world, x, y, s)) edges |= 1 << s
         if (t.hoard) this.edgeRails(x, y, x + 1, y + 1, top, edges)
         else this.merlons(x, y, x + 1, y + 1, top, c, edges)
+        this.drawWaterArch(world, i, x, y, 0.5)
         break
       }
       case 'tower': {
@@ -991,6 +996,7 @@ export class Renderer {
         }
         break
       case 'gate':
+      case 'gatehouse':
         this.drawGate(world, i, x, y, z, f)
         break
       case 'cottage':
@@ -1224,45 +1230,131 @@ export class Renderer {
     if (!drewLog) log()
   }
 
+  // Gates and gatehouses. A broken gate has lost only its door: the stone
+  // arch stands open over a litter of splintered planks.
   drawGate(world, i, x, y, z, f) {
-    const h = STRUCTURES.gate.height
+    const t = world.tiles[i]
+    const big = t.type === 'gatehouse'
+    const h = STRUCTURES[t.type].height
     const c = COLORS.thick
     const side = scale(c.side, f)
     const top = scale(c.top, f)
-    const alongX = this.axisX(world, x, y, (t) => WALL_FAMILY.has(t))
+    const alongX = this.axisX(world, x, y, (ty) => WALL_FAMILY.has(ty))
     const fz = this.footZ ?? this.minFoot ?? z
-    // Pillars at each end, a lintel over the passage, and the door.
-    const parts = alongX
-      ? [
-          [x, y + 0.12, x + 0.3, y + 0.88, fz, z + h, side, top],
-          [x + 0.7, y + 0.12, x + 1, y + 0.88, fz, z + h, side, top],
-          [x + 0.3, y + 0.12, x + 0.7, y + 0.88, z + 0.85, z + h, side, top],
-        ]
-      : [
-          [x + 0.12, y, x + 0.88, y + 0.3, fz, z + h, side, top],
-          [x + 0.12, y + 0.7, x + 0.88, y + 1, fz, z + h, side, top],
-          [x + 0.12, y + 0.3, x + 0.88, y + 0.7, z + 0.85, z + h, side, top],
-        ]
-    if (!this.openGates?.has(i)) {
-      parts.push(alongX
-        ? [x + 0.3, y + 0.44, x + 0.7, y + 0.56, fz, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)]
-        : [x + 0.44, y + 0.3, x + 0.56, y + 0.7, fz, z + 0.85, COLORS.door, scale(COLORS.door, 1.2)])
+    // Rectangles in the gate's own frame: u runs along the wall, v across.
+    const R = (u0, v0, u1, v1) => (alongX ? [x + u0, y + v0, x + u1, y + v1] : [x + v0, y + u0, x + v1, y + u1])
+    const open = t.broken || this.openGates?.has(i)
+    const arch = big ? 1.15 : 0.85
+    const parts = []
+    if (big) {
+      // Twin towers flanking the passage, rising above the gate's roof.
+      parts.push([...R(0, 0, 0.34, 1), fz, z + h + 0.35, side, top, 'tower'])
+      parts.push([...R(0.66, 0, 1, 1), fz, z + h + 0.35, side, top, 'tower'])
+      parts.push([...R(0.34, 0.06, 0.66, 0.94), z + arch, z + h, side, top])
+    } else {
+      parts.push([...R(0, 0.12, 0.3, 0.88), fz, z + h, side, top])
+      parts.push([...R(0.7, 0.12, 1, 0.88), fz, z + h, side, top])
+      parts.push([...R(0.3, 0.12, 0.7, 0.88), z + arch, z + h, side, top])
     }
+    const u0 = big ? 0.34 : 0.3
+    const u1 = big ? 0.66 : 0.7
+    if (!open) parts.push([...R(u0, 0.44, u1, 0.56), fz, z + arch, COLORS.door, scale(COLORS.door, 1.2)])
+    else if (t.broken) this.splinters(R, z, i)
     const cam = this.cam
     parts.sort((a, b) => cam.depth((a[0] + a[2]) / 2, (a[1] + a[3]) / 2) - cam.depth((b[0] + b[2]) / 2, (b[1] + b[3]) / 2))
-    if (this.barred?.has(i) && !this.openGates?.has(i)) {
+    if (this.barred?.has(i) && !open) {
       // Barred: a heavy beam across the door on both faces.
       const bz = fz + 0.42
-      parts.push(alongX
-        ? [x + 0.26, y + 0.38, x + 0.74, y + 0.62, bz, bz + 0.1, [70, 64, 58], [96, 90, 82]]
-        : [x + 0.38, y + 0.26, x + 0.62, y + 0.74, bz, bz + 0.1, [70, 64, 58], [96, 90, 82]])
+      parts.push([...R(u0 - 0.04, 0.38, u1 + 0.04, 0.62), bz, bz + 0.1, [70, 64, 58], [96, 90, 82]])
     }
-    for (const p of parts) this.box(...p, 0, true, p[6] === side ? 'stone' : null)
-    if (world.tiles[i].hoard) {
+    for (const p of parts) {
+      this.box(...p.slice(0, 8), 0, true, p[6] === side ? 'stone' : null)
+      if (p[8] === 'tower') {
+        if (t.hoard) this.edgeRails(p[0], p[1], p[2], p[3], p[5], 15)
+        else this.merlons(p[0], p[1], p[2], p[3], p[5], c, 15)
+      }
+    }
+    if (big) {
+      // The portcullis: an iron grate hanging in the arch on the side
+      // facing the camera, down when the gate holds, up when it's broken.
+      const near = cam.depth(...R(0.5, 0.03, 0.5, 0.03).slice(0, 2)) > cam.depth(...R(0.5, 0.97, 0.5, 0.97).slice(0, 2))
+      const v = near ? 0.04 : 0.96
+      const bottom = open ? z + arch - 0.25 : fz
+      const w = Math.max(1, cam.k * 0.03)
+      for (let k = 1; k < 6; k++) {
+        const [px, py] = R(u0 + ((u1 - u0) * k) / 6, v, 0, 0)
+        this.line(px, py, bottom, px, py, z + arch, '#2b2a28', w)
+      }
+      for (let zz = bottom + 0.2; zz < z + arch; zz += 0.28) {
+        const [ax, ay] = R(u0, v, 0, 0)
+        const [bx, by] = R(u1, v, 0, 0)
+        this.line(ax, ay, zz, bx, by, zz, '#2b2a28', w)
+      }
+    }
+    if (t.hoard && !big) {
       if (alongX) this.edgeRails(x, y + 0.12, x + 1, y + 0.88, z + h, 5)
       else this.edgeRails(x + 0.12, y, x + 0.88, y + 1, z + h, 10)
     }
   }
+
+  // Where a wall stands in water, an arch at its foot lets the water
+  // through, shut by an iron grate that runs down into the water.
+  drawWaterArch(world, i, x, y, hw) {
+    const axis = world.waterArch(i)
+    const cam = this.cam
+    if (!axis || cam.cosE < 0.05) return
+    const cx = x + 0.5
+    const cy = y + 0.5
+    // Draw on whichever face of the wall looks toward the camera.
+    const front = axis === 'x'
+      ? (cam.depth(cx, cy + 1) > cam.depth(cx, cy - 1) ? 1 : -1)
+      : (cam.depth(cx + 1, cy) > cam.depth(cx - 1, cy) ? 1 : -1)
+    const P = (u, zz) => (axis === 'x' ? [x + u, cy + front * (hw + 0.004), zz] : [cx + front * (hw + 0.004), y + u, zz])
+    const zw = world.heightAt(cx, cy)
+    const z0 = zw - 0.08
+    const spring = zw + 0.32
+    const r = 0.26
+    const u0 = 0.5 - r
+    const u1 = 0.5 + r
+    const crown = (u) => spring + Math.sqrt(Math.max(0, r * r - (u - 0.5) * (u - 0.5)))
+    const pts = [...P(u0, z0), ...P(u0, spring)]
+    for (let k = 1; k < 10; k++) {
+      const u = u0 + ((u1 - u0) * k) / 10
+      pts.push(...P(u, crown(u)))
+    }
+    pts.push(...P(u1, spring), ...P(u1, z0))
+    const ctx = this.ctx
+    this.poly(pts)
+    ctx.fillStyle = 'rgba(14,18,22,0.88)'
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(70,64,56,0.9)'
+    ctx.lineWidth = Math.max(1, cam.k * 0.03)
+    ctx.stroke()
+    // Water running through, catching a little light.
+    this.poly([...P(u0, z0), ...P(u0, zw + 0.06), ...P(u1, zw + 0.06), ...P(u1, z0)])
+    ctx.fillStyle = 'rgba(52,104,132,0.7)'
+    ctx.fill()
+    const w = Math.max(1, cam.k * 0.035)
+    for (let k = 1; k < 6; k++) {
+      const u = u0 + ((u1 - u0) * k) / 6
+      this.line(...P(u, z0), ...P(u, crown(u)), '#3a3936', w)
+    }
+    for (const zz of [zw + 0.2, spring + 0.1]) {
+      const span = Math.sqrt(Math.max(0, r * r - Math.max(0, zz - spring) ** 2))
+      this.line(...P(0.5 - span, zz), ...P(0.5 + span, zz), '#3a3936', w)
+    }
+  }
+
+  // Planks of a smashed door strewn through the gateway.
+  splinters(R, z, i) {
+    const ang = [0.4, -0.7, 1.3, 2.2]
+    const at = [[0.42, 0.3], [0.58, 0.62], [0.47, 0.78], [0.55, 0.22]]
+    for (let k = 0; k < 4; k++) {
+      const [px, py] = R(at[k][0], at[k][1], 0, 0)
+      this.orientedBox(px, py, 0.16, 0.035, ang[k] + i, z, z + 0.04, COLORS.door, scale(COLORS.door, 1.15))
+    }
+  }
+
 
   drawCottage(x, y, z, f) {
     const { ctx, cam } = this
@@ -1844,7 +1936,7 @@ export class Renderer {
 
 function blockHeight(t) {
   if (t.type === 'thick') return STRUCTURES.thick.height
-  if (t.type === 'gate') return STRUCTURES.gate.height
+  if (t.type === 'gate' || t.type === 'gatehouse') return STRUCTURES[t.type].height
   if (t.type === 'keep') return KEEP.height
   return 0
 }

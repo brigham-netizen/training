@@ -18,6 +18,7 @@ npm run build    # dist/ plus dist/hold-the-keep.html (single self-contained fil
 | Stone wall | 2 | Thin wall; archers walk along connected stone. |
 | Thick wall | 5 | Full-block wall, very tough, holds 2 archers, +1 range. |
 | Gate | 15 | Your swordsmen walk through; archers walk over it. Weaker than stone, so attackers (rams most of all) go for gates first. |
+| Gatehouse | 45 | Big stone gate with four corner turrets, portcullises and stairs inside. 900 HP, holds 3 archers. Drops into a wall or over a gate. |
 | Hoarding | 3 | Wooden shields on a stone wall, gate or tower. Archers there take 20% of arrow damage (50% without) and half boulder splash. |
 | Tower | 60 | Tall and tough, comes with an archer, holds 3, +1.5 range. |
 | Archer | 20 | Place on any wall, tower or the keep. Walks the ramparts to reach attackers. Takes half damage from arrows behind battlements. |
@@ -115,8 +116,29 @@ build, map number, wave and device, or posts it as a GitHub issue.
 
 Terrain: hills (+1 archer range, slow to climb), marsh and fords (slow, no
 building), rivers and lakes (impassable). Hills slope smoothly into the
-ground around them, and walls built across a slope follow it. Every map is random; "New map" in
-the menu rolls another.
+ground around them, and walls built across a slope follow it. "New map" in
+the menu (and the first launch) asks for a kind of land: random, rivers &
+lakes, coast, mountains or forest.
+
+Raiders who come over on a ladder never jump down off the wall. They walk the
+wall walks to a stair, a tower or gatehouse (both have stairs inside, reached
+from their base or the walls joining them), or the keep. Only if there's no
+way down at all do they haul their ladder over and climb down the inside,
+which takes several seconds.
+
+A broken gate or gatehouse loses only its door: the stonework stays, archers
+on it stay put, and the open arch lets everyone through until you rehang the
+door with Upgrade (the cost of the damage).
+
+Stone walls built in water, or across a moat, get an arch at their foot for
+the water to pass, shut with an iron grate. It's only for looks; nobody gets
+through.
+
+**Armory** (anvil button, top right): between waves, buy upgrades that last
+the whole game: longbows (+1 range, 120), bodkin arrows (+40% damage, 150),
+fletchers (+25% rate of fire, 110), chainmail (archers and swordsmen take 35%
+less damage, 120), steel swords (+40% swordsman damage, 100) and the lord's
+guard (+60% guard damage and a door half again as strong, 90).
 
 ## Playing on a phone
 

@@ -24,8 +24,13 @@ export const STRUCTURES = {
   wall: { label: 'Wall', cost: 2, hp: 300, height: 1.2, solid: true, thin: 0.6, rampart: true, slots: 1, perch: 0.5, upgrade: 'thick' },
   thick: { label: 'Thick wall', cost: 5, hp: 750, height: 1.6, solid: true, rampart: true, slots: 2, perch: 1 },
   // The one way in for foot soldiers who don't bring ladders.
+  // Gates: when broken, only the door gives way. The stone stays (archers
+  // keep their place on top) and the way is open until you repair the door.
   gate: { label: 'Gate', cost: 15, hp: 400, height: 1.5, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
-  tower: { label: 'Tower', cost: 60, hp: 550, height: 2.8, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1 },
+  // A bigger gate between two round towers, with stairs inside.
+  gatehouse: { label: 'Gatehouse', cost: 45, hp: 900, height: 2.3, solid: true, rampart: true, slots: 3, perch: 1.2, gate: true, stairs: true },
+  // Towers have stairs inside, reached from the ground at their foot.
+  tower: { label: 'Tower', cost: 60, hp: 550, height: 2.8, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1, stairs: true },
   moat: { label: 'Moat', cost: 3, slow: 0.35, flatOnly: true },
   // Built against a wall, tower or the keep: lets swordsmen climb up and
   // fight on the ramparts. Enemies just walk over it.
@@ -51,19 +56,38 @@ export const ROCK_FOUNDATION = { hp: 1.25 }
 //   rocks: crushes whoever is climbing or battering right below, and knocks
 //          any ladder on that wall down
 export const DROPS = {
-  oil: { label: 'Boiling oil', cost: 25, damage: 140, radius: 1.6, on: ['wall', 'thick', 'gate', 'tower'] },
-  rocks: { label: 'Rock bucket', cost: 10, damage: 110, radius: 0.9, on: ['wall', 'thick', 'gate', 'tower'] },
+  oil: { label: 'Boiling oil', cost: 25, damage: 140, radius: 1.6, on: ['wall', 'thick', 'gate', 'gatehouse', 'tower'] },
+  rocks: { label: 'Rock bucket', cost: 10, damage: 110, radius: 0.9, on: ['wall', 'thick', 'gate', 'gatehouse', 'tower'] },
 }
 // Moats: rams can't cross until enough foot soldiers have waded in to fill
 // a tile (seconds of wading).
 export const MOAT = { fill: 9 }
+
+// Armory research: one-time upgrades bought between waves.
+export const RESEARCH = {
+  longbow: { label: 'Longbows', cost: 120, text: 'Archers shoot a tile further.' },
+  bodkin: { label: 'Bodkin arrows', cost: 150, text: 'Arrows hit 40% harder.' },
+  fletchers: { label: 'Fletchers', cost: 110, text: 'Archers shoot 25% faster.' },
+  mail: { label: 'Chainmail', cost: 120, text: 'Archers and swordsmen take 35% less damage.' },
+  steel: { label: 'Steel swords', cost: 100, text: 'Swordsmen strike 40% harder.' },
+  guard: { label: "Lord's guard", cost: 90, text: 'The guard in the keep fights 60% harder and the keep door is half again as strong.' },
+}
+
+// Map styles to choose from when starting a new map.
+export const MAP_STYLES = {
+  random: { label: 'Random' },
+  rivers: { label: 'Rivers & lakes' },
+  coast: { label: 'Coast' },
+  mountains: { label: 'Mountains' },
+  forest: { label: 'Forest' },
+}
 
 // Renown, the score: per wave survived, plus per village building still
 // standing at the end of each wave.
 export const RENOWN = { wave: 10, cottage: 3, farm: 2, market: 8, lord: 20 }
 
 // Wooden hoarding built on top of a stone wall, gate or tower.
-export const HOARDING = { label: 'Hoarding', cost: 3, cover: 0.2, splash: 0.5, on: ['wall', 'thick', 'gate', 'tower'] }
+export const HOARDING = { label: 'Hoarding', cost: 3, cover: 0.2, splash: 0.5, on: ['wall', 'thick', 'gate', 'gatehouse', 'tower'] }
 
 // How the village grows: plots appear between waves where it feels safe.
 // It judges safety from your walls and towers, never from where attacks come.
@@ -102,7 +126,9 @@ export const KEEP = { size: 3, hp: 1000, height: 3.2, slots: 2, perch: 1.5, arch
 //   push:  shove damage per second from each archer on or beside the wall,
 //   climb: speed multiplier while climbing, cost: path cost of a ladder,
 //   regroup: seconds stuck at a wall before two soldiers lash a new ladder.
-export const LADDER = { raise: 1.2, hp: 80, push: 16, climb: 0.35, cost: 9, regroup: 14, reach: ['wall', 'thick'] }
+//   haul:  seconds to haul a ladder over and climb down inside, when a wall
+//          has no stairs, tower, gatehouse or keep to get down by
+export const LADDER = { raise: 1.2, hp: 80, push: 16, climb: 0.35, cost: 9, regroup: 14, haul: 5, reach: ['wall', 'thick'] }
 // Structures foot soldiers can't damage.
 export const STONE = ['wall', 'thick', 'tower']
 

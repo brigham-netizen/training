@@ -20,7 +20,9 @@ const TERRAIN_NAMES = Object.fromEntries(Object.entries(TERRAIN_CODES).map(([k, 
 
 export class World {
   // `map` (from snapshotMap) rebuilds a saved landscape instead of generating one.
-  constructor(seed = 1, map = null) {
+  // `style` (see MAP_STYLES) shapes generation: rivers, coast, mountains...
+  constructor(seed = 1, map = null, style = 'random') {
+    this.style = style
     this.w = GRID_W
     this.h = GRID_H
     this.tiles = []
@@ -131,9 +133,29 @@ export class World {
     const t = this.tiles[i]
     return t.type === 'tree' || t.type === 'rock' || TERRAIN[t.terrain].blocked === true
   }
+  // A broken gate is an open archway: nothing solid in the way.
   isSolid(i) {
     const t = this.tiles[i]
-    return t.type === 'keep' || STRUCTURES[t.type]?.solid === true
+    return t.type === 'keep' || (STRUCTURES[t.type]?.solid === true && !t.broken)
+  }
+  isGate(i) {
+    return STRUCTURES[this.tiles[i].type]?.gate === true
+  }
+  // A stone wall standing in water (or across a moat) is pierced by an arch
+  // so the water flows under it, closed by an iron grate. Returns 'x' for
+  // a wall running east-west, 'y' for north-south, or null for no arch.
+  waterArch(i) {
+    const t = this.tiles[i]
+    if (t.type !== 'wall' && t.type !== 'thick') return null
+    const x = i % this.w
+    const y = (i / this.w) | 0
+    const at = (dx, dy) => (this.inBounds(x + dx, y + dy) ? this.tiles[this.idx(x + dx, y + dy)] : null)
+    const wallish = (n) => n && (STRUCTURES[n.type]?.rampart || n.type === 'tower' || n.type === 'keep')
+    const wet = (n) => n && (n.type === 'moat' || n.terrain === 'water' || n.terrain === 'shallows')
+    const alongX = wallish(at(1, 0)) || wallish(at(-1, 0)) || !(wallish(at(0, 1)) || wallish(at(0, -1)))
+    const across = alongX ? wet(at(0, -1)) && wet(at(0, 1)) : wet(at(-1, 0)) && wet(at(1, 0))
+    if (t.terrain === 'water' || t.terrain === 'shallows' || across) return alongX ? 'x' : 'y'
+    return null
   }
   isWalkable(i) {
     return !this.isBlocked(i) && !this.isSolid(i)
@@ -227,7 +249,7 @@ export class World {
       if (!this.inBounds(x + dx, y + dy)) continue
       const j = this.idx(x + dx, y + dy)
       if (!this.isRampart(j)) continue
-      const r = ['wall', 'thick', 'gate', 'tower', 'keep'].indexOf(this.tiles[j].type)
+      const r = ['wall', 'thick', 'gate', 'gatehouse', 'tower', 'keep'].indexOf(this.tiles[j].type)
       if (r < rank) {
         rank = r
         best = j
@@ -288,6 +310,8 @@ export class World {
       if (this.inBounds(x, y)) this.tiles[this.idx(x, y)].terrain = terrain
     }
     const terrainAt = (x, y) => (this.inBounds(x, y) ? this.tiles[this.idx(x, y)].terrain : null)
+    // The chosen map style tips the odds.
+    const st = this.style || 'random'
     // Feature counts grow with the map.
     const A = (w * h) / (32 * 20)
     const many = (base, spread) => Math.round((base + Math.floor(rnd() * spread)) * A)
@@ -302,10 +326,10 @@ export class World {
     }
 
     // A sea coast in one corner, behind a sandy beach.
-    if (rnd() < 0.45) {
+    if (st === 'coast' || (st === 'random' && rnd() < 0.45)) {
       const x0 = rnd() < 0.5 ? 0 : w - 1
       const y0 = rnd() < 0.5 ? 0 : h - 1
-      const R = 0.26 + rnd() * 0.1
+      const R = (st === 'coast' ? 0.34 : 0.26) + rnd() * 0.1
       const ph = [rnd() * 6, rnd() * 6, rnd() * 6]
       for (let y = 0; y < h; y++)
         for (let x = 0; x < w; x++) {
@@ -320,7 +344,7 @@ export class World {
     }
 
     // Mountain ranges: chains of impassable peaks with hilly foothills.
-    const ranges = rnd() < 0.55 ? (rnd() < 0.35 ? 2 : 1) : 0
+    const ranges = st === 'mountains' ? 3 + Math.floor(rnd() * 2) : st === 'random' ? (rnd() < 0.55 ? (rnd() < 0.35 ? 2 : 1) : 0) : st === 'forest' ? (rnd() < 0.4 ? 1 : 0) : 0
     for (let k = 0; k < ranges; k++) {
       let x = Math.floor(rnd() * w)
       let y = Math.floor(rnd() * h)
@@ -341,14 +365,14 @@ export class World {
     }
 
     // Hills.
-    const hills = many(3, 3)
+    const hills = many(st === 'mountains' ? 6 : 3, 3)
     for (let k = 0; k < hills; k++)
       blob(1.6 + rnd() * 1.6, (x, y) => {
         if (!nearKeep(x, y, 3, 3) && terrainAt(x, y) === 'grass') set(x, y, 'hill')
       })
 
     // A river with two fords, on one side of the keep.
-    if (rnd() < 0.7) {
+    if (st === 'rivers' || (st !== 'mountains' && st !== 'coast' && rnd() < 0.7)) {
       const vertical = rnd() < 0.6
       const len = vertical ? h : w
       let pos = vertical
@@ -371,7 +395,7 @@ export class World {
     }
 
     // Lakes ringed by shallows, and marsh.
-    const lakes = Math.floor(rnd() * 3 * A)
+    const lakes = st === 'rivers' ? 2 + Math.floor(rnd() * 2 * A) : Math.floor(rnd() * 3 * A)
     for (let k = 0; k < lakes; k++) {
       const r = 1.3 + rnd() * 1.2
       blob(r + 1, (x, y, d) => {
@@ -395,7 +419,7 @@ export class World {
     }
     // Dense forests: big stands of trees you'll have to build around (or
     // pay to clear).
-    const forests = 1 + Math.floor(rnd() * 3 * A)
+    const forests = st === 'forest' ? 5 + Math.floor(rnd() * 3 * A) : 1 + Math.floor(rnd() * 3 * A)
     for (let k = 0; k < forests; k++)
       blob(2.2 + rnd() * 1.6, (x, y) => {
         if (rnd() < 0.85) plant(x, y, 'tree')
@@ -484,6 +508,7 @@ export class World {
     t.rock = false
     t.hoard = false
     t.oil = t.rocks = false
+    t.broken = false
     t.fill = 0
     t.ladder = null
     t.plot = null
@@ -499,8 +524,16 @@ export class World {
       this.keep.hp = Math.max(0, this.keep.hp - amount)
       return this.keep.hp <= 0
     }
+    if (t.broken) return false
     t.hp -= amount
     if (t.hp <= 0) {
+      // Gates: the door gives way, the stonework stands.
+      if (STRUCTURES[t.type]?.gate) {
+        t.hp = 0
+        t.broken = true
+        this.dirty = true
+        return true
+      }
       this.clear(i)
       return true
     }

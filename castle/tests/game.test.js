@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Game } from '../src/game.js'
 import { computeFlow } from '../src/pathing.js'
-import { STRUCTURES, ARCHER, KEEP, TOTAL_WAVES } from '../src/config.js'
+import { STRUCTURES, ARCHER, KEEP, TOTAL_WAVES, LADDER } from '../src/config.js'
 
 function run(game, seconds, step = 1 / 60) {
   for (let t = 0; t < seconds && game.phase === 'attack'; t += step) game.update(step)
@@ -1065,4 +1065,103 @@ test('maps can have sea coasts, mountains and dense forest; mountains block wall
     assert.ok(w.spawnsConnected())
   }
   assert.ok(coast > 0 && peaks > 0, `coast ${coast} peaks ${peaks}`)
+})
+
+// ---- stage 10: wall walks, tower stairs, gates that break open -----------------
+
+test('raiders over a ladder walk the walls and come down a tower, never jumping', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 100000
+  game.archers = []
+  const { world } = game
+  const tiles = ring(game, 4)
+  const W = 9
+  const corners = [tiles[0], tiles[W - 1], tiles[tiles.length - W], tiles[tiles.length - 1]]
+  for (const i of tiles) world.build(i, corners.includes(i) ? 'tower' : 'wall')
+  const k = world.keep
+  const wall = world.idx(k.x - 3, k.y + 1)
+  const l = { id: 1, tile: wall, dir: [1, 0], hp: 1e9, maxHp: 1e9 }
+  game.ladders.push(l)
+  world.tiles[wall].ladder = l
+  world.dirty = true
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 5, y: k.y + 1 }, hpMult: 50 })
+  let wasUp = false
+  let cameDownAt = null
+  let last = world.idxAt(e.x, e.y)
+  for (let t = 0; t < 40 && cameDownAt === null && !e.gone; t += 1 / 60) {
+    game.update(1 / 60)
+    if (e.up) wasUp = true
+    const here = world.idxAt(e.x, e.y)
+    if (wasUp && !e.up) cameDownAt = last
+    last = here
+  }
+  assert.ok(wasUp, 'climbed onto the wall')
+  if (!e.gone) assert.equal(world.tiles[cameDownAt].type, 'tower', 'came down inside a tower')
+})
+
+test('with no way down, they haul the ladder over and that takes time', () => {
+  const game = new Game()
+  clearMap(game)
+  game.archers = []
+  const { world } = game
+  for (const i of ring(game, 4)) world.build(i, 'wall')
+  const k = world.keep
+  const wall = world.idx(k.x - 3, k.y + 1)
+  const l = { id: 1, tile: wall, dir: [1, 0], hp: 1e9, maxHp: 1e9 }
+  game.ladders.push(l)
+  world.tiles[wall].ladder = l
+  world.dirty = true
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'raider', spawn: { x: k.x - 5, y: k.y + 1 }, hpMult: 50 })
+  let upAt = -1
+  let downAt = -1
+  let t = 0
+  for (; t < 30 && downAt < 0; t += 1 / 60) {
+    game.update(1 / 60)
+    if (e.up && upAt < 0) upAt = t
+    if (upAt >= 0 && !e.up) downAt = t
+  }
+  assert.ok(upAt >= 0 && downAt > 0, 'got up and down')
+  assert.ok(downAt - upAt >= LADDER.haul, `hauled for ${(downAt - upAt).toFixed(1)}s`)
+})
+
+test('a broken gate opens: the door goes, the stonework and archers stay', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const { world } = game
+  const tiles = ring(game, 3)
+  const gate = tiles[3]
+  for (const i of tiles) game.place(i, i === gate ? 'gate' : 'wall')
+  game.archers = []
+  game.addArcher(gate)
+  world.damage(gate, 1e6)
+  const t = world.tiles[gate]
+  assert.equal(t.type, 'gate')
+  assert.ok(t.broken)
+  assert.ok(world.isWalkable(gate), 'open to walk through')
+  assert.ok(world.isRampart(gate), 'still a rampart')
+  game.update(1 / 60)
+  assert.equal(game.archers.length, 1, 'archer still up there')
+  assert.ok(game.upgradeInfo(gate)?.kind === 'repair')
+  game.upgrade(gate)
+  assert.ok(!t.broken && world.isSolid(gate), 'door hung again')
+})
+
+test('a gatehouse drops into a wall and has stairs inside', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const { world } = game
+  const tiles = ring(game, 3)
+  for (const i of tiles) game.place(i, 'wall')
+  const gh = tiles[3]
+  assert.ok(game.place(gh, 'gatehouse'))
+  assert.equal(world.tiles[gh].type, 'gatehouse')
+  const inside = world.idx(gh % world.w, ((gh / world.w) | 0) + 1)
+  const route = game.troopRoute(inside * 2, gh * 2 + 1)
+  assert.ok(route, 'swordsmen can climb up through the gatehouse')
+  assert.ok(game.troopPath(inside, world.idx(gh % world.w, ((gh / world.w) | 0) - 2)), 'and walk out through it')
 })

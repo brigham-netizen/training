@@ -12,7 +12,7 @@ import { loadFlora } from './flora.js'
 // Ground textures load in the background; both renderers repaint when ready.
 loadTerrain()
 loadFlora()
-import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, DROPS, RENOWN, waveComposition } from './config.js'
+import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, DROPS, RENOWN, RESEARCH, MAP_STYLES, waveComposition } from './config.js'
 
 const ICONS = {
   look: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>',
@@ -42,6 +42,8 @@ const ICONS = {
   feedback: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M12 8v3M12 13.5v.01"/></svg>',
   oil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h14l-1.5 9a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7z"/><path d="M3 9h18M9 5c0-1.2 1-1.2 1-2.4M14 5c0-1.2 1-1.2 1-2.4"/></svg>',
   rocks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 11h16l-1.5 9h-13z"/><circle cx="8.5" cy="8" r="2.5"/><circle cx="14.5" cy="7.5" r="3"/></svg>',
+  gatehouse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M1 22V6h2V4h2v2h1V4h2v2h1v16M15 22V6h1V4h2v2h1V4h2v2h2v16M9 9h6v13M1 22h22"/><path d="M10 22v-6a2 2 0 0 1 4 0v6M11 16v6M13 16v6"/></svg>',
+  armory: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h13a5 5 0 0 0 5 1v2a5 5 0 0 1-5 2H9a3 3 0 0 1-3-3H3zM9 13l-1 4h8l-1-4M6 21h12l-2-4H8z"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
@@ -55,6 +57,7 @@ const TOOL_LABELS = {
   moat: 'Moat',
   pikes: 'Pikes',
   gate: 'Gate',
+  gatehouse: 'Gatehouse',
   stair: 'Stairs',
   swordsman: 'Swordsman',
   upgrade: 'Upgrade',
@@ -72,14 +75,15 @@ const TOOL_HINTS = {
   thick: 'Very tough, holds 2 archers.',
   tower: 'Comes with an archer. Height adds range.',
   archer: 'Tap a wall, tower or the keep.',
-  gate: 'Your troops walk through; enemies must break it. Drop one into a wall for the difference.',
+  gate: 'Your troops walk through; enemies must break the door. Drop one into a wall for the difference.',
+  gatehouse: 'A big stone gate with turrets: tougher, 3 archers on top, stairs inside. Drop it into a wall or over a gate.',
   stair: 'Build against a wall, tower or keep so swordsmen can climb up.',
   swordsman: 'Guards a spot. Tap a wall or the keep to post one up top.',
   hoard: 'Wooden shields on a stone wall, gate or tower. Archers behind it are much safer.',
   oil: 'A cauldron on a wall: scalds everyone at its foot, once per wave.',
   rocks: 'Stones on a wall: crush a ladder\'s climbers or the attackers below, once per wave.',
   orders: 'Tell swordsmen which area to cover.',
-  upgrade: 'Palisade to stone, stone to thick; repairs damage.',
+  upgrade: 'Palisade to stone, stone to thick; repairs damage and rehangs broken gate doors.',
   settle: 'Build the houses and farms the village asks for.',
   moat: 'Enemies wade through slowly.',
   pikes: 'Hurts anyone who attacks it.',
@@ -88,14 +92,14 @@ const TOOL_HINTS = {
 // Toolbar groups; multi-tool groups open a flyout.
 const GROUPS = [
   { id: 'look', tools: ['look'] },
-  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate', 'stair', 'hoard'] },
+  { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate', 'gatehouse', 'stair', 'hoard'] },
   { id: 'defend', tools: ['tower', 'archer', 'swordsman', 'orders', 'oil', 'rocks'] },
   { id: 'obstacles', tools: ['moat', 'pikes', 'trap'] },
   { id: 'improve', tools: ['settle', 'upgrade'] },
   { id: 'demolish', tools: ['demolish'] },
 ]
 const KEYS = ['look', 'palisade', 'wall', 'thick', 'gate', 'tower', 'archer', 'swordsman', 'orders', 'settle']
-const PLACE_ON_RELEASE = new Set(['tower', 'archer', 'swordsman', 'gate'])
+const PLACE_ON_RELEASE = new Set(['tower', 'archer', 'swordsman', 'gate', 'gatehouse'])
 const costOf = (id) =>
   id === 'archer' ? ARCHER.cost : id === 'swordsman' ? SWORDSMAN.cost : id === 'hoard' ? HOARDING.cost : DROPS[id] ? DROPS[id].cost : STRUCTURES[id]?.cost
 
@@ -143,7 +147,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top
   navigator.serviceWorker.register('./sw.js').catch(() => {})
 }
 
-window.htk = { get game() { return game }, audio, camera, setGfx: (m) => setGfx(m), restart: (s) => restart(s) }
+window.htk = { get game() { return game }, audio, camera, setGfx: (m) => setGfx(m), restart: (s, m, st) => restart(s, m, st) }
 // Browsers only start audio from a user gesture, and they disagree on
 // which events count, so try on all of them.
 for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'])
@@ -368,6 +372,7 @@ function selectTool(id) {
 }
 
 $('menu-btn').innerHTML = ICONS.menu
+$('armory-btn').innerHTML = ICONS.armory
 $('feedback-btn').innerHTML = ICONS.feedback
 $('feedback-btn').addEventListener('click', () => captureScreen((blob) => showFeedback(blob)))
 const soundBtn = $('sound-btn')
@@ -441,6 +446,7 @@ function autosave() {
   saves.saveProgress(game.serialize()).catch(() => {})
 }
 $('menu-btn').addEventListener('click', () => showMenu())
+$('armory-btn').addEventListener('click', () => showArmory())
 
 function setView(mode) {
   camera.setMode(mode)
@@ -590,12 +596,15 @@ const HELP = `
     <li><b>Walls</b>: drag to paint. Wooden palisades are cheap; stone walls let archers walk along them; thick walls take a beating. Enemies walk around walls if they can. Soldiers on foot can't break stone: they hack through gates and wood, or climb over with ladders.</li>
     <li><b>Towers and archers</b>: drag to aim, release to place. Archers stand on walls, towers and the keep, and walk along connected stone to reach attackers. Height adds range: towers most, then thick walls and hills. Arrows rarely miss at the foot of the wall but often miss at long range. Archers deal with anyone inside or on your walls first, and hurry along the walls to a breach.</li>
     <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates, which are barred while attackers are at them; enemies have to break gates down. Send them out to kill catapults. Drop a gate into an existing wall for the difference in price.</li>
-    <li><b>Stairs</b>: build them against a wall, tower or the keep and swordsmen can climb up to fight raiders coming over on ladders. Post swordsmen on the keep (it has its own stairs inside the door) to guard your lord.</li>
+    <li><b>Stairs</b>: build them against a wall, tower or the keep and swordsmen can climb up to fight raiders coming over on ladders. Towers and gatehouses have stairs inside, reached from their base or the walls joining them. Post swordsmen on the keep (it has its own stairs inside the door) to guard your lord.</li>
+    <li><b>Gatehouse</b>: a big stone gate with corner turrets, a portcullis and stairs inside. It holds 3 archers and takes far more punishment. When attackers break a gate or gatehouse they smash only the door; the stonework stands and archers stay put. Tap it with <b>Upgrade</b> to hang a new door.</li>
+    <li><b>Armory</b> (anvil button): between waves, spend gold on longbows, bodkin arrows, fletchers, chainmail, steel swords and the lord's guard. Upgrades last the whole game.</li>
     <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
     <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through and stop rams until soldiers fill them in (always leave the keep a dry way out); pikes hurt anyone attacking them; spikes hurt anyone walking over them but wear out, and a ram smashes them.</li>
-    <li><b>Enemies</b>: raiders and brutes hack at gates, palisades and pikes. Pairs of raiders carry <b>ladders</b> to stone walls and climb over; archers on or next to that wall push the ladder off. Rams smash gates and stone, bowmen shoot your troops, and catapults throw boulders from beyond archer range until they run out, then fall apart.</li>
+    <li><b>Enemies</b>: raiders and brutes hack at gates, palisades and pikes. Pairs of raiders carry <b>ladders</b> to stone walls and climb over; archers on or next to that wall push the ladder off. Once up, they won't jump down: they walk the walls to a stair, a tower or gatehouse, or the keep, and only haul their ladder over (slowly) if there's no other way. Rams smash gates and stone, bowmen shoot your troops, and catapults throw boulders from beyond archer range until they run out, then fall apart.</li>
     <li><b>Armies</b>: each wave arrives at once, an army massing at each red banner and marching together until it nears your castle. Raiders break off to sack village buildings they can reach without breaking anything, so a village outside your walls is easy pickings.</li>
     <li><b>The keep and your lord</b>: attackers who reach the keep batter its door, then fight their way up its narrow stair, two at a time, to your lord. His guard fights back, but a crowd will wear him down. Masons mend the door after every wave.</li>
+    <li><b>Maps</b>: choose rivers, coast, mountains, forest or a mix when you start a new map (menu → New map).</li>
     <li><b>Terrain</b>: rivers, lakes and the sea block the way except at fords; mountains can't be crossed or built through; forests block the way until you build through them; marsh and fords slow enemies down. Walls, gates, towers and pikes can be built across marsh, water, trees and rocks, but cost more there.</li>
     <li><b>Village</b>: after each wave the village stakes out plots where it feels safe. Tap a plot to build it; it pays gold after every wave.</li>
     <li><b>Renown</b> is your score: ${RENOWN.wave} for each wave you hold, plus every wave ${RENOWN.cottage} per cottage, ${RENOWN.farm} per farm and ${RENOWN.market} per market still standing. A big, safe village is how you win big.</li>
@@ -704,6 +713,39 @@ async function sendFeedback(shot, how) {
   }
 }
 
+// The armory: upgrades for your troops and keep, bought between waves.
+function showArmory() {
+  const building = game.phase === 'build'
+  const cards = Object.entries(RESEARCH).map(([id, r]) => {
+    const owned = game.research.has(id)
+    const can = game.canResearch(id)
+    const state = owned ? 'Owned' : `<span class="cost">${r.cost}</span>`
+    return `<button id="research-${id}" class="research ${owned ? 'owned' : ''} ${!owned && !can ? 'poor' : ''}" ${owned || !can ? 'disabled' : ''}>
+      <b>${r.label}</b><small>${r.text}</small><span class="price">${state}</span></button>`
+  })
+  const note = building ? `You have <b>${Math.floor(game.gold)}</b> gold. Each upgrade lasts for the rest of the game.` : 'The armory opens between waves.'
+  modal('Armory', `<p class="save-note">${note}</p><div class="research-grid">${cards.join('')}</div>`, [{ label: 'Done', primary: true }])
+}
+
+// Choose the kind of land for a new map.
+function showMapPicker(first = false) {
+  let last = 'random'
+  try {
+    last = localStorage.getItem('htk-style') || 'random'
+  } catch {
+    // ignore
+  }
+  const blurb = {
+    random: 'A bit of everything.',
+    rivers: 'A river cuts the land, with fords and lakes.',
+    coast: 'The sea guards one side; beaches and cliffs.',
+    mountains: 'Impassable ridges funnel the attackers.',
+    forest: 'Thick woods to clear or build through.',
+  }
+  const cards = Object.entries(MAP_STYLES).map(([id, m]) => `<button id="style-${id}" class="research ${id === last ? 'owned' : ''}"><b>${m.label}</b><small>${blurb[id] || ''}</small></button>`)
+  modal(first ? 'Choose your land' : 'New map', `<div class="research-grid">${cards.join('')}</div>`, first ? [{ label: 'Keep this one', primary: true }] : [{ label: 'Cancel' }])
+}
+
 function showMenu() {
   const toggles = `<div class="toggles">
     <button id="music-toggle" class="${audio.musicOn ? 'on' : ''}">Music: ${audio.musicOn ? 'on' : 'off'}</button>
@@ -720,7 +762,7 @@ function showMenu() {
     <button id="my-maps">My maps</button>
   </div><p class="save-note" id="save-note">Saves are kept in ${saves.where}. The game also saves before every wave.</p>`
   modal('Hold the Keep', toggles + savesRow + HELP + CREDITS, [
-    { label: 'New map', run: () => restart(randomSeed()) },
+    { label: 'New map', run: () => showMapPicker() },
     { label: 'Restart', run: () => restart() },
     { label: 'Resume', primary: true },
   ])
@@ -778,6 +820,24 @@ document.addEventListener('click', async (e) => {
       else parts.push('Music is still loading.')
       el.textContent = parts.join(' ')
     }, 600)
+    return
+  }
+  // Card buttons hold markup, so find the button that was tapped.
+  const bid = e.target.closest?.('button')?.id || ''
+  if (bid.startsWith('research-')) {
+    if (game.buyResearch(bid.slice(9))) refreshHud()
+    return showArmory()
+  }
+  if (bid.startsWith('style-')) {
+    const st = bid.slice(6)
+    try {
+      localStorage.setItem('htk-style', st)
+    } catch {
+      // ignore
+    }
+    closeModal()
+    restart(randomSeed(), null, st)
+    banner(`${MAP_STYLES[st].label}<small>A new landscape to defend</small>`, 2200)
     return
   }
   if (id === 'save-map') return showSaveMap()
@@ -874,9 +934,10 @@ function escapeHtml(s) {
 }
 
 // No arguments: same land again. A seed alone: a brand new landscape.
-function restart(seed, map) {
+// A style picks the kind of landscape (see MAP_STYLES).
+function restart(seed, map, style) {
   if (seed === undefined) game.reset()
-  else game.reset(seed, map || null)
+  else game.reset(seed, map || null, style || 'random')
   audio.setMusic('build')
   ui.tool = ui.buildTool = 'wall'
   ui.speed = 1
@@ -913,7 +974,7 @@ function handleEvents() {
       audio.setMusic('build')
       modal('Victory!', `<p>Your keep stood against all <b>${TOTAL_WAVES}</b> waves.</p>${renownLine(ev.renown)}`, [
         { label: 'Keep looking' },
-        { label: 'New map', primary: true, run: () => restart(randomSeed()) },
+        { label: 'New map', primary: true, run: () => showMapPicker() },
       ])
     } else if (ev.type === 'lost') {
       audio.play('defeat')
@@ -1026,7 +1087,7 @@ requestAnimationFrame(frame)
 try {
   if (!localStorage.getItem('htk-seen-help')) {
     localStorage.setItem('htk-seen-help', '1')
-    modal('Hold the Keep', HELP, [{ label: 'Start building', primary: true }])
+    modal('Hold the Keep', HELP, [{ label: 'Choose a map', primary: true, run: () => showMapPicker(true) }])
   }
 
 } catch {
