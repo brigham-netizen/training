@@ -1,7 +1,10 @@
 // Tunable game constants. Distances are in tiles, times in seconds.
 
-export const GRID_W = 32
-export const GRID_H = 20
+export const GRID_W = 40
+export const GRID_H = 26
+// Units are drawn (and collide) at this fraction of their old size, so
+// walls and towers tower over them the way they should.
+export const UNIT_SCALE = 0.7
 export const TILE_PX = 32 // screen px per tile at zoom 1
 
 export const START_GOLD = 250
@@ -17,18 +20,20 @@ export const SIEGE_COST_PER_HP = 1 / 16
 //   upgrade: what the Upgrade tool turns it into
 //   gate:    your troops can walk through it; enemies must break it
 export const STRUCTURES = {
-  palisade: { label: 'Palisade', cost: 1, hp: 120, height: 0.9, solid: true, thin: 0.3, upgrade: 'wall' },
-  wall: { label: 'Wall', cost: 2, hp: 300, height: 1.0, solid: true, thin: 0.6, rampart: true, slots: 1, perch: 0.5, upgrade: 'thick' },
-  thick: { label: 'Thick wall', cost: 5, hp: 750, height: 1.35, solid: true, rampart: true, slots: 2, perch: 1 },
+  palisade: { label: 'Palisade', cost: 1, hp: 120, height: 1.0, solid: true, thin: 0.3, upgrade: 'wall' },
+  wall: { label: 'Wall', cost: 2, hp: 300, height: 1.2, solid: true, thin: 0.6, rampart: true, slots: 1, perch: 0.5, upgrade: 'thick' },
+  thick: { label: 'Thick wall', cost: 5, hp: 750, height: 1.6, solid: true, rampart: true, slots: 2, perch: 1 },
   // The one way in for foot soldiers who don't bring ladders.
-  gate: { label: 'Gate', cost: 15, hp: 400, height: 1.25, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
-  tower: { label: 'Tower', cost: 60, hp: 550, height: 2.2, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1 },
+  gate: { label: 'Gate', cost: 15, hp: 400, height: 1.5, solid: true, rampart: true, slots: 1, perch: 0.5, gate: true },
+  tower: { label: 'Tower', cost: 60, hp: 550, height: 2.8, solid: true, rampart: true, slots: 3, perch: 1.5, freeArchers: 1 },
   moat: { label: 'Moat', cost: 3, slow: 0.35, flatOnly: true },
   // Built against a wall, tower or the keep: lets swordsmen climb up and
   // fight on the ramparts. Enemies just walk over it.
   stair: { label: 'Stairs', cost: 4, stair: true },
   pikes: { label: 'Pikes', cost: 3, hp: 110, height: 0.6, solid: true, thorns: 18 },
-  trap: { label: 'Spikes', cost: 20, dps: 22 },
+  // Spike pits wear out as enemies cross them (wear per second of someone
+  // standing in them) and a ram rolling over one smashes it outright.
+  trap: { label: 'Spikes', cost: 20, dps: 22, hp: 100, wear: 7 },
   // Village buildings: proposed by the village, built by you, pay out each wave.
   cottage: { label: 'Cottage', cost: 30, hp: 160, height: 0.9, solid: true, village: true, income: 10 },
   farm: { label: 'Farm', cost: 15, hp: 40, village: true, income: 6, trample: 90 },
@@ -37,9 +42,25 @@ export const STRUCTURES = {
 
 // Walls, gates, towers and pikes can be built over rough ground at a price.
 // Multipliers stack: terrain times whatever has to be cleared first.
-export const ROUGH_COST = { hill: 1, marsh: 2, shallows: 3, water: 4, tree: 2, rock: 3 }
+export const ROUGH_COST = { hill: 1, marsh: 2, shallows: 3, water: 4, beach: 1, tree: 2, rock: 3 }
 // Fortifications built on a rock keep it as a natural base: a bit tougher.
 export const ROCK_FOUNDATION = { hp: 1.25 }
+
+// Things to drop from the walls, each once per wave, refilled between waves.
+//   oil:   scalds everyone at the foot of the wall within `radius` tiles
+//   rocks: crushes whoever is climbing or battering right below, and knocks
+//          any ladder on that wall down
+export const DROPS = {
+  oil: { label: 'Boiling oil', cost: 25, damage: 140, radius: 1.6, on: ['wall', 'thick', 'gate', 'tower'] },
+  rocks: { label: 'Rock bucket', cost: 10, damage: 110, radius: 0.9, on: ['wall', 'thick', 'gate', 'tower'] },
+}
+// Moats: rams can't cross until enough foot soldiers have waded in to fill
+// a tile (seconds of wading).
+export const MOAT = { fill: 9 }
+
+// Renown, the score: per wave survived, plus per village building still
+// standing at the end of each wave.
+export const RENOWN = { wave: 10, cottage: 3, farm: 2, market: 8, lord: 20 }
 
 // Wooden hoarding built on top of a stone wall, gate or tower.
 export const HOARDING = { label: 'Hoarding', cost: 3, cover: 0.2, splash: 0.5, on: ['wall', 'thick', 'gate', 'tower'] }
@@ -73,7 +94,7 @@ export const ZONE_MARGIN = 0.75
 // (doorHp) and then fight their way up to him. The stair is narrow: only
 // `stair` attackers reach the top at a time, the rest queue below. His
 // guard fights back, splitting `guard` damage per second among them.
-export const KEEP = { size: 3, hp: 1000, height: 2.6, slots: 2, perch: 1.5, archers: 2, doorHp: 260, guard: 30, climb: 2.5, stair: 2 }
+export const KEEP = { size: 3, hp: 1000, height: 3.2, slots: 2, perch: 1.5, archers: 2, doorHp: 260, guard: 30, climb: 2.5, stair: 2 }
 
 // Foot soldiers can't hurt stone. They break gates and wooden things, and
 // get over stone walls with ladders carried by a crew of two.
@@ -92,6 +113,10 @@ export const TERRAIN = {
   marsh: { slow: 0.55, noBuild: true },
   shallows: { slow: 0.45, noBuild: true },
   water: { blocked: true },
+  // Sea coasts: sand along the shore, open water beyond.
+  beach: { slow: 0.85 },
+  // Mountains: impassable rock that can't be built through.
+  mountain: { blocked: true, noBuild: true, noWalls: true, elev: 1.7 },
 }
 
 export const ENEMIES = {

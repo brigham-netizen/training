@@ -15,7 +15,7 @@ export function mulberry32(seed) {
   }
 }
 
-const TERRAIN_CODES = { grass: 'g', hill: 'h', marsh: 'm', shallows: 's', water: 'w' }
+const TERRAIN_CODES = { grass: 'g', hill: 'h', marsh: 'm', shallows: 's', water: 'w', beach: 'b', mountain: 'M' }
 const TERRAIN_NAMES = Object.fromEntries(Object.entries(TERRAIN_CODES).map(([k, v]) => [v, k]))
 
 export class World {
@@ -288,26 +288,67 @@ export class World {
       if (this.inBounds(x, y)) this.tiles[this.idx(x, y)].terrain = terrain
     }
     const terrainAt = (x, y) => (this.inBounds(x, y) ? this.tiles[this.idx(x, y)].terrain : null)
-    const blob = (r, fn) => {
-      const bx = Math.floor(rnd() * w)
-      const by = Math.floor(rnd() * h)
-      for (let y = by - 4; y <= by + 4; y++)
-        for (let x = bx - 4; x <= bx + 4; x++) {
+    // Feature counts grow with the map.
+    const A = (w * h) / (32 * 20)
+    const many = (base, spread) => Math.round((base + Math.floor(rnd() * spread)) * A)
+    const blob = (r, fn, bx = Math.floor(rnd() * w), by = Math.floor(rnd() * h)) => {
+      const R = Math.ceil(r + 1)
+      for (let y = by - R; y <= by + R; y++)
+        for (let x = bx - R; x <= bx + R; x++) {
           if (!this.inBounds(x, y)) continue
           const d = Math.hypot(x - bx, y - by) + rnd() * 0.9
           if (d < r) fn(x, y, d)
         }
     }
 
-    // Hills first so water can cut through them.
-    const hills = 3 + Math.floor(rnd() * 3)
+    // A sea coast in one corner, behind a sandy beach.
+    if (rnd() < 0.45) {
+      const x0 = rnd() < 0.5 ? 0 : w - 1
+      const y0 = rnd() < 0.5 ? 0 : h - 1
+      const R = 0.26 + rnd() * 0.1
+      const ph = [rnd() * 6, rnd() * 6, rnd() * 6]
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const u = (x - x0) / w
+          const v = (y - y0) / h
+          const a = Math.atan2(Math.abs(v), Math.abs(u))
+          const d = Math.hypot(u, v) - (Math.sin(a * 5 + ph[0]) * 0.03 + Math.sin(a * 11 + ph[1]) * 0.015 + Math.sin(a * 23 + ph[2]) * 0.008)
+          if (nearKeep(x, y, 8, 6) || nearSpawn(x, y, 5)) continue
+          if (d < R) set(x, y, 'water')
+          else if (d < R + 0.05) set(x, y, 'beach')
+        }
+    }
+
+    // Mountain ranges: chains of impassable peaks with hilly foothills.
+    const ranges = rnd() < 0.55 ? (rnd() < 0.35 ? 2 : 1) : 0
+    for (let k = 0; k < ranges; k++) {
+      let x = Math.floor(rnd() * w)
+      let y = Math.floor(rnd() * h)
+      const ang = rnd() * Math.PI * 2
+      const len = 6 + Math.floor(rnd() * 6 * A)
+      for (let s = 0; s < len; s++) {
+        const r = 1.1 + rnd() * 1.1
+        blob(r + 1.2, (bx, by, d) => {
+          if (nearKeep(bx, by, 8, 6) || nearSpawn(bx, by, 5)) return
+          const t = terrainAt(bx, by)
+          if (t === 'water' || t === 'beach') return
+          if (d < r) set(bx, by, 'mountain')
+          else if (t !== 'mountain') set(bx, by, 'hill')
+        }, Math.round(x), Math.round(y))
+        x += Math.cos(ang + (rnd() - 0.5) * 0.8) * 1.4
+        y += Math.sin(ang + (rnd() - 0.5) * 0.8) * 1.4
+      }
+    }
+
+    // Hills.
+    const hills = many(3, 3)
     for (let k = 0; k < hills; k++)
       blob(1.6 + rnd() * 1.6, (x, y) => {
-        if (!nearKeep(x, y, 3, 3)) set(x, y, 'hill')
+        if (!nearKeep(x, y, 3, 3) && terrainAt(x, y) === 'grass') set(x, y, 'hill')
       })
 
     // A river with two fords, on one side of the keep.
-    if (rnd() < 0.8) {
+    if (rnd() < 0.7) {
       const vertical = rnd() < 0.6
       const len = vertical ? h : w
       let pos = vertical
@@ -323,22 +364,22 @@ export class World {
         for (const off of [0, 1]) {
           const x = vertical ? pos + off : t
           const y = vertical ? t : pos + off
-          if (nearKeep(x, y, 6, 5)) continue
+          if (nearKeep(x, y, 6, 5) || terrainAt(x, y) === 'mountain') continue
           set(x, y, ford ? 'shallows' : 'water')
         }
       }
     }
 
     // Lakes ringed by shallows, and marsh.
-    const lakes = Math.floor(rnd() * 3)
+    const lakes = Math.floor(rnd() * 3 * A)
     for (let k = 0; k < lakes; k++) {
       const r = 1.3 + rnd() * 1.2
       blob(r + 1, (x, y, d) => {
-        if (nearKeep(x, y, 6, 5)) return
+        if (nearKeep(x, y, 6, 5) || terrainAt(x, y) === 'mountain') return
         set(x, y, d < r ? 'water' : 'shallows')
       })
     }
-    const marshes = 1 + Math.floor(rnd() * 3)
+    const marshes = many(1, 3)
     for (let k = 0; k < marshes; k++)
       blob(1.5 + rnd() * 1.5, (x, y) => {
         if (!nearKeep(x, y, 4, 3) && terrainAt(x, y) === 'grass') set(x, y, 'marsh')
@@ -347,8 +388,21 @@ export class World {
     // Keep and spawn areas are always flat, dry ground.
     this.placeFixtures()
 
-    // Tree clusters and rocks (rocks favour hills).
-    const clusters = 8 + Math.floor(rnd() * 4)
+    const plant = (x, y, kind) => {
+      if (!this.inBounds(x, y) || nearKeep(x, y, 6, 5) || nearSpawn(x, y, 4)) return
+      const t = this.tiles[this.idx(x, y)]
+      if (t.terrain === 'grass' || t.terrain === 'hill' || (kind === 'tree' && t.terrain === 'marsh')) t.type = kind
+    }
+    // Dense forests: big stands of trees you'll have to build around (or
+    // pay to clear).
+    const forests = 1 + Math.floor(rnd() * 3 * A)
+    for (let k = 0; k < forests; k++)
+      blob(2.2 + rnd() * 1.6, (x, y) => {
+        if (rnd() < 0.85) plant(x, y, 'tree')
+      })
+
+    // Smaller clusters of trees and rocks (rocks favour hills).
+    const clusters = many(8, 4)
     for (let c = 0; c < clusters; c++) {
       let x = Math.floor(rnd() * w)
       let y = Math.floor(rnd() * h)
@@ -356,10 +410,7 @@ export class World {
       const onHill = terrainAt(x, y) === 'hill'
       const kind = rnd() < (onHill ? 0.45 : 0.85) ? 'tree' : 'rock'
       for (let k = 0; k < size; k++) {
-        if (this.inBounds(x, y) && !nearKeep(x, y, 6, 5) && !nearSpawn(x, y, 4)) {
-          const t = this.tiles[this.idx(x, y)]
-          if (t.terrain === 'grass' || t.terrain === 'hill' || (kind === 'tree' && t.terrain === 'marsh')) t.type = kind
-        }
+        plant(x, y, kind)
         x += Math.floor(rnd() * 3) - 1
         y += Math.floor(rnd() * 3) - 1
       }
@@ -400,7 +451,10 @@ export class World {
   buildProblem(i, type) {
     const t = this.tiles[i]
     if (this.reserved[i]) return 'reserved'
-    if (this.isRough(type)) return t.type === 'grass' || t.type === 'tree' || t.type === 'rock' ? null : 'occupied'
+    if (this.isRough(type)) {
+      if (TERRAIN[t.terrain].noWalls) return 'terrain'
+      return t.type === 'grass' || t.type === 'tree' || t.type === 'rock' ? null : 'occupied'
+    }
     if (t.type !== 'grass') return 'occupied'
     const terrain = TERRAIN[t.terrain]
     if (terrain.blocked || terrain.noBuild) return 'terrain'
@@ -429,6 +483,8 @@ export class World {
     t.type = t.rock ? 'rock' : 'grass'
     t.rock = false
     t.hoard = false
+    t.oil = t.rocks = false
+    t.fill = 0
     t.ladder = null
     t.plot = null
     t.paid = undefined

@@ -68,6 +68,24 @@ of their range. Each wave arrives at once: an army masses at each banner
 castle, then charges. Raiders break off to sack cottages, farms and markets
 they can reach without breaking anything.
 
+Spike pits wear down as enemies cross them (repair with Upgrade) and a ram
+rolling over one smashes it. Rams can't cross a moat: they wait at the edge
+while foot soldiers wading in fill a tile, then roll over. A moat may never
+seal the keep off from the map edge.
+
+Boiling oil (25) and rock buckets (10) go on stone walls, gates and towers and
+each let go once per wave: oil scalds everyone at the foot of the wall when a
+crowd or a ram arrives; rocks crush ladder climbers (knocking the ladder down)
+or attackers right below. Both refill between waves.
+
+Renown is the score: 10 per wave held, plus every wave 3 per cottage, 2 per
+farm and 8 per market still standing, and up to 20 more for a healthy lord at
+victory. The best score is kept on the device.
+
+The map is 40×26 and can have a sea coast in one corner (behind a beach),
+mountain ranges (impassable, can't be built through), and dense forests.
+Walls, towers and the keep are taller and units are drawn at 70% size.
+
 The goal is your lord. Attackers who reach the keep batter its door (south
 face), then climb the keep's narrow stair, two at a time, to fight him and his guard
 (the Lord bar). Catapults

@@ -11,7 +11,7 @@ const BATTLE_TRACK = './music/heroic.mp3'
 
 // Minimum seconds between repeats of each effect so a volley of 30
 // arrows doesn't turn into noise.
-const THROTTLE = { bow: 0.07, hit: 0.06, clash: 0.12, build: 0.05, recruit: 0.1, crumble: 0.15, launch: 0.3, impact: 0.2, fall: 0.2 }
+const THROTTLE = { bow: 0.07, hit: 0.06, clash: 0.12, build: 0.05, recruit: 0.1, crumble: 0.15, launch: 0.3, impact: 0.2, fall: 0.2, splash: 0.3 }
 
 export class Audio {
   constructor() {
@@ -227,6 +227,12 @@ export class Audio {
   fx_impact(t, g) {
     this.tone(t, 'sine', 70, 0.5, 0.45 * g, 30)
     this.hiss(t, 0.45, 0.3 * g, 'lowpass', 700, 0.7, 120)
+  }
+  // Boiling oil: a long hissing pour and a bubbling sizzle.
+  fx_splash(t, g) {
+    this.hiss(t, 1.1, 0.3 * g, 'bandpass', 2600, 0.8, 900)
+    this.hiss(t + 0.1, 0.9, 0.18 * g, 'highpass', 3500, 0.7)
+    this.tone(t, 'sine', 140, 0.3, 0.12 * g, 70)
   }
   fx_fall(t, g) {
     this.tone(t, 'sawtooth', 300, 0.25, 0.05 * g, 120)

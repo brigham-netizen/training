@@ -53,18 +53,21 @@ class MinHeap {
 // Cost of stepping into tile i (Infinity if this kind of attacker can't).
 //   foot:   can't hurt stone; climbs it only where a ladder is up
 //   ladder: a ladder crew, who can put a ladder up against a wall
-//   ram:    siege engines, who batter through anything
+//   ram:    siege engines, who batter through anything but can't cross
+//           a moat; ramWait is the same but rolls up to moats to wait
 function stepCost(world, i, step, mode) {
   const t = world.tiles[i]
   if (t.type === 'keep') return Infinity
+  // Siege engines can't cross water: a moat must be filled first.
+  if (t.type === 'moat' && mode === 'ram') return Infinity
   if (world.isSolid(i)) {
     const stone = STONE.includes(t.type)
-    if (stone && mode !== 'ram') {
+    if (stone && mode !== 'ram' && mode !== 'ramWait') {
       if (t.ladder) return step / LADDER.climb
       if (mode === 'ladder' && LADDER.reach.includes(t.type)) return step / LADDER.climb + LADDER.cost
       return Infinity
     }
-    const lure = t.type === 'gate' ? (mode === 'ram' ? RAM_GATE_LURE : GATE_LURE) : 1
+    const lure = t.type === 'gate' ? (mode === 'ram' || mode === 'ramWait' ? RAM_GATE_LURE : GATE_LURE) : 1
     return step + Math.max(0, t.hp) * SIEGE_COST_PER_HP * lure
   }
   return step / world.slow(i)

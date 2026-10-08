@@ -3,6 +3,7 @@ import { computeFlow, computeRamFlow, computeLadderFlow, computeVillageFlow } fr
 import {
   START_GOLD, TOTAL_WAVES, STRUCTURES, KEEP, ENEMIES, ARCHER, SWORDSMAN, ARROW_SPEED, COVER,
   HOARDING, VILLAGE, ZONE_MARGIN, ROUGH_COST, LADDER, STONE, AIM, PLUNDER_RANGE, ARMY,
+  UNIT_SCALE, DROPS, MOAT, RENOWN, TERRAIN,
   waveComposition, waveBonus,
 } from './config.js'
 
@@ -32,6 +33,7 @@ export class Game {
     this.map = map
     this.world = new World(seed, map)
     this.gold = START_GOLD
+    this.renown = 0 // the score
     this.wave = 0 // waves completed
     this.phase = 'build' // build | attack | won | lost
     this.enemies = []
@@ -96,6 +98,8 @@ export class Game {
     if (type === 'swordsman') return this.canPlaceSwordsman(i)
     if (type === 'upgrade') return this.upgradeInfo(i) !== null && this.gold >= this.upgradeInfo(i).cost
     if (type === 'hoard') return this.canHoard(i)
+    if (DROPS[type]) return this.canDrop(i, type)
+    if (type === 'moat' && this.world.canBuild(i, 'moat') && !this.leavesWayOut(i)) return false
     if (type === 'settle') return this.canSettle(i)
     const over = this.layOverCost(i, type)
     if (over !== null) return this.gold >= over
@@ -111,6 +115,7 @@ export class Game {
     if (type === 'swordsman') return this.placeSwordsman(i)
     if (type === 'upgrade') return this.upgrade(i)
     if (type === 'hoard') return this.hoard(i)
+    if (DROPS[type]) return this.addDrop(i, type)
     if (type === 'settle') return this.settle(i)
     if (this.layOverCost(i, type) !== null) return this.layOver(i, type)
     if (!this.canPlace(i, type)) return false
@@ -251,6 +256,110 @@ export class Game {
     this.world.tiles[i].hoard = true
     this.sfx('build', ...this.center(i))
     return true
+  }
+
+  // ---- things dropped from the walls ----------------------------------------
+
+  canDrop(i, kind) {
+    const t = this.world.tiles[i]
+    const d = DROPS[kind]
+    return this.phase !== 'won' && this.phase !== 'lost' && d.on.includes(t.type) && !t[kind] && this.gold >= d.cost
+  }
+
+  addDrop(i, kind) {
+    if (!this.canDrop(i, kind)) return false
+    this.gold -= DROPS[kind].cost
+    this.world.tiles[i][kind] = true
+    this.world.tiles[i][kind + 'Used'] = false
+    this.sfx('build', ...this.center(i))
+    return true
+  }
+
+  // Ground-level enemies within r of (x, y).
+  enemiesNear(x, y, r, ground = true) {
+    return this.enemies.filter((e) => !e.dead && !e.gone && Math.hypot(e.x - x, e.y - y) <= r && (!ground || !this.elevated(e)))
+  }
+
+  // Each wall with oil or rocks lets them go once per wave, at the moment
+  // they'll do the most good.
+  updateDrops() {
+    const { world } = this
+    for (let i = 0; i < world.tiles.length; i++) {
+      const t = world.tiles[i]
+      if (!t.oil && !t.rocks) continue
+      const [cx, cy] = this.center(i)
+      if (t.oil && !t.oilUsed) {
+        // Oil waits for a crowd, a ram, or a wall that's taking a beating.
+        const near = this.enemiesNear(cx, cy, DROPS.oil.radius).filter((e) => e.type !== 'catapult')
+        const ram = near.some((e) => e.type === 'ram' && e.attacking)
+        const hurting = near.some((e) => e.attacking) && (t.hp < t.maxHp * 0.85 || near.length >= 3)
+        if (near.length >= 4 || ram || hurting) {
+          t.oilUsed = true
+          for (const e of near) this.hurt(e, DROPS.oil.damage)
+          this.effects.push({ type: 'oil', x: cx, y: cy, z: world.surface(i), t: 0, life: 1.4, size: DROPS.oil.radius })
+          this.sfx('splash', cx, cy)
+        }
+      }
+      if (t.rocks && !t.rocksUsed) {
+        // Rocks go on whoever is coming up a ladder, or battering right below.
+        const ladder = this.ladders.find((l) => l.tile === i)
+        const climbers = this.enemies.filter((e) => !e.dead && !e.gone && world.idxAt(e.x, e.y) === i)
+        const below = this.enemiesNear(cx, cy, DROPS.rocks.radius + 0.3).filter((e) => e.attacking)
+        if (ladder || climbers.length || below.length) {
+          t.rocksUsed = true
+          let fx = cx
+          let fy = cy
+          if (ladder) {
+            const g = this.ladderGeom(ladder)
+            fx = (g.fx + g.tx) / 2
+            fy = (g.fy + g.ty) / 2
+            ladder.hp = 0 // knocked off the wall
+          } else if (below.length) {
+            fx = below[0].x
+            fy = below[0].y
+          }
+          for (const e of this.enemies) {
+            if (e.dead || e.gone) continue
+            if (Math.hypot(e.x - fx, e.y - fy) <= DROPS.rocks.radius || world.idxAt(e.x, e.y) === i) this.hurt(e, DROPS.rocks.damage)
+          }
+          this.effects.push({ type: 'rocks', x: fx, y: fy, z: 0, t: 0, life: 1.0, size: 0.8, from: world.surface(i) })
+          this.sfx('impact', fx, fy)
+        }
+      }
+    }
+  }
+
+  // ---- moats ------------------------------------------------------------------
+
+  // Would a moat on tile i still leave the keep a dry way out to the edge
+  // of the map? (Your own buildings don't count: gates can go in them.)
+  leavesWayOut(i) {
+    const { world } = this
+    const t = world.tiles[i]
+    const was = t.type
+    t.type = 'moat'
+    const seen = new Uint8Array(world.w * world.h)
+    const queue = [world.keep.step]
+    seen[world.keep.step] = 1
+    let out = false
+    while (queue.length && !out) {
+      const u = queue.pop()
+      const x = u % world.w
+      const y = (u / world.w) | 0
+      if (x === 0 || y === 0 || x === world.w - 1 || y === world.h - 1) out = true
+      for (const [dx, dy] of N4) {
+        const nx = x + dx
+        const ny = y + dy
+        if (!world.inBounds(nx, ny)) continue
+        const v = world.idx(nx, ny)
+        const n = world.tiles[v]
+        if (seen[v] || n.type === 'moat' || n.type === 'keep' || n.type === 'tree' || n.type === 'rock' || TERRAIN[n.terrain].blocked) continue
+        seen[v] = 1
+        queue.push(v)
+      }
+    }
+    t.type = was
+    return out
   }
 
   // ---- village --------------------------------------------------------------
@@ -577,7 +686,7 @@ export class Game {
       a.heading = Math.atan2(target.y - a.y, target.x - a.x)
       if (a.cd <= 0) {
         a.cd = 1 / ARCHER.fireRate
-        this.shoot(a.x, a.y, a.z + 0.5, target, ARCHER.damage, false, this.hitChance(a, target))
+        this.shoot(a.x, a.y, a.z + 0.5 * UNIT_SCALE, target, ARCHER.damage, false, this.hitChance(a, target))
         this.sfx('bow', a.x, a.y)
       }
       return
@@ -719,7 +828,7 @@ export class Game {
       z: 0,
       hp: SWORDSMAN.hp,
       maxHp: SWORDSMAN.hp,
-      r: SWORDSMAN.r,
+      r: SWORDSMAN.r * UNIT_SCALE,
       path: [],
       zone: null, // {x0, y0, x1, y1} in tiles when given orders
       target: null,
@@ -969,7 +1078,7 @@ export class Game {
       dps: def.dps,
       siege: def.siege,
       gold: def.gold,
-      r: def.r,
+      r: def.r * UNIT_SCALE,
       heading: 0,
       attacking: false,
       shooting: false,
@@ -1016,6 +1125,7 @@ export class Game {
 
     for (const e of this.enemies) this.updateEnemy(e, dt)
     this.updateLadders(dt)
+    this.updateDrops()
     this.regroup(dt)
     this.updateIntruders(dt)
     this.separate()
@@ -1033,7 +1143,7 @@ export class Game {
 
     if (this.world.keep.hp <= 0) {
       this.phase = 'lost'
-      this.emit('lost', { wave: this.nextWave })
+      this.emit('lost', { wave: this.nextWave, renown: this.renown })
       return
     }
     if (!this.spawnQueue.length && !this.enemies.length && !this.intruders.length) this.endWave()
@@ -1053,6 +1163,7 @@ export class Game {
     this.flow = computeFlow(this.world)
     this.ladderFlow = computeLadderFlow(this.world)
     this.ramFlow = computeRamFlow(this.world)
+    this.ramWaitFlow = computeFlow(this.world, 'ramWait')
     this.villageFlow = computeVillageFlow(this.world)
     // How far out from the keep door your castle reaches (walls, towers).
     const { world } = this
@@ -1116,7 +1227,11 @@ export class Game {
   // all round, no ladder up) follow the ladder crews' field to the foot of
   // the wall and wait there.
   flowFor(e) {
-    if (ENEMIES[e.type].siegeEngine) return this.ramFlow
+    if (ENEMIES[e.type].siegeEngine) {
+      // No dry way in: roll up to the moat and wait for it to be filled.
+      const ci = this.world.idxAt(e.x, e.y)
+      return isFinite(this.ramFlow.dist[ci]) ? this.ramFlow : this.ramWaitFlow
+    }
     if (e.type === 'ladder') return this.ladderFlow
     const ci = this.world.idxAt(e.x, e.y)
     return isFinite(this.flow.dist[ci]) ? this.flow : this.ladderFlow
@@ -1139,11 +1254,21 @@ export class Game {
     this.world.keep.doorHp = this.world.keep.doorMax
     this.world.keep.inside = 0
     this.world.dirty = true
+    // Oil cauldrons refilled, rock buckets restocked.
+    for (const t of this.world.tiles) {
+      if (t.oil) t.oilUsed = false
+      if (t.rocks) t.rocksUsed = false
+    }
+    // Renown: for holding out, and for every village building still standing.
+    const renown = this.renownForWave()
+    this.renown += renown
     // Survivors patch themselves up between waves.
     for (const u of [...this.archers, ...this.swordsmen]) u.hp = u.maxHp
     if (this.wave >= TOTAL_WAVES) {
       this.phase = 'won'
-      this.emit('won', { wave: this.wave })
+      const lord = Math.round((this.world.keep.hp / this.world.keep.maxHp) * RENOWN.lord)
+      this.renown += lord
+      this.emit('won', { wave: this.wave, renown: this.renown })
       return
     }
     const bonus = waveBonus(this.wave)
@@ -1153,7 +1278,14 @@ export class Game {
     this.world.keep.hp = this.world.keep.maxHp
     this.phase = 'build'
     const plots = this.proposePlots()
-    this.emit('waveEnd', { wave: this.wave, bonus, village, plots })
+    this.emit('waveEnd', { wave: this.wave, bonus, village, plots, renown })
+  }
+
+  // Renown earned this wave: holding out, plus each village building left.
+  renownForWave() {
+    let r = RENOWN.wave
+    for (const t of this.world.tiles) r += RENOWN[t.type] && STRUCTURES[t.type]?.village ? RENOWN[t.type] : 0
+    return r
   }
 
   // `mode`: 'troop' (your swordsmen, through gates), 'troopUp' (your
@@ -1244,7 +1376,7 @@ export class Game {
         e.heading = Math.atan2(t.y - e.y, t.x - e.x)
         if (e.cd <= 0) {
           e.cd = 1 / def.rate
-          this.shoot(e.x, e.y, e.z + 0.5, t, def.shot, true)
+          this.shoot(e.x, e.y, e.z + 0.5 * UNIT_SCALE, t, def.shot, true)
           this.sfx('bow', e.x, e.y)
         }
         return
@@ -1360,6 +1492,11 @@ export class Game {
     }
     const [tx, ty] = this.center(target)
     const tt = world.tiles[target]
+    // Siege engines can't cross a moat; they wait at the edge.
+    if (tt.type === 'moat' && def.siegeEngine) {
+      e.heading = Math.atan2(ty - e.y, tx - e.x)
+      if (Math.max(Math.abs(tx - e.x), Math.abs(ty - e.y)) <= 0.5 + e.r + 0.1) return
+    }
 
     if (world.isSolid(target) && !(tt.ladder && this.climbs(e))) {
       const reach = Math.max(Math.abs(tx - e.x), Math.abs(ty - e.y))
@@ -1570,10 +1707,33 @@ export class Game {
     }
   }
 
+  // Spike pits and moats under the attackers' feet.
   updateTraps(dt) {
     const { world } = this
     for (const e of this.enemies) {
-      if (world.tiles[world.idxAt(e.x, e.y)].type === 'trap') this.hurt(e, STRUCTURES.trap.dps * dt, false)
+      if (e.dead || e.gone) continue
+      const i = world.idxAt(e.x, e.y)
+      const t = world.tiles[i]
+      if (t.type === 'trap') {
+        this.hurt(e, STRUCTURES.trap.dps * dt, false)
+        // Every pair of feet wears the spikes down; a ram smashes them flat.
+        t.hp -= e.type === 'ram' ? t.hp : STRUCTURES.trap.wear * dt
+        if (t.hp <= 0) {
+          world.clear(i)
+          const [x, y] = this.center(i)
+          this.effects.push({ type: 'dust', x, y, z: 0.1, t: 0, life: 0.8, size: 0.7 })
+          this.sfx('crumble', x, y)
+        }
+      } else if (t.type === 'moat' && this.climbs(e)) {
+        // Soldiers wading in throw in earth and brush until it's filled.
+        t.fill = (t.fill || 0) + dt
+        if (t.fill >= MOAT.fill) {
+          world.clear(i)
+          const [x, y] = this.center(i)
+          this.effects.push({ type: 'dust', x, y, z: 0.1, t: 0, life: 0.9, size: 0.8 })
+          this.sfx('crumble', x, y)
+        }
+      }
     }
   }
 
@@ -1629,7 +1789,7 @@ export class Game {
       kind: 'arrow',
       hostile,
       sx: x, sy: y, sz: z,
-      tx: target.x + Math.cos(ang) * off, ty: target.y + Math.sin(ang) * off, tz: miss ? this.world.heightAt(target.x, target.y) : target.z + 0.4,
+      tx: target.x + Math.cos(ang) * off, ty: target.y + Math.sin(ang) * off, tz: miss ? this.world.heightAt(target.x, target.y) : target.z + 0.4 * UNIT_SCALE,
       x, y, z,
       px: x, py: y, pz: z,
       target,
@@ -1661,7 +1821,7 @@ export class Game {
       if (p.kind === 'arrow' && !p.miss && !p.target.dead) {
         p.tx = p.target.x
         p.ty = p.target.y
-        p.tz = p.target.z + 0.4
+        p.tz = p.target.z + 0.4 * UNIT_SCALE
       }
       p.t = Math.min(1, p.t + dt / p.dur)
       p.px = p.x
@@ -1709,6 +1869,9 @@ export class Game {
       types: world.tiles.map((t) => (t.type === 'tree' || t.type === 'rock' ? '' : t.type === 'grass' ? '' : t.type)),
       hp: world.tiles.map((t) => Math.round(t.hp || 0)),
       hoard: world.tiles.flatMap((t, i) => (t.hoard ? [i] : [])),
+      oil: world.tiles.flatMap((t, i) => (t.oil ? [i] : [])),
+      rocks: world.tiles.flatMap((t, i) => (t.rocks ? [i] : [])),
+      renown: this.renown,
       plots: world.tiles.flatMap((t, i) => (t.type === 'plot' ? [[i, t.plot]] : [])),
       archers: this.archers.map((a) => a.post),
       swordsmen: this.swordsmen.map((s) => ({ post: s.post, zone: s.zone })),
@@ -1729,6 +1892,9 @@ export class Game {
       } else if (type !== 'keep' && t.type === 'plot') world.clear(i)
     })
     for (const i of data.hoard) world.tiles[i].hoard = true
+    for (const i of data.oil || []) world.tiles[i].oil = true
+    for (const i of data.rocks || []) world.tiles[i].rocks = true
+    g.renown = data.renown || 0
     for (const [i, kind] of data.plots) {
       world.tiles[i].type = 'plot'
       world.tiles[i].plot = kind

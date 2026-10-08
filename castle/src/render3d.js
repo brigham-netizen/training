@@ -7,7 +7,7 @@
 
 import * as THREE from 'three'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { STRUCTURES, KEEP } from './config.js'
+import { STRUCTURES, KEEP, UNIT_SCALE, MOAT } from './config.js'
 import { stoneTexture, woodTexture, TEXTURE_LUM } from './textures.js'
 import { paintTerrain, terrainReady } from './terrain.js'
 import { floraReady, floraSprites, treeSpec, rockSpec, FLORA_URLS } from './flora.js'
@@ -998,6 +998,12 @@ export class Renderer3D {
     const p = this.pools[name]
     if (p.n >= p.max) return
     const { m, c } = this.tmp
+    // Units are drawn at UNIT_SCALE about their own position.
+    const a = this.anchor
+    if (a) {
+      pos = pos.clone().sub(a).multiplyScalar(UNIT_SCALE).add(a)
+      scale = scale.clone().multiplyScalar(UNIT_SCALE)
+    }
     m.compose(pos, quat, scale)
     p.mesh.setMatrixAt(p.n, m)
     p.mesh.setColorAt(p.n, c.setHex(hex))
@@ -1026,6 +1032,7 @@ export class Renderer3D {
     const yaw = (heading) => new THREE.Quaternion().setFromAxisAngle(UP, -heading)
 
     for (const e of game.enemies) {
+      this.anchor = new THREE.Vector3(e.x, e.z, e.y)
       const hit = e.flash > 0
       const bob = Math.abs(Math.sin(e.walk)) * 0.05
       if (e.type === 'ram') {
@@ -1055,7 +1062,7 @@ export class Renderer3D {
       const big = e.type === 'brute'
       const h = big ? 0.6 : 0.48
       const body = hit ? 0xffffff : C[e.type]
-      this.figure(e.x, e.y, e.z + bob, e.r * 0.8, h, body, big ? C.helmet : e.type === 'bowman' ? 0x33442a : C.skin)
+      this.figure(e.x, e.y, e.z + bob, (e.r / UNIT_SCALE) * 0.8, h, body, big ? C.helmet : e.type === 'bowman' ? 0x33442a : C.skin)
       const swing = e.attacking ? Math.sin(e.walk * 2) * 0.5 : 0
       const reach = big ? 0.42 : 0.34
       const hz = e.z + h * 0.6 + bob
@@ -1072,6 +1079,7 @@ export class Renderer3D {
       const z = w.minGround(i) + 0.45
       this.put('box', new THREE.Vector3(x, z, y), new THREE.Quaternion(), alongX ? new THREE.Vector3(0.5, 0.09, 0.2) : new THREE.Vector3(0.2, 0.09, 0.5), 0x4a4038)
     }
+    this.anchor = null
     for (const l of game.ladders) {
       const g = game.ladderGeom(l)
       this.ladder([g.fx, g.fy, g.fz], [g.tx, g.ty, g.tz])
@@ -1081,16 +1089,43 @@ export class Renderer3D {
       const [dx, dy] = f.dir
       this.ladder([f.x + dx * 0.55, f.y + dy * 0.55, z], [f.x - dx * 0.55, f.y - dy * 0.55, z])
     }
+    // Oil cauldrons and rock buckets on the walls; earth thrown into moats.
+    const w = game.world
+    for (let i = 0; i < w.tiles.length; i++) {
+      const t = w.tiles[i]
+      if (!t.oil && !t.rocks && !(t.type === 'moat' && t.fill > 0)) continue
+      const cx = (i % w.w) + 0.5
+      const cy = ((i / w.w) | 0) + 0.5
+      const q = new THREE.Quaternion()
+      if (t.type === 'moat') {
+        const f = Math.min(1, t.fill / MOAT.fill)
+        this.put('disc', new THREE.Vector3(cx, -0.06, cy), q, new THREE.Vector3(0.15 + f * 0.35, 0.03, 0.15 + f * 0.35), 0x68523a)
+        continue
+      }
+      if (t.oil) {
+        const z = w.surfaceAt(i, cx - 0.18, cy - 0.12)
+        this.put('disc', new THREE.Vector3(cx - 0.18, z + 0.09, cy - 0.12), q, new THREE.Vector3(0.12, 0.18, 0.12), 0x36322e)
+        if (!t.oilUsed) this.put('disc', new THREE.Vector3(cx - 0.18, z + 0.185, cy - 0.12), q, new THREE.Vector3(0.1, 0.01, 0.1), 0x96601a)
+      }
+      if (t.rocks) {
+        const z = w.surfaceAt(i, cx + 0.16, cy + 0.12)
+        this.put('box', new THREE.Vector3(cx + 0.17, z + 0.07, cy + 0.13), q, new THREE.Vector3(0.24, 0.14, 0.24), 0x70502e)
+        if (!t.rocksUsed)
+          for (const [ox, oy] of [[0.11, 0.08], [0.21, 0.1], [0.15, 0.18]]) this.put('ball', new THREE.Vector3(cx + ox, z + 0.18, cy + oy), q, new THREE.Vector3(0.05, 0.05, 0.05), 0x8d877c)
+      }
+    }
     // The lord on the keep roof, crowned.
     const k = game.world.keep
     const lx = k.x + 2.35
     const ly = k.y + 2.3
     const lz = KEEP.height
+    this.anchor = new THREE.Vector3(lx, lz, ly)
     const struck = k.inside > 0 && Math.sin(t * 20) > 0.6
     this.figure(lx, ly, lz, 0.13, 0.36, struck ? 0xffffff : C.lord, C.skin)
     this.put('disc', new THREE.Vector3(lx, lz + 0.5, ly), new THREE.Quaternion(), new THREE.Vector3(0.07, 0.05, 0.07), C.crown)
 
     for (const a of game.archers) {
+      this.anchor = new THREE.Vector3(a.x, a.z, a.y)
       const walking = a.path.length > 0
       const bob = walking ? Math.abs(Math.sin(t * 12 + a.id)) * 0.04 : 0
       this.figure(a.x, a.y, a.z + bob, 0.11, 0.3, a.flash > 0 ? 0xffffff : C.player, C.skin)
@@ -1098,8 +1133,9 @@ export class Renderer3D {
     }
 
     for (const s of game.swordsmen) {
+      this.anchor = new THREE.Vector3(s.x, s.z, s.y)
       const bob = Math.abs(Math.sin(s.walk)) * 0.04
-      this.figure(s.x, s.y, s.z + bob, s.r * 0.8, 0.48, s.flash > 0 ? 0xffffff : C.player, C.helmet)
+      this.figure(s.x, s.y, s.z + bob, (s.r / UNIT_SCALE) * 0.8, 0.48, s.flash > 0 ? 0xffffff : C.player, C.helmet)
       const h = s.heading
       const swing = s.fighting ? Math.sin(s.walk * 2) * 0.6 : 0.3
       const hz = s.z + 0.32 + bob
@@ -1111,6 +1147,7 @@ export class Renderer3D {
       this.put('disc', new THREE.Vector3(sx, s.z + 0.3 + bob, sy), q, new THREE.Vector3(0.12, 0.03, 0.12), C.shield)
     }
 
+    this.anchor = null
     for (const p of game.projectiles) {
       if (p.kind === 'boulder') {
         this.put('ball', new THREE.Vector3(p.x, p.z, p.y), new THREE.Quaternion(), new THREE.Vector3(0.14, 0.14, 0.14), C.boulder)

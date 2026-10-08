@@ -12,7 +12,7 @@ import { loadFlora } from './flora.js'
 // Ground textures load in the background; both renderers repaint when ready.
 loadTerrain()
 loadFlora()
-import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, waveComposition } from './config.js'
+import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, DROPS, RENOWN, waveComposition } from './config.js'
 
 const ICONS = {
   look: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>',
@@ -40,6 +40,8 @@ const ICONS = {
   fsOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>',
   stair: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 21h18V4h-4v4.25h-4.5v4.25H8v4.25H3z"/></svg>',
   feedback: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M12 8v3M12 13.5v.01"/></svg>',
+  oil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h14l-1.5 9a2 2 0 0 1-2 1.7h-7a2 2 0 0 1-2-1.7z"/><path d="M3 9h18M9 5c0-1.2 1-1.2 1-2.4M14 5c0-1.2 1-1.2 1-2.4"/></svg>',
+  rocks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 11h16l-1.5 9h-13z"/><circle cx="8.5" cy="8" r="2.5"/><circle cx="14.5" cy="7.5" r="3"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
 }
 
@@ -57,6 +59,8 @@ const TOOL_LABELS = {
   swordsman: 'Swordsman',
   upgrade: 'Upgrade',
   hoard: 'Hoarding',
+  oil: 'Boiling oil',
+  rocks: 'Rock bucket',
   orders: 'Orders',
   settle: 'Village',
   trap: 'Spikes',
@@ -72,6 +76,8 @@ const TOOL_HINTS = {
   stair: 'Build against a wall, tower or keep so swordsmen can climb up.',
   swordsman: 'Guards a spot. Tap a wall or the keep to post one up top.',
   hoard: 'Wooden shields on a stone wall, gate or tower. Archers behind it are much safer.',
+  oil: 'A cauldron on a wall: scalds everyone at its foot, once per wave.',
+  rocks: 'Stones on a wall: crush a ladder\'s climbers or the attackers below, once per wave.',
   orders: 'Tell swordsmen which area to cover.',
   upgrade: 'Palisade to stone, stone to thick; repairs damage.',
   settle: 'Build the houses and farms the village asks for.',
@@ -83,7 +89,7 @@ const TOOL_HINTS = {
 const GROUPS = [
   { id: 'look', tools: ['look'] },
   { id: 'walls', tools: ['palisade', 'wall', 'thick', 'gate', 'stair', 'hoard'] },
-  { id: 'defend', tools: ['tower', 'archer', 'swordsman', 'orders'] },
+  { id: 'defend', tools: ['tower', 'archer', 'swordsman', 'orders', 'oil', 'rocks'] },
   { id: 'obstacles', tools: ['moat', 'pikes', 'trap'] },
   { id: 'improve', tools: ['settle', 'upgrade'] },
   { id: 'demolish', tools: ['demolish'] },
@@ -91,7 +97,7 @@ const GROUPS = [
 const KEYS = ['look', 'palisade', 'wall', 'thick', 'gate', 'tower', 'archer', 'swordsman', 'orders', 'settle']
 const PLACE_ON_RELEASE = new Set(['tower', 'archer', 'swordsman', 'gate'])
 const costOf = (id) =>
-  id === 'archer' ? ARCHER.cost : id === 'swordsman' ? SWORDSMAN.cost : id === 'hoard' ? HOARDING.cost : STRUCTURES[id]?.cost
+  id === 'archer' ? ARCHER.cost : id === 'swordsman' ? SWORDSMAN.cost : id === 'hoard' ? HOARDING.cost : DROPS[id] ? DROPS[id].cost : STRUCTURES[id]?.cost
 
 const $ = (id) => document.getElementById(id)
 
@@ -137,7 +143,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && window.top
   navigator.serviceWorker.register('./sw.js').catch(() => {})
 }
 
-window.htk = { game, audio, camera, setGfx: (m) => setGfx(m) }
+window.htk = { get game() { return game }, audio, camera, setGfx: (m) => setGfx(m), restart: (s) => restart(s) }
 // Browsers only start audio from a user gesture, and they disagree on
 // which events count, so try on all of them.
 for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'])
@@ -224,9 +230,9 @@ function paint(i) {
     game.demolish(i)
   } else if (tool === 'upgrade') {
     if (!game.place(i, 'upgrade') && game.upgradeInfo(i) && game.gold < game.upgradeInfo(i).cost) warnGold()
-  } else if (tool === 'settle' || tool === 'hoard') {
+  } else if (tool === 'settle' || tool === 'hoard' || DROPS[tool]) {
     const t = game.world.tiles[i]
-    const cost = tool === 'hoard' ? HOARDING.cost : STRUCTURES[t.plot]?.cost
+    const cost = tool === 'hoard' ? HOARDING.cost : DROPS[tool] ? DROPS[tool].cost : STRUCTURES[t.plot]?.cost
     if (!game.place(i, tool) && cost && game.gold < cost) warnGold()
   } else if (STRUCTURES[tool]) {
     const over = game.layOverCost(i, tool)
@@ -451,6 +457,7 @@ function refreshHud() {
     frac > 0.5 ? 'linear-gradient(#7fdc63,#4c9c3a)' : frac > 0.25 ? 'linear-gradient(#f0d060,#b8922a)' : 'linear-gradient(#ef6a4c,#a8301c)'
 
   $('archers').textContent = game.archers.length
+  $('renown').textContent = game.renown
   for (const b of toolbar.children) {
     const g = GROUPS.find((g) => g.id === b.dataset.group)
     const id = ui.groupChoice[g.id] || g.tools[0]
@@ -512,6 +519,14 @@ function toolHint() {
     }
     case 'hoard':
       return `<b>Hoarding</b> (${HOARDING.cost}): tap stone walls, gates, towers<br>Archers behind it take ${Math.round(HOARDING.cover * 100)}% of arrow damage`
+    case 'oil':
+      return `<b>Boiling oil</b> (${DROPS.oil.cost}): tap stone walls, gates, towers<br>Pours once per wave on a crowd, a ram, or anyone battering it`
+    case 'rocks':
+      return `<b>Rock bucket</b> (${DROPS.rocks.cost}): tap stone walls, gates, towers<br>Drops once per wave on ladder climbers (knocking the ladder down) or attackers below`
+    case 'moat':
+      return '<b>Moat</b>: rams can\'t cross until soldiers wading in have filled it.<br>Leave the keep a dry way out to the edge of the map.'
+    case 'trap':
+      return `<b>Spikes</b>: wear down as enemies cross; a ram smashes them.<br>Repair worn ones with Upgrade.`
     case 'orders': {
       const n = ui.orders.selected.size
       if (!n) return '<b>Orders</b>: tap a swordsman, or drag a box around several, to select'
@@ -525,6 +540,19 @@ function toolHint() {
       }
       return ''
   }
+}
+
+// Renown at the end of a game, against the best so far on this device.
+function renownLine(score) {
+  let best = 0
+  try {
+    best = Number(localStorage.getItem('htk-best') || 0)
+    if (score > best) localStorage.setItem('htk-best', String(score))
+  } catch {
+    // ignore
+  }
+  const record = score > best ? ' <b>New best!</b>' : best ? ` Best: ${best}.` : ''
+  return `<p>Renown: <b>${score}</b>.${record}</p>`
 }
 
 let bannerTimer = 0
@@ -564,12 +592,14 @@ const HELP = `
     <li><b>Gates and swordsmen</b>: swordsmen guard the spot you place them and charge enemies that come close. They walk through gates, which are barred while attackers are at them; enemies have to break gates down. Send them out to kill catapults. Drop a gate into an existing wall for the difference in price.</li>
     <li><b>Stairs</b>: build them against a wall, tower or the keep and swordsmen can climb up to fight raiders coming over on ladders. Post swordsmen on the keep (it has its own stairs inside the door) to guard your lord.</li>
     <li><b>Upgrade</b>: tap a palisade to make it stone, or stone to make it thick. Tap damaged thick walls, towers and gates to repair them.</li>
-    <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through, pikes hurt anyone attacking them, and spikes hurt anyone walking over them.</li>
+    <li><b>Moats, pikes and spikes</b>: moats slow anyone wading through and stop rams until soldiers fill them in (always leave the keep a dry way out); pikes hurt anyone attacking them; spikes hurt anyone walking over them but wear out, and a ram smashes them.</li>
     <li><b>Enemies</b>: raiders and brutes hack at gates, palisades and pikes. Pairs of raiders carry <b>ladders</b> to stone walls and climb over; archers on or next to that wall push the ladder off. Rams smash gates and stone, bowmen shoot your troops, and catapults throw boulders from beyond archer range until they run out, then fall apart.</li>
     <li><b>Armies</b>: each wave arrives at once, an army massing at each red banner and marching together until it nears your castle. Raiders break off to sack village buildings they can reach without breaking anything, so a village outside your walls is easy pickings.</li>
     <li><b>The keep and your lord</b>: attackers who reach the keep batter its door, then fight their way up its narrow stair, two at a time, to your lord. His guard fights back, but a crowd will wear him down. Masons mend the door after every wave.</li>
-    <li><b>Terrain</b>: rivers and lakes block the way except at fords; marsh and fords slow enemies down. Walls, gates, towers and pikes can be built across marsh, water, trees and rocks, but cost more there.</li>
+    <li><b>Terrain</b>: rivers, lakes and the sea block the way except at fords; mountains can't be crossed or built through; forests block the way until you build through them; marsh and fords slow enemies down. Walls, gates, towers and pikes can be built across marsh, water, trees and rocks, but cost more there.</li>
     <li><b>Village</b>: after each wave the village stakes out plots where it feels safe. Tap a plot to build it; it pays gold after every wave.</li>
+    <li><b>Renown</b> is your score: ${RENOWN.wave} for each wave you hold, plus every wave ${RENOWN.cottage} per cottage, ${RENOWN.farm} per farm and ${RENOWN.market} per market still standing. A big, safe village is how you win big.</li>
+    <li><b>Oil and rocks</b>: a cauldron of boiling oil or a bucket of rocks on a wall lets go once per wave: oil on a crowd or a ram at its foot, rocks on ladder climbers (knocking the ladder down) or attackers below.</li>
     <li><b>Remove</b>: full refund between waves, half during an attack.</li>
   </ul>
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
@@ -869,7 +899,7 @@ function handleEvents() {
       const plots = ev.plots?.length
         ? `<br>The village staked out ${listKinds(ev.plots)}. Tap a plot to build it.`
         : ''
-      banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold${village}.${plots}</small>`, plots ? 5000 : 3400)
+      banner(`Wave ${ev.wave} repelled!<small>+${ev.bonus} gold${village} · +${ev.renown} renown.${plots}</small>`, plots ? 5000 : 3400)
       autosave()
       setView('top')
       audio.play('waveEnd')
@@ -881,14 +911,14 @@ function handleEvents() {
     } else if (ev.type === 'won') {
       audio.play('victory')
       audio.setMusic('build')
-      modal('Victory!', `<p>Your keep stood against all <b>${TOTAL_WAVES}</b> waves.</p>`, [
+      modal('Victory!', `<p>Your keep stood against all <b>${TOTAL_WAVES}</b> waves.</p>${renownLine(ev.renown)}`, [
         { label: 'Keep looking' },
         { label: 'New map', primary: true, run: () => restart(randomSeed()) },
       ])
     } else if (ev.type === 'lost') {
       audio.play('defeat')
       audio.setMusic('build')
-      modal('Your lord has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>`, [
+      modal('Your lord has fallen', `<p>You held out until wave <b>${ev.wave}</b>.</p>${renownLine(ev.renown)}`, [
         { label: 'Look around' },
         { label: 'Start over', run: () => restart() },
         {

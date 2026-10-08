@@ -9,8 +9,9 @@ import hillUrl from './tex/hill.jpg'
 import marshUrl from './tex/marsh.jpg'
 import earthUrl from './tex/earth.jpg'
 import bedUrl from './tex/bed.jpg'
+import cliffUrl from './tex/rock.jpg'
 
-const URLS = { grass: grassUrl, grassLight: grassLightUrl, meadow: meadowUrl, hill: hillUrl, marsh: marshUrl, earth: earthUrl, bed: bedUrl }
+const URLS = { grass: grassUrl, grassLight: grassLightUrl, meadow: meadowUrl, hill: hillUrl, marsh: marshUrl, earth: earthUrl, bed: bedUrl, cliff: cliffUrl }
 
 // Pixels per tile in the painted ground, and how many tiles one texture
 // image spans before it repeats.
@@ -209,6 +210,9 @@ export function paintTerrain(world, { water = true, shade = false } = {}) {
   const terr = (name) => (t) => t.terrain === name && t.type !== 'moat'
   layer('hill', tileMask(world, 0.3, terr('hill'), 2), 0.9)
   layer('marsh', tileMask(world, 0.2, terr('marsh'), 3), 1)
+  // Sandy beaches along the sea, bare rock up the mountains.
+  layer('bed', tileMask(world, 0.25, (t) => t.terrain === 'beach' || t.terrain === 'water', 9), 1)
+  layer('cliff', tileMask(world, 0.3, terr('mountain'), 10), 1)
   // River and lake beds, with a band of bare earth along the banks.
   const wet = (t) => t.terrain === 'water' || t.terrain === 'shallows'
   layer('earth', tileMask(world, 0.45, (t) => wet(t) || t.type === 'moat', 4), 0.8)

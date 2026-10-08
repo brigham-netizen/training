@@ -1,4 +1,4 @@
-import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN } from './config.js'
+import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN, UNIT_SCALE, MOAT } from './config.js'
 import { stoneTexture, flagstoneTexture, woodTexture, TEXTURE_PX, TEXTURE_LUM } from './textures.js'
 import { paintTerrain, terrainReady, GROUND_PX } from './terrain.js'
 import { floraReady, floraSprites, treeSpec, rockSpec } from './flora.js'
@@ -104,6 +104,26 @@ export class Renderer {
     this.canvas.style.height = `${h}px`
     this.dpr = dpr
     this.cam.setViewport(w, h)
+  }
+
+  // Draw a unit at UNIT_SCALE about its own position: a stand-in camera
+  // that shrinks every point (and pixel size) toward the unit.
+  atUnitScale(u, fn) {
+    const real = this.cam
+    const s = UNIT_SCALE
+    const proxy = Object.create(real)
+    proxy.k = real.k * s
+    proxy.P = (x, y, z = 0) => {
+      real.P(u.x + (x - u.x) * s, u.y + (y - u.y) * s, u.z + (z - u.z) * s)
+      proxy.sx = real.sx
+      proxy.sy = real.sy
+    }
+    this.cam = proxy
+    try {
+      fn()
+    } finally {
+      this.cam = real
+    }
   }
 
   // ---- primitives ---------------------------------------------------------
@@ -375,15 +395,17 @@ export class Renderer {
       this.minFoot = world.minGround(i)
       if (t.rock) this.drawFoundation(x, y, ground, this.footZ, t.v)
       this.drawTile(world, i, x, y, ground, game.time)
+      if (t.oil || t.rocks) this.drawDrops(world, i, x, y)
       this.footZ = null
       const here = units.get(i)
       if (!here) continue
       here.sort((a, b) => cam.depth(a.u.x, a.u.y) - cam.depth(b.u.x, b.u.y))
-      for (const { u, kind } of here) {
-        if (kind === 0) this.drawEnemy(u, game.time)
-        else if (kind === 1) this.drawArcher(u, game.time)
-        else this.drawSwordsman(u)
-      }
+      for (const { u, kind } of here)
+        this.atUnitScale(u, () => {
+          if (kind === 0) this.drawEnemy(u, game.time)
+          else if (kind === 1) this.drawArcher(u, game.time)
+          else this.drawSwordsman(u)
+        })
     }
 
     for (const p of game.projectiles) {
@@ -951,7 +973,7 @@ export class Renderer {
         if (i === k.door) this.drawKeepDoor(k, x, y, z)
         if (x === k.x + 1 && y === k.y + 1) {
           this.flag(x + 0.5, y + 0.5, z + h, time)
-          this.drawLord(x + 0.85, y + 0.8, z + h, k)
+          this.atUnitScale({ x: x + 0.85, y: y + 0.8, z: z + h }, () => this.drawLord(x + 0.85, y + 0.8, z + h, k))
         }
         break
       }
@@ -960,6 +982,13 @@ export class Renderer {
         break
       case 'stair':
         this.drawStair(world, i, x, y)
+        break
+      case 'moat':
+        if (t.fill > 0) {
+          // Earth and brush thrown in by the attackers.
+          const f = Math.min(1, t.fill / MOAT.fill)
+          this.ellipse(x + 0.5, y + 0.5, 0.02, 0.15 + f * 0.35, `rgba(104,82,52,${(0.4 + f * 0.5).toFixed(3)})`)
+        }
         break
       case 'gate':
         this.drawGate(world, i, x, y, z, f)
@@ -1080,6 +1109,63 @@ export class Renderer {
       // Taller when seen from the side, a rounder footprint from above.
       const h = w * (0.62 + (1 - cam.sinE) * 0.35 + r.height * 0.3)
       ctx.drawImage(sp.rocks[r.variant], cam.sx - w / 2, cam.sy - h * 0.82, w, h)
+    }
+  }
+
+  // Oil cauldron and rock bucket on top of a wall (empty once used).
+  drawDrops(world, i, x, y) {
+    const t = world.tiles[i]
+    const cx = x + 0.5
+    const cy = y + 0.5
+    if (t.oil) {
+      const z = world.surfaceAt(i, cx - 0.18, cy - 0.12)
+      this.box(cx - 0.3, cy - 0.24, cx - 0.06, cy, z, z + 0.18, [54, 50, 46], [70, 66, 60], 0, true)
+      if (!t.oilUsed) {
+        this.ellipse(cx - 0.18, cy - 0.12, z + 0.19, 0.1, 'rgb(150,96,24)')
+        this.ball(cx - 0.18, cy - 0.12, z + 0.32 + Math.sin(Date.now() / 300 + x) * 0.03, 0.05, 'rgba(230,230,225,0.45)')
+      }
+    }
+    if (t.rocks) {
+      const z = world.surfaceAt(i, cx + 0.16, cy + 0.12)
+      this.box(cx + 0.04, cy, cx + 0.3, cy + 0.26, z, z + 0.14, [112, 80, 46], [138, 100, 60], 0, true)
+      if (!t.rocksUsed)
+        for (const [ox, oy] of [[0.11, 0.08], [0.21, 0.1], [0.15, 0.18]]) this.ball(cx + ox, cy + oy, z + 0.19, 0.05, '#8d877c', '#3a352e')
+    }
+  }
+
+  // A flight of stone steps rising to the rampart it's built against.
+  drawStair(world, i, x, y) {
+    const f = world.stairFace(i)
+    const cx = x + 0.5
+    const cy = y + 0.5
+    const n = 4
+    let dx = 0
+    let dy = 1
+    let top = world.elev(i) + 0.4
+    if (f >= 0) {
+      dx = (f % world.w) - x
+      dy = ((f / world.w) | 0) - y
+      top = world.surfaceAt(f, cx + dx * 0.5, cy + dy * 0.5)
+    }
+    const c = COLORS.wall
+    const steps = []
+    for (let k = 0; k < n; k++) {
+      // Step k spans [a, b] along the climb direction, measured from the far edge.
+      const a = -0.5 + k / n
+      const b = -0.5 + (k + 1) / n
+      const hw = 0.3
+      const x0 = dx ? cx + Math.min(a * dx, b * dx) : cx - hw
+      const x1 = dx ? cx + Math.max(a * dx, b * dx) : cx + hw
+      const y0 = dy ? cy + Math.min(a * dy, b * dy) : cy - hw
+      const y1 = dy ? cy + Math.max(a * dy, b * dy) : cy + hw
+      steps.push([x0, y0, x1, y1, (k + 1) / n])
+    }
+    const cam = this.cam
+    steps.sort((p, q) => cam.depth((p[0] + p[2]) / 2, (p[1] + p[3]) / 2) - cam.depth((q[0] + q[2]) / 2, (q[1] + q[3]) / 2))
+    const ground = (px, py) => world.heightAt(px, py)
+    for (const [x0, y0, x1, y1, h] of steps) {
+      const g = world.heightAt((x0 + x1) / 2, (y0 + y1) / 2)
+      this.box(x0, y0, x1, y1, ground, g + (top - g) * h, c.side, c.top, 0, true, 'stone')
     }
   }
 
@@ -1430,7 +1516,7 @@ export class Renderer {
       this.drawCatapult(e, time)
       return
     }
-    this.ellipse(e.x, e.y, z, e.r * 1.1, 'rgba(0,0,0,0.3)')
+    this.ellipse(e.x, e.y, z, (e.r / UNIT_SCALE) * 1.1, 'rgba(0,0,0,0.3)')
     const hit = e.flash > 0
     if (e.type === 'ram') {
       const side = hit ? [255, 255, 255] : COLORS.ram
@@ -1463,8 +1549,8 @@ export class Renderer {
     const big = e.type === 'brute'
     if (e.type === 'bowman') {
       this.bow(e.x, e.y, z, e.heading, '#3b2a18')
-      this.ball(e.x, e.y, z + 0.28 + bob, e.r, rgb(color), 'rgba(20,10,5,0.7)')
-      this.ball(e.x, e.y, z + 0.52 + bob, e.r * 0.6, rgb(scale(COLORS.bowman, 0.7)), 'rgba(20,10,5,0.6)')
+      this.ball(e.x, e.y, z + 0.28 + bob, e.r / UNIT_SCALE, rgb(color), 'rgba(20,10,5,0.7)')
+      this.ball(e.x, e.y, z + 0.52 + bob, (e.r / UNIT_SCALE) * 0.6, rgb(scale(COLORS.bowman, 0.7)), 'rgba(20,10,5,0.6)')
       return
     }
     // Weapon: swings while attacking, points ahead while marching.
@@ -1475,8 +1561,8 @@ export class Renderer {
       e.x + Math.cos(e.heading + swing) * reach, e.y + Math.sin(e.heading + swing) * reach, z + 0.5 + bob + swing * 0.3,
       big ? '#3b3b3b' : '#cfcfcf', Math.max(1.5, cam.k * 0.06),
     )
-    this.ball(e.x, e.y, z + 0.3 + bob, e.r, rgb(color), 'rgba(20,10,5,0.7)')
-    this.ball(e.x, e.y, z + 0.62 + bob, e.r * 0.55, big ? '#777' : rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
+    this.ball(e.x, e.y, z + 0.3 + bob, e.r / UNIT_SCALE, rgb(color), 'rgba(20,10,5,0.7)')
+    this.ball(e.x, e.y, z + 0.62 + bob, (e.r / UNIT_SCALE) * 0.55, big ? '#777' : rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
   }
 
   drawArcher(a, time) {
@@ -1503,7 +1589,7 @@ export class Renderer {
     const { cam } = this
     const z = s.z
     const bob = Math.abs(Math.sin(s.walk)) * 0.05
-    this.ellipse(s.x, s.y, z, s.r * 1.1, 'rgba(0,0,0,0.3)')
+    this.ellipse(s.x, s.y, z, (s.r / UNIT_SCALE) * 1.1, 'rgba(0,0,0,0.3)')
     const swing = s.fighting ? Math.sin(s.walk * 2) * 0.5 : 0.3
     const h = s.heading
     // Sword on the right hand, shield on the left.
@@ -1512,9 +1598,9 @@ export class Renderer {
       s.x + Math.cos(h + swing) * 0.42, s.y + Math.sin(h + swing) * 0.42, z + 0.5 + bob,
       '#dfe4ea', Math.max(1.5, cam.k * 0.06),
     )
-    this.ball(s.x, s.y, z + 0.3 + bob, s.r, s.flash > 0 ? '#fff' : rgb(COLORS.player), '#162440')
+    this.ball(s.x, s.y, z + 0.3 + bob, s.r / UNIT_SCALE, s.flash > 0 ? '#fff' : rgb(COLORS.player), '#162440')
     this.ball(s.x + Math.cos(h - 1.1) * 0.17, s.y + Math.sin(h - 1.1) * 0.17, z + 0.32 + bob, 0.11, rgb(COLORS.shield), '#4a3a14')
-    this.ball(s.x, s.y, z + 0.6 + bob, s.r * 0.55, '#9aa3ad', '#2a2f36')
+    this.ball(s.x, s.y, z + 0.6 + bob, (s.r / UNIT_SCALE) * 0.55, '#9aa3ad', '#2a2f36')
   }
 
   drawCatapult(e, time) {
@@ -1556,6 +1642,44 @@ export class Renderer {
   drawEffect(fx) {
     const { ctx, cam } = this
     const k = fx.t / fx.life
+    if (fx.type === 'oil') {
+      // A pour of boiling oil spreading into a steaming pool.
+      const pour = Math.min(1, k * 3)
+      cam.P(fx.x, fx.y, fx.z)
+      const x0 = cam.sx
+      const y0 = cam.sy
+      cam.P(fx.x, fx.y, 0)
+      ctx.strokeStyle = `rgba(70,46,14,${(0.85 * (1 - k)).toFixed(3)})`
+      ctx.lineWidth = Math.max(2, cam.k * 0.18)
+      ctx.beginPath()
+      ctx.moveTo(x0, y0)
+      ctx.lineTo(x0 + (cam.sx - x0) * pour, y0 + (cam.sy - y0) * pour)
+      ctx.stroke()
+      if (k > 0.2) {
+        const r = fx.size * Math.min(1, (k - 0.2) * 2.5)
+        this.ellipse(fx.x, fx.y, 0.02, r, `rgba(52,34,10,${(0.6 * (1 - k)).toFixed(3)})`)
+        for (let n = 0; n < 5; n++) {
+          const a = n * 1.3 + fx.x
+          cam.P(fx.x + Math.cos(a) * r * 0.6, fx.y + Math.sin(a) * r * 0.6, 0.2 + k * 0.9)
+          ctx.beginPath()
+          ctx.arc(cam.sx, cam.sy, Math.max(1, cam.k * 0.12 * (0.5 + k)), 0, Math.PI * 2)
+          ctx.fillStyle = `rgba(235,235,230,${(0.35 * (1 - k)).toFixed(3)})`
+          ctx.fill()
+        }
+      }
+      return
+    }
+    if (fx.type === 'rocks') {
+      // Stones tumbling from the wall top, then dust where they land.
+      const f = Math.min(1, k * 2.2)
+      for (let n = 0; n < 4; n++) {
+        const ox = Math.cos(n * 2.1) * 0.18
+        const oy = Math.sin(n * 2.1) * 0.18
+        const z = (fx.from || 1) * (1 - f * f) + 0.08
+        this.ball(fx.x + ox, fx.y + oy, z, 0.07 + n * 0.012, '#8d877c', '#3a352e')
+      }
+      if (f < 1) return
+    }
     for (let n = 0; n < 4; n++) {
       const a = n * 1.7 + fx.x * 3
       const r = fx.size * (0.2 + k * 0.6)
@@ -1639,8 +1763,8 @@ export class Renderer {
     const k = world.keep
     if (k.doorHp > 0 && k.doorHp < k.doorMax) this.hpBar(k.x + 1.5, k.y + 3.05, 1.35, k.doorHp / k.doorMax, 0.6)
     if (k.inside > 0) this.insideBadge(k)
-    for (const e of game.enemies) this.hpBar(e.x, e.y, e.z + 1.0, e.hp / e.maxHp, 0.5)
-    for (const u of [...game.archers, ...game.swordsmen]) this.hpBar(u.x, u.y, u.z + 0.95, u.hp / u.maxHp, 0.4)
+    for (const e of game.enemies) this.hpBar(e.x, e.y, e.z + 1.0 * UNIT_SCALE, e.hp / e.maxHp, 0.45)
+    for (const u of [...game.archers, ...game.swordsmen]) this.hpBar(u.x, u.y, u.z + 0.95 * UNIT_SCALE, u.hp / u.maxHp, 0.35)
   }
 
   // How many attackers are inside the keep, fighting their way up.

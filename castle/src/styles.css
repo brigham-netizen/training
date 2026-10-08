@@ -406,6 +406,29 @@ button {
   height: 16px;
   color: #8fb0ea;
 }
+#renown-pill svg {
+  width: 16px;
+  height: 16px;
+  color: var(--gold);
+}
+/* The lord's bar sits in the top row after the pills, so they never overlap. */
+.top-left .keep-bar {
+  width: min(20vw, 220px);
+  margin-top: 7px;
+}
+@media (max-width: 900px) {
+  .top-left {
+    gap: 6px;
+  }
+  .pill {
+    padding: 0 9px;
+    gap: 5px;
+    font-size: 14px;
+  }
+  #wave-pill .lbl {
+    display: none;
+  }
+}
 .tool.group {
   position: relative;
 }

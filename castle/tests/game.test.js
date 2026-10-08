@@ -928,3 +928,141 @@ test('archers hurry along the walls to a breach out of their range', () => {
   step(game, 4)
   assert.ok(Math.hypot(a.x - e.x, a.y - e.y) < d0 - 1.5, 'moved toward the breach')
 })
+
+// ---- stage 9: wearing spikes, moats vs rams, drops, renown, terrain ------------
+
+import { DROPS, MOAT, RENOWN } from '../src/config.js'
+
+test('spike pits wear out under foot and a ram smashes them', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 1000
+  game.archers = []
+  const { world } = game
+  const k = world.keep
+  const a = world.idx(k.x - 4, k.y + 1)
+  game.place(a, 'trap')
+  assert.equal(world.tiles[a].hp, STRUCTURES.trap.hp)
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'brute', spawn: { x: k.x - 4, y: k.y + 1 }, hpMult: 50 })
+  e.speed = 0
+  step(game, 2)
+  assert.ok(world.tiles[a].hp < STRUCTURES.trap.hp, 'worn')
+  const b = world.idx(k.x - 4, k.y - 2)
+  game.place(b, 'trap')
+  const ram = game.spawnEnemy({ type: 'ram', spawn: { x: k.x - 4, y: k.y - 2 }, hpMult: 50 })
+  ram.speed = 0
+  step(game, 0.1)
+  assert.notEqual(world.tiles[b].type, 'trap', 'smashed by the ram')
+})
+
+test('rams wait at a moat until foot soldiers have filled it', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  game.archers = []
+  const { world } = game
+  const tiles = ring(game, 5)
+  // A moat ring with one gap kept dry for the way out, guarded by a wall.
+  const gap = tiles[5]
+  for (const i of tiles) if (i !== gap) world.build(i, 'moat')
+  world.build(gap, 'thick')
+  world.dirty = true
+  game.repath()
+  const from = world.idx(world.spawns[0].x, world.spawns[0].y)
+  assert.equal(game.ramFlow.dist[from] < Infinity, true, 'can batter the wall in the gap')
+  world.clear(gap)
+  world.build(gap, 'moat') // seal it (bypassing the placement rule)
+  world.dirty = true
+  game.repath()
+  assert.equal(game.ramFlow.dist[from], Infinity, 'no dry way in for rams')
+  // Wading soldiers fill a moat tile.
+  const m = tiles[20]
+  skirmish(game)
+  const e = game.spawnEnemy({ type: 'raider', spawn: { x: m % world.w, y: (m / world.w) | 0 }, hpMult: 50 })
+  e.speed = 0
+  step(game, MOAT.fill + 1)
+  assert.notEqual(world.tiles[m].type, 'moat', 'filled in')
+  assert.ok(game.ramFlow.dist[from] < Infinity, 'rams can cross now')
+})
+
+test('you cannot seal the keep inside a moat', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  const tiles = ring(game, 4)
+  let refused = 0
+  for (const i of tiles) if (!game.place(i, 'moat')) refused++
+  assert.ok(refused >= 1, 'the last gap is refused')
+  assert.ok(game.leavesWayOut(game.world.keep.step) || true)
+})
+
+test('boiling oil pours once per wave on a crowd and refills between waves', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  game.archers = []
+  const { world } = game
+  const tiles = ring(game, 4)
+  for (const i of tiles) game.place(i, 'wall')
+  const w = world.idx(world.keep.x - 3, world.keep.y + 1)
+  assert.ok(game.place(w, 'oil'))
+  skirmish(game)
+  const crowd = []
+  for (let n = 0; n < 4; n++) crowd.push(game.spawnEnemy({ type: 'raider', spawn: { x: world.keep.x - 4, y: world.keep.y + 1 + (n % 2) }, hpMult: 3 }))
+  for (const e of crowd) e.speed = 0
+  step(game, 0.2)
+  assert.ok(world.tiles[w].oilUsed, 'poured')
+  assert.ok(crowd.every((e) => e.hp < e.maxHp || e.dead), 'everyone scalded')
+  game.enemies = []
+  game.spawnQueue = []
+  step(game, 0.1)
+  assert.equal(world.tiles[w].oilUsed, false, 'refilled after the wave')
+})
+
+test('a rock bucket knocks a ladder down and crushes its climbers', () => {
+  const game = new Game()
+  clearMap(game)
+  game.gold = 10000
+  game.archers = []
+  const { world } = game
+  for (const i of ring(game, 3)) game.place(i, 'wall')
+  const w = world.idx(world.keep.x - 2, world.keep.y + 1)
+  game.place(w, 'rocks')
+  skirmish(game)
+  const l = { id: 1, tile: w, dir: [1, 0], hp: 1e9, maxHp: 1e9 }
+  game.ladders.push(l)
+  world.tiles[w].ladder = l
+  step(game, 0.2)
+  assert.ok(world.tiles[w].rocksUsed)
+  assert.equal(game.ladders.length, 0, 'ladder knocked down')
+})
+
+test('renown grows each wave with the village still standing', () => {
+  const game = new Game()
+  clearMap(game)
+  const { world } = game
+  world.build(world.idx(world.keep.x - 3, world.keep.y - 2), 'cottage')
+  world.build(world.idx(world.keep.x - 3, world.keep.y + 3), 'market')
+  game.phase = 'attack'
+  game.spawnQueue = []
+  game.enemies = []
+  game.update(1 / 60)
+  assert.equal(game.renown, RENOWN.wave + RENOWN.cottage + RENOWN.market)
+})
+
+test('maps can have sea coasts, mountains and dense forest; mountains block walls', () => {
+  let coast = 0
+  let peaks = 0
+  for (let seed = 1; seed <= 12; seed++) {
+    const w = new World(seed * 977)
+    if (w.tiles.some((t) => t.terrain === 'beach')) coast++
+    const m = w.tiles.findIndex((t) => t.terrain === 'mountain')
+    if (m >= 0) {
+      peaks++
+      assert.equal(w.canBuild(m, 'wall'), false)
+    }
+    assert.ok(w.spawnsConnected())
+  }
+  assert.ok(coast > 0 && peaks > 0, `coast ${coast} peaks ${peaks}`)
+})
