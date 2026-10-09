@@ -1,0 +1,162 @@
+<!doctype html>
+<!-- Converts the Quaternius FBX characters into lean, single-mesh GLBs for
+     the game. Run by scripts/units/build.cjs through a Vite dev server. -->
+<script type="module">
+import * as THREE from 'three'
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { MeshoptSimplifier } from 'meshoptimizer'
+
+// Share of triangles kept when simplifying.
+const RATIO = 0.35
+
+// Clips kept per model, renamed to what the game asks for.
+const MODELS = {
+  Warrior: { idle: 'Idle_Weapon', walk: 'Walk', run: 'Run_Weapon', attack: 'Sword_Attack', death: 'Death' },
+  Ranger: { idle: 'Idle_Weapon', walk: 'Walk', run: 'Run', attack: 'Bow_Attack_Shoot', death: 'Death' },
+  Rogue: { idle: 'Idle', walk: 'Walk', run: 'Run', attack: 'Dagger_Attack', death: 'Death' },
+  Cleric: { idle: 'Idle', walk: 'Walk', run: 'Run_Weapon', attack: 'Staff_Attack', death: 'Death' },
+}
+
+// The body texture fills the left half of a 2:1 atlas; the weapon texture
+// sits in the top-left quarter of the right half.
+const toAtlas = (geo, weapon) => {
+  const uv = geo.attributes.uv
+  for (let i = 0; i < uv.count; i++) {
+    let u = uv.getX(i) - Math.floor(uv.getX(i))
+    let v = uv.getY(i) - Math.floor(uv.getY(i))
+    if (weapon) uv.setXY(i, 0.5 + u * 0.25, 0.5 + v * 0.5)
+    else uv.setXY(i, u * 0.5, v)
+  }
+}
+
+async function convert(name) {
+  const fbx = await new Promise((res, rej) => new FBXLoader().load(`/cmp/${name}.fbx`, res, undefined, rej))
+  fbx.updateMatrixWorld(true)
+  let body = null
+  fbx.traverse((o) => { if (o.isSkinnedMesh) body = o })
+  const bones = body.skeleton.bones
+  const boneIndex = new Map(bones.map((b, i) => [b.name, i]))
+  const toBody = new THREE.Matrix4().copy(body.matrixWorld).invert()
+  const parts = []
+  const uvRange = [Infinity, -Infinity]
+  fbx.traverse((o) => {
+    if (!o.isMesh) return
+    let g = o.geometry.clone()
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k)
+    g = g.index ? g.toNonIndexed() : g
+    g.clearGroups()
+    const uv = g.attributes.uv
+    for (let i = 0; i < uv.count; i++) { uvRange[0] = Math.min(uvRange[0], uv.getX(i), uv.getY(i)); uvRange[1] = Math.max(uvRange[1], uv.getX(i), uv.getY(i)) }
+    const weapon = [].concat(o.material)[0].name.includes('_') && !/^(Warrior|Ranger|Rogue|Cleric)_Texture$/.test([].concat(o.material)[0].name)
+    toAtlas(g, weapon)
+    if (!o.isSkinnedMesh) {
+      // A rigid piece hanging off a bone: move it into the body's space
+      // and bind it wholly to that bone.
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toBody, o.matrixWorld))
+      let b = o.parent
+      while (b && !boneIndex.has(b.name)) b = b.parent
+      const bi = boneIndex.get(b.name)
+      const n = g.attributes.position.count
+      g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Array(n * 4).fill(0).map((_, k) => (k % 4 === 0 ? bi : 0)), 4))
+      g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(new Array(n * 4).fill(0).map((_, k) => (k % 4 === 0 ? 1 : 0)), 4))
+    }
+    parts.push(g)
+  })
+  // Merge everything into one geometry.
+  const total = parts.reduce((s, g) => s + g.attributes.position.count, 0)
+  const merged = new THREE.BufferGeometry()
+  for (const [k, size, Arr] of [['position', 3, Float32Array], ['normal', 3, Float32Array], ['uv', 2, Float32Array], ['skinIndex', 4, Uint16Array], ['skinWeight', 4, Float32Array]]) {
+    const arr = new Arr(total * size)
+    let off = 0
+    for (const g of parts) {
+      const a = g.attributes[k]
+      for (let i = 0; i < a.count; i++) for (let c = 0; c < size; c++) arr[(off + i) * size + c] = a.getComponent(i, c)
+      off += a.count
+    }
+    merged.setAttribute(k, new THREE.BufferAttribute(arr, size))
+  }
+  const welded = mergeVertices(merged, 1e-4)
+  merged.dispose()
+  // Thin the mesh out: the figures are a few dozen pixels tall in the game.
+  await MeshoptSimplifier.ready
+  const src = new Uint32Array(welded.index.array)
+  const target = Math.floor((src.length * RATIO) / 3) * 3
+  const [kept] = MeshoptSimplifier.simplify(src, welded.attributes.position.array, 3, target, 0.02, [])
+  const used = new Map()
+  const newIndex = new Uint32Array(kept.length)
+  for (let i = 0; i < kept.length; i++) {
+    if (!used.has(kept[i])) used.set(kept[i], used.size)
+    newIndex[i] = used.get(kept[i])
+  }
+  const geo = new THREE.BufferGeometry()
+  for (const [k, a] of Object.entries(welded.attributes)) {
+    const arr = new a.array.constructor(used.size * a.itemSize)
+    for (const [from, to] of used) for (let c = 0; c < a.itemSize; c++) arr[to * a.itemSize + c] = a.array[from * a.itemSize + c]
+    geo.setAttribute(k, new THREE.BufferAttribute(arr, a.itemSize, a.normalized))
+  }
+  geo.setIndex(new THREE.BufferAttribute(used.size < 65536 ? new Uint16Array(newIndex) : newIndex, 1))
+  geo.computeBoundingBox()
+  const geomBytes = Object.values(geo.attributes).reduce((s, a) => s + a.array.byteLength, 0) + geo.index.array.byteLength
+  // Compact skinning data: 32 bones fit a byte, weights as normalised bytes.
+  const si = geo.attributes.skinIndex
+  const sw = geo.attributes.skinWeight
+  const idx = new Uint8Array(si.count * 4)
+  const wts = new Uint8Array(sw.count * 4)
+  for (let i = 0; i < si.count; i++) {
+    let sum = 0
+    const w = [0, 1, 2, 3].map((c) => sw.getComponent(i, c))
+    for (const v of w) sum += v
+    let acc = 0
+    for (let c = 0; c < 4; c++) {
+      idx[i * 4 + c] = si.getComponent(i, c)
+      const q = c === 3 ? 255 - acc : Math.round((w[c] / (sum || 1)) * 255)
+      wts[i * 4 + c] = Math.max(0, q)
+      acc += wts[i * 4 + c]
+    }
+  }
+  geo.setAttribute('skinIndex', new THREE.BufferAttribute(idx, 4))
+  geo.setAttribute('skinWeight', new THREE.BufferAttribute(wts, 4, true))
+  const merged2 = geo
+  const bb = merged2.boundingBox
+  const mesh = new THREE.SkinnedMesh(merged2, new THREE.MeshStandardMaterial({ name: 'atlas' }))
+  mesh.name = name
+  // Rebuild a clean hierarchy: an armature with the original bone tree.
+  const root = new THREE.Group()
+  root.name = name
+  const armature = bones[0].parent
+  // The rigid pieces now live in the merged mesh: drop the originals.
+  const strays = []
+  armature.traverse((o) => { if (o.isMesh) strays.push(o) })
+  for (const o of strays) o.removeFromParent()
+  root.add(armature)
+  root.add(mesh)
+  mesh.bind(body.skeleton, body.bindMatrix)
+  const clips = []
+  const want = MODELS[name]
+  for (const [as, from] of Object.entries(want)) {
+    const c = fbx.animations.find((a) => a.name.endsWith('|' + from))
+    if (!c) throw new Error(`${name}: no clip ${from}`)
+    const clip = c.clone()
+    clip.name = as
+    // Scale tracks never change in these rigs; drop them.
+    clip.tracks = clip.tracks.filter((t) => !t.name.endsWith('.scale'))
+    clip.optimize()
+    clips.push(clip)
+  }
+  const height = bb.max.y - bb.min.y
+  root.userData = { height, footY: bb.min.y }
+  const glb = await new GLTFExporter().parseAsync(root, { binary: true, animations: clips, onlyVisible: false })
+  return { glb, height, footY: bb.min.y, uvRange, verts: merged2.attributes.position.count, geomBytes, animBytes: clips.reduce((s, c) => s + c.tracks.reduce((t, k) => t + k.times.byteLength + k.values.byteLength, 0), 0) }
+}
+
+window.convert = async (name) => {
+  const r = await convert(name)
+  const bytes = new Uint8Array(r.glb)
+  let s = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return { b64: btoa(s), height: r.height, footY: r.footY, uvRange: r.uvRange, verts: r.verts, geomBytes: r.geomBytes, animBytes: r.animBytes }
+}
+window.ready = true
+</script>

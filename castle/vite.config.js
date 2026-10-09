@@ -14,6 +14,8 @@ function buildStamp() {
 // Relative base so the build works from any folder or static host.
 export default defineConfig({
   base: './',
-  build: { assetsInlineLimit: 100000 },
+  // Everything inlines (the single-file build needs it), the unit models too.
+  build: { assetsInlineLimit: 2000000, chunkSizeWarningLimit: 6000 },
+  assetsInclude: ['**/*.glb'],
   define: { __BUILD__: JSON.stringify(buildStamp()) },
 })

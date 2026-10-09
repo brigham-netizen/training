@@ -190,6 +190,27 @@ The classic view draws clump and faceted-boulder sprites; the 3D view uses
 camera-facing leaf sprites (with hidden blobs to cast canopy shadows),
 bark-textured trunks and noise-displaced 3D boulders.
 
+## Troops
+
+Soldiers on both sides are Quaternius' CC0 "RPG Characters" (Nov 2020),
+animated (idle, walk, run, attack, death). The clothing is recoloured in the
+texture itself: blue for your swordsmen, archers and lord; drab greys and
+browns for the raiders, brutes, bowmen and ladder crews. The 3D view plays
+the animations on the models; the classic view draws sprite sheets that the
+game renders from the same models when it loads (8 facings).
+
+To rebuild them: download the pack from
+https://opengameart.org/content/lowpoly-rpg-characters, then
+
+    python3 scripts/units/recolor.py "<pack>/Textures"
+    mkdir cmp && cp "<pack>"/FBX/{Warrior,Ranger,Rogue,Cleric}.fbx cmp/
+    npx vite --port 5199 &   # then:
+    node scripts/units/build.cjs
+
+`recolor.py` writes the recoloured textures and `build.cjs` merges each
+character into one simplified, single-texture skinned mesh with only the
+clips the game uses (`src/units/*.glb`). Delete `cmp/` afterwards.
+
 ## Code map
 
 - `src/config.js`: every balance number (costs, HP, enemy stats, wave sizes)
@@ -204,6 +225,7 @@ bark-textured trunks and noise-displaced 3D boulders.
 - `src/render3d.js`: 3D preview renderer (three.js): lit, shadowed low-poly
   models; its orthographic camera matches `camera.js`, so input is shared.
   Toggle with Graphics in the menu.
+- `src/units.js`: troop models, animation, and the classic-view sprite bake
 - `src/audio.js`: synthesized sound effects and music crossfading
 - `src/saves.js`: progress and map saves (artifact db, or localStorage)
 - `src/input.js`, `src/main.js`: touch input, HUD, game loop

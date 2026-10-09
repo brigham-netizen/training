@@ -2,6 +2,7 @@ import { STRUCTURES, KEEP, ARCHER, SWORDSMAN, TERRAIN, UNIT_SCALE, MOAT } from '
 import { stoneTexture, flagstoneTexture, woodTexture, TEXTURE_PX, TEXTURE_LUM } from './textures.js'
 import { paintTerrain, terrainReady, GROUND_PX } from './terrain.js'
 import { floraReady, floraSprites, treeSpec, rockSpec } from './flora.js'
+import { LOOKS, SPRITE, SpriteAnim, spriteFrame, spritesReady } from './units.js'
 
 const COLORS = {
   grass: [[76, 114, 53], [80, 119, 56], [73, 109, 51], [83, 123, 58]],
@@ -336,6 +337,12 @@ export class Renderer {
     ctx.fillStyle = sky
     ctx.fillRect(0, 0, cam.vw, cam.vh)
 
+    // Sprite animation clock: game time, so pauses and fast-forward apply.
+    this.dt = this.lastTime === undefined ? 0 : Math.min(0.1, Math.max(0, game.time - this.lastTime))
+    this.lastTime = game.time
+    this.anims ??= new Map()
+    this.spriteSeen = new Set()
+
     this.drawGround(world, game.time)
     // Grid lines only help in the top-down view; hide them once the camera tilts.
     if (ui.showGrid && this.cam.sinE > 0.97) this.drawGrid(world)
@@ -374,8 +381,19 @@ export class Renderer {
       order.push({ d: cam.depth((g.fx + g.tx) / 2, (g.fy + g.ty) / 2), ladder: g })
     }
     for (const f of game.fallen) order.push({ d: cam.depth(f.x, f.y) - 0.01, fallen: f })
+    // The fallen play out their death where they dropped.
+    for (const st of this.anims.values()) if (st.dying > 0) order.push({ d: cam.depth(st.x, st.y), corpse: st })
     order.sort((a, b) => a.d - b.d)
-    for (const { i, x, y, ladder, fallen } of order) {
+    for (const { i, x, y, ladder, fallen, corpse } of order) {
+      if (corpse) {
+        this.atUnitScale(corpse, () => {
+          this.ellipse(corpse.x, corpse.y, corpse.z, 0.18 * corpse.scale, `rgba(0,0,0,${(0.3 * Math.min(1, corpse.dying)).toFixed(3)})`)
+          this.ctx.globalAlpha = Math.min(1, corpse.dying * 2)
+          this.blitSprite(corpse.id, 'death', corpse.anim.frame, corpse.x, corpse.y, corpse.z, corpse.heading, corpse.scale, false)
+          this.ctx.globalAlpha = 1
+        })
+        continue
+      }
       if (ladder) {
         this.drawLadder(ladder.fx, ladder.fy, ladder.fz, ladder.tx, ladder.ty, ladder.tz)
         continue
@@ -407,6 +425,8 @@ export class Renderer {
           else this.drawSwordsman(u)
         })
     }
+
+    this.sweepSprites()
 
     for (const p of game.projectiles) {
       if (p.kind === 'boulder') this.drawBoulder(p)
@@ -1531,9 +1551,14 @@ export class Renderer {
   drawLord(x, y, z, k) {
     const hurt = k.hp < k.maxHp && (k.inside > 0)
     this.ellipse(x, y, z, 0.14, 'rgba(0,0,0,0.3)')
-    this.ball(x, y, z + 0.27, 0.14, hurt ? '#fff' : rgb(COLORS.lord), '#2a1030')
-    this.ball(x, y, z + 0.5, 0.09, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
-    this.cam.P(x, y, z + 0.6)
+    const lord = this.lordSpot ?? (this.lordSpot = {})
+    Object.assign(lord, { x, y, z, hp: k.hp })
+    const sprite = this.drawSprite('lord', 'lord', lord, Math.PI * 0.75, { fighting: k.inside > 0, flash: hurt && Math.sin(performance.now() / 50) > 0.3 })
+    if (!sprite) {
+      this.ball(x, y, z + 0.27, 0.14, hurt ? '#fff' : rgb(COLORS.lord), '#2a1030')
+      this.ball(x, y, z + 0.5, 0.09, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
+    }
+    this.cam.P(x, y, z + (sprite ? 0.66 : 0.6))
     const s = Math.max(2, this.cam.k * 0.09)
     const { ctx } = this
     ctx.beginPath()
@@ -1601,6 +1626,80 @@ export class Renderer {
     this.ctx.fill()
   }
 
+  // Draw a unit as an animated sprite (once the sheets are baked). Returns
+  // false so the caller can fall back to the simple figure.
+  drawSprite(key, id, unit, heading, { fighting = false, flash = false, height } = {}) {
+    if (!spritesReady()) return false
+    const k = `${id}:${key}`
+    let st = this.anims.get(k)
+    if (!st || st.unit !== unit) {
+      st = { anim: new SpriteAnim(), unit, px: unit.x, py: unit.y, cd: unit.cd ?? 0 }
+      this.anims.set(k, st)
+    }
+    this.spriteSeen.add(k)
+    const dt = this.dt
+    const x = unit.x
+    const y = unit.y
+    const moving = dt > 0 ? Math.hypot(x - st.px, y - st.py) / dt / UNIT_SCALE : 0
+    st.px = x
+    st.py = y
+    if (unit.cd !== undefined) {
+      if (unit.cd > st.cd + 0.05) st.anim.strike()
+      st.cd = unit.cd
+    }
+    st.anim.update(dt, { moving, fighting })
+    Object.assign(st, { id, x, y, z: unit.z, heading, scale: (height ?? LOOKS[id].height) / LOOKS[id].height })
+    this.blitSprite(id, st.anim.anim, st.anim.frame, x, y, unit.z, heading, st.scale, flash)
+    return true
+  }
+
+  // Sprites whose unit is gone: the dead fall where they stood, the rest
+  // are forgotten.
+  sweepSprites() {
+    for (const [k, st] of this.anims) {
+      if (this.spriteSeen.has(k)) continue
+      if (st.dying === undefined && (st.unit.hp ?? 1) <= 0 && this.dt > 0) st.dying = 1.4
+      if (st.dying > 0) {
+        st.dying -= this.dt
+        st.anim.update(this.dt, { dead: true })
+        if (st.dying > 0) continue
+      }
+      this.anims.delete(k)
+    }
+  }
+
+  // A stand-in unit for one of a ladder's two carriers, kept between frames.
+  crewOf(e, o, x, y, z) {
+    this.crew ??= new WeakMap()
+    if (!this.crew.has(e)) this.crew.set(e, {})
+    const men = this.crew.get(e)
+    men[o] ??= {}
+    return Object.assign(men[o], { x, y, z, hp: e.hp })
+  }
+
+  blitSprite(id, anim, frame, x, y, z, heading, scale, flash) {
+    const { cam, ctx } = this
+    // Facing in the camera's frame picks the sprite column.
+    const c = Math.cos(heading)
+    const s = Math.sin(heading)
+    const fr = spriteFrame(id, anim, frame, Math.atan2(c * cam.sinT + s * cam.cosT, c * cam.cosT - s * cam.sinT))
+    if (!fr) return
+    const { cell, world, footY } = SPRITE
+    cam.P(x, y, z)
+    const px = (world / cell) * cam.k * scale
+    const w = cell * px
+    const dx = cam.sx - w / 2
+    const dy = cam.sy - footY * px
+    ctx.drawImage(fr.sheet, fr.sx, fr.sy, cell, cell, dx, dy, w, w)
+    if (flash) {
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalAlpha *= 0.55
+      ctx.drawImage(fr.sheet, fr.sx, fr.sy, cell, cell, dx, dy, w, w)
+      ctx.globalAlpha /= 0.55
+      ctx.globalCompositeOperation = 'source-over'
+    }
+  }
+
   drawEnemy(e, time) {
     const { cam } = this
     const z = e.z
@@ -1628,6 +1727,11 @@ export class Renderer {
       for (const [o, ph] of men) {
         const mx = e.x + hx * o
         const my = e.y + hy * o
+        if (spritesReady()) {
+          // Each carrier is its own figure, walking alongside the ladder.
+          this.drawSprite(`${e.id}:${o}`, 'raider', this.crewOf(e, o, mx, my, z), e.heading, { flash: hit, height: 0.56 })
+          continue
+        }
         const b = Math.abs(Math.sin(e.walk + ph)) * 0.05
         this.ball(mx, my, z + 0.28 + b, 0.17, color, 'rgba(20,10,5,0.7)')
         this.ball(mx, my, z + 0.55 + b, 0.1, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
@@ -1636,6 +1740,7 @@ export class Renderer {
       this.drawLadder(e.x - hx * 0.5, e.y - hy * 0.5, z + 0.5, e.x + hx * 0.5, e.y + hy * 0.5, z + 0.5 + lift)
       return
     }
+    if (this.drawSprite(e.id, e.type, e, e.heading, { fighting: e.attacking && e.type !== 'bowman', flash: hit })) return
     const color = hit ? [255, 255, 255] : COLORS[e.type]
     const bob = Math.abs(Math.sin(e.walk)) * 0.06
     const big = e.type === 'brute'
@@ -1663,6 +1768,7 @@ export class Renderer {
     const walking = a.path.length > 0
     const bob = walking ? Math.abs(Math.sin(time * 12 + a.id)) * 0.05 : 0
     this.ellipse(a.x, a.y, z, 0.15, 'rgba(0,0,0,0.3)')
+    if (this.drawSprite(a.id, 'archer', a, a.heading, { flash: a.flash > 0 })) return
     this.bow(a.x, a.y, z, a.heading, '#6b4423')
     this.ball(a.x, a.y, z + 0.25 + bob, 0.13, a.flash > 0 ? '#fff' : rgb(COLORS.player), '#162440')
     this.ball(a.x, a.y, z + 0.47 + bob, 0.08, rgb(COLORS.skin), 'rgba(20,10,5,0.6)')
@@ -1682,6 +1788,7 @@ export class Renderer {
     const z = s.z
     const bob = Math.abs(Math.sin(s.walk)) * 0.05
     this.ellipse(s.x, s.y, z, (s.r / UNIT_SCALE) * 1.1, 'rgba(0,0,0,0.3)')
+    if (this.drawSprite(s.id, 'swordsman', s, s.heading, { fighting: s.fighting, flash: s.flash > 0 })) return
     const swing = s.fighting ? Math.sin(s.walk * 2) * 0.5 : 0.3
     const h = s.heading
     // Sword on the right hand, shield on the left.

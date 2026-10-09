@@ -11,6 +11,7 @@ import { STRUCTURES, KEEP, UNIT_SCALE, MOAT } from './config.js'
 import { stoneTexture, woodTexture, TEXTURE_LUM } from './textures.js'
 import { paintTerrain, terrainReady } from './terrain.js'
 import { floraReady, floraSprites, treeSpec, rockSpec, FLORA_URLS } from './flora.js'
+import { unitsReady, Actor } from './units.js'
 
 const C = {
   grass: [0x58823c, 0x5d8a40, 0x537c39, 0x618f44],
@@ -146,6 +147,11 @@ export class Renderer3D {
     this.mapSig = ''
     this.structSig = ''
     this.pools = {}
+    // Animated troop models, one per unit, keyed by the unit's id.
+    this.actors = new Map()
+    this.actorGroup = new THREE.Group()
+    this.scene.add(this.actorGroup)
+    this.lastTime = null
     this.tmp = { m: new THREE.Matrix4(), q: new THREE.Quaternion(), s: new THREE.Vector3(), p: new THREE.Vector3(), c: new THREE.Color() }
     this.buildPools()
   }
@@ -1089,6 +1095,23 @@ export class Renderer3D {
     pool('box', new THREE.BoxGeometry(1, 1, 1), 200) // rams and catapults
     pool('ball', new THREE.SphereGeometry(1, 8, 6), 200) // boulders, ram heads, wheels
     pool('disc', new THREE.CylinderGeometry(1, 1, 1, 10), 200) // shields
+    // Soft round shadows under the troop models (cheaper than casting).
+    const blob = document.createElement('canvas')
+    blob.width = blob.height = 64
+    const bg = blob.getContext('2d')
+    const grad = bg.createRadialGradient(32, 32, 0, 32, 32, 32)
+    grad.addColorStop(0, 'rgba(0,0,0,0.55)')
+    grad.addColorStop(1, 'rgba(0,0,0,0)')
+    bg.fillStyle = grad
+    bg.fillRect(0, 0, 64, 64)
+    const blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
+    const blobMesh = new THREE.InstancedMesh(blobGeo, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(blob), transparent: true, depthWrite: false }), 400)
+    blobMesh.count = 0
+    blobMesh.frustumCulled = false
+    blobMesh.renderOrder = 1
+    blobMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.scene.add(blobMesh)
+    this.pools.blob = { mesh: blobMesh, n: 0, max: 400 }
   }
 
   put(name, pos, quat, scale, hex) {
@@ -1123,9 +1146,72 @@ export class Renderer3D {
     this.put('head', new THREE.Vector3(x, z + h + r * 0.45, y), q, new THREE.Vector3(r * 0.6, r * 0.6, r * 0.6), head)
   }
 
+  // Place (creating if new) the animated model for a unit. `key` is unique
+  // per figure; `unit` is the game object, watched for shots and death.
+  actor(id, look, unit, x, y, z, heading, { fighting = false, flash = false, height } = {}) {
+    const key = `${look}:${id}`
+    let a = this.actors.get(key)
+    // Ids restart with a new game: a different unit under an old key.
+    if (a && a.unit !== unit) {
+      a.actor.dispose()
+      this.actors.delete(key)
+      a = null
+    }
+    if (!a) {
+      a = { actor: new Actor(look, height), px: x, py: y, cd: unit.cd ?? 0, unit, slot: this.actors.size }
+      this.actorGroup.add(a.actor.object)
+      this.actors.set(key, a)
+    }
+    this.seen.add(key)
+    const dt = this.dt
+    const moving = dt > 0 ? Math.hypot(x - a.px, y - a.py) / dt / UNIT_SCALE : 0
+    a.px = x
+    a.py = y
+    const o = a.actor.object
+    o.position.set(x, z, y)
+    const r = (height ?? 0.62) * 0.75 * UNIT_SCALE
+    const saved = this.anchor
+    this.anchor = null
+    this.put('blob', new THREE.Vector3(x, z + 0.02, y), new THREE.Quaternion(), new THREE.Vector3(r, 1, r), 0xffffff)
+    this.anchor = saved
+    o.scale.setScalar(UNIT_SCALE)
+    a.actor.face(heading)
+    // A shot loosed: the cooldown jumped back up.
+    if (unit.cd !== undefined) {
+      if (unit.cd > a.cd + 0.05) a.actor.strike()
+      a.cd = unit.cd
+    }
+    a.actor.flash(flash)
+    // With a crowd on screen, pose each figure every other frame.
+    const skip = this.actors.size > 50 && (this.frameNo + a.slot) % 2 === 1
+    a.actor.update(dt, { moving, fighting, skip })
+  }
+
+  // Models whose unit is gone: the dead fall and fade, the rest vanish.
+  sweepActors() {
+    for (const [key, a] of this.actors) {
+      if (this.seen.has(key)) continue
+      if (a.dying === undefined && (a.unit.hp ?? 1) <= 0 && this.dt > 0) a.dying = 1.6
+      if (a.dying > 0) {
+        a.dying -= this.dt
+        a.actor.flash(false)
+        a.actor.update(this.dt, { dead: true })
+        if (a.dying < 0.4) a.actor.object.position.y -= this.dt * 0.25
+        if (a.dying > 0) continue
+      }
+      a.actor.dispose()
+      this.actors.delete(key)
+    }
+  }
+
   drawUnits(game) {
     for (const p of Object.values(this.pools)) p.n = 0
     const t = game.time
+    this.dt = this.lastTime === null ? 0 : Math.min(0.1, Math.max(0, t - this.lastTime))
+    this.lastTime = t
+    this.frameNo = (this.frameNo || 0) + 1
+    this.seen = new Set()
+    const models = unitsReady()
     const yaw = (heading) => new THREE.Quaternion().setFromAxisAngle(UP, -heading)
 
     for (const e of game.enemies) {
@@ -1149,11 +1235,19 @@ export class Renderer3D {
         const hx = Math.cos(e.heading)
         const hy = Math.sin(e.heading)
         for (const [o, ph] of [[0.24, 0], [-0.24, Math.PI]]) {
+          if (models) {
+            this.actor(`${e.id}:${o}`, 'raider', e, e.x + hx * o, e.y + hy * o, e.z, e.heading, { flash: hit, height: 0.56 })
+            continue
+          }
           const b = Math.abs(Math.sin(e.walk + ph)) * 0.05
           this.figure(e.x + hx * o, e.y + hy * o, e.z + b, 0.15, 0.46, hit ? 0xffffff : C.raider, C.skin)
         }
         const lift = Math.min(1, e.raising / 1.2) * 0.9
         this.ladder([e.x - hx * 0.5, e.y - hy * 0.5, e.z + 0.52], [e.x + hx * 0.5, e.y + hy * 0.5, e.z + 0.52 + lift])
+        continue
+      }
+      if (models) {
+        this.actor(e.id, e.type, e, e.x, e.y, e.z, e.heading, { fighting: e.attacking && e.type !== 'bowman', flash: hit })
         continue
       }
       const big = e.type === 'brute'
@@ -1219,10 +1313,19 @@ export class Renderer3D {
     const lz = KEEP.height
     this.anchor = new THREE.Vector3(lx, lz, ly)
     const struck = k.inside > 0 && Math.sin(t * 20) > 0.6
-    this.figure(lx, ly, lz, 0.13, 0.36, struck ? 0xffffff : C.lord, C.skin)
-    this.put('disc', new THREE.Vector3(lx, lz + 0.5, ly), new THREE.Quaternion(), new THREE.Vector3(0.07, 0.05, 0.07), C.crown)
+    if (models) {
+      this.actor('lord', 'lord', k, lx, ly, lz, Math.PI * 0.75, { fighting: k.inside > 0, flash: struck })
+      this.put('disc', new THREE.Vector3(lx, lz + 0.62 * UNIT_SCALE, ly), new THREE.Quaternion(), new THREE.Vector3(0.06, 0.04, 0.06), C.crown)
+    } else {
+      this.figure(lx, ly, lz, 0.13, 0.36, struck ? 0xffffff : C.lord, C.skin)
+      this.put('disc', new THREE.Vector3(lx, lz + 0.5, ly), new THREE.Quaternion(), new THREE.Vector3(0.07, 0.05, 0.07), C.crown)
+    }
 
     for (const a of game.archers) {
+      if (models) {
+        this.actor(a.id, 'archer', a, a.x, a.y, a.z, a.heading, { flash: a.flash > 0 })
+        continue
+      }
       this.anchor = new THREE.Vector3(a.x, a.z, a.y)
       const walking = a.path.length > 0
       const bob = walking ? Math.abs(Math.sin(t * 12 + a.id)) * 0.04 : 0
@@ -1231,6 +1334,10 @@ export class Renderer3D {
     }
 
     for (const s of game.swordsmen) {
+      if (models) {
+        this.actor(s.id, 'swordsman', s, s.x, s.y, s.z, s.heading, { fighting: s.fighting, flash: s.flash > 0 })
+        continue
+      }
       this.anchor = new THREE.Vector3(s.x, s.z, s.y)
       const bob = Math.abs(Math.sin(s.walk)) * 0.04
       this.figure(s.x, s.y, s.z + bob, (s.r / UNIT_SCALE) * 0.8, 0.48, s.flash > 0 ? 0xffffff : C.player, C.helmet)
@@ -1246,6 +1353,7 @@ export class Renderer3D {
     }
 
     this.anchor = null
+    this.sweepActors()
     for (const p of game.projectiles) {
       if (p.kind === 'boulder') {
         this.put('ball', new THREE.Vector3(p.x, p.z, p.y), new THREE.Quaternion(), new THREE.Vector3(0.14, 0.14, 0.14), C.boulder)

@@ -8,10 +8,13 @@ import { Audio, BUILD_TRACKS } from './audio.js'
 import { Saves } from './saves.js'
 import { loadTerrain } from './terrain.js'
 import { loadFlora } from './flora.js'
+import { bakeSprites } from './units.js'
 
 // Ground textures load in the background; both renderers repaint when ready.
 loadTerrain()
 loadFlora()
+// Troop models load, then their classic-view sprites bake, in the background.
+bakeSprites()
 import { STRUCTURES, ARCHER, SWORDSMAN, HOARDING, ROUGH_COST, TOTAL_WAVES, DROPS, RENOWN, RESEARCH, MAP_STYLES, waveComposition } from './config.js'
 
 const ICONS = {
@@ -614,7 +617,7 @@ const HELP = `
   <p><b>Two fingers</b> pinch to zoom and drag to pan. In <b>3D</b>, twist two fingers to orbit around your castle.
   The camera tilts to 3D when a wave starts so you can watch it play out, and returns to 2D for building.</p>`
 
-const CREDITS = `<p class="credits">Music: “Castle Chamber” by brigham773. “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0. Ground, leaf, rock and bark textures from ambientCG and Poly Haven (CC0).</p>`
+const CREDITS = `<p class="credits">Music: “Castle Chamber” by brigham773. “Minstrel Guild” and “Heroic Age” by Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution 4.0. Ground, leaf, rock and bark textures from ambientCG and Poly Haven (CC0). Character models by Quaternius (CC0), recoloured.</p>`
 
 // ---- feedback ---------------------------------------------------------------
 
