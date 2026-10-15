@@ -27,6 +27,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--night);
@@ -119,6 +120,28 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
   animation: fadein .35s;
 }
 @keyframes fadein { from { opacity: 0; } }
+.overlay { overflow-y: auto; justify-content: safe center; }
+.overlay h3 { font-family: var(--font-label); font-weight: normal; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: var(--gilt); margin: 4px 0 -4px; }
+.overlay p.sub { font-size: 14px; margin-top: -6px; }
+#riddle-grid { display: grid; grid-template-columns: repeat(4, 62px); gap: 10px; justify-content: center; }
+.rv { width: 62px; height: 68px; position: relative; display: flex; align-items: flex-end; justify-content: center; }
+.rv svg { position: absolute; inset: 0 0 6px; width: 100%; height: 62px; }
+.rv span { position: relative; font-family: var(--font-label); font-size: 12px; background: #09080bcc; border-radius: 6px; padding: 0 5px; }
+.rv[disabled] { opacity: .3; cursor: default; }
+#riddle { display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; padding: 0 4px; }
+#riddle .verse { margin: 0; font-style: italic; font-size: 15.5px; line-height: 1.32; max-width: 38ch; text-wrap: balance; }
+#riddle .help { margin: 0; font-size: 12.5px; color: var(--vellum-dim); max-width: 44ch; line-height: 1.3; }
+#riddle .answered { margin: 0; font-size: 14px; color: var(--vellum-dim); }
+#riddle .answered b { color: var(--gilt); font-weight: normal; font-family: var(--font-label); letter-spacing: .06em; }
+#guess { display: flex; gap: 6px; width: 100%; max-width: 330px; }
+#guess input {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--vellum);
+  background: var(--lead); border: 1px solid var(--stone-hi); border-radius: 999px; padding: 6px 14px;
+}
+#guess input:focus { outline: 2px solid var(--gilt); outline-offset: 1px; }
+.btn.small { font-size: 14px; padding: 6px 16px; }
+.shake { animation: shake .35s; }
+@keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
 .overlay h1 { font-family: var(--font-title); font-weight: normal; font-size: 46px; margin: 0; color: var(--gilt); text-wrap: balance; }
 .overlay h2 { font-family: var(--font-title); font-weight: normal; font-size: 32px; margin: 0; text-wrap: balance; }
 .overlay p { max-width: 34ch; margin: 0; line-height: 1.45; color: var(--vellum-dim); }
@@ -209,6 +232,7 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
     <div class="toast" id="toast"></div>
   </div>
   <div class="lore" id="lore"></div>
+  <div id="riddle" hidden></div>
   <div id="hours"></div>
   <div id="tray"></div>
 </div>
@@ -432,6 +456,114 @@ function toRoman(n) {
   return s;
 }
 // ENGINE END -----------------------------------------------------------------
+// RIDDLE ENGINE START --------------------------------------------------------
+// Riddle windows: one large window hides a picture. The sun reads it three
+// ways: straight down the columns at Sext, along the diagonals at Lauds and
+// Vespers. Each floor stone counts the coloured panes its beam passes through.
+const RIDDLES = [
+  { name: "The Porter's Riddle", answers: ['key', 'keys', 'a key'],
+    verse: 'I have teeth but never bite. I turn in the dark, and the door gives way.',
+    help: 'Each floor stone counts the coloured panes its beam passes through. Paint panes until every count is right. Tap a stone to see its beam.',
+    art: ['.YYYY.', 'YY..YY', 'YY..YY', '.YYYY.', '..YY..', '..YY..', '..YYYY', '..YY..', '..YYY.'] },
+  { name: "The Sexton's Riddle", answers: ['bell', 'a bell', 'church bell', 'bells'],
+    verse: 'I have a tongue but cannot taste, a mouth but cannot eat. Pull my rope and the whole town hears me.',
+    help: 'Diagonal stones count along the slanting light. Mark panes you know are empty with Plain glass.',
+    art: ['...K...', '..YYY..', '.YYYYY.', '.YYYYY.', '.YYYYY.', '.YYYYY.', 'YYYYYYY', '...R...'] },
+  { name: "The Alchemist's Riddle", answers: ['hourglass', 'hour glass', 'sandglass', 'sand glass', 'egg timer', 'timer', 'an hourglass'],
+    verse: 'Two bellies and a narrow waist. I eat my own sand, and when I am empty you turn me over and I start again.',
+    art: ['YYYYYYY', '.K...K.', '.KOOOK.', '..KOK..', '...O...', '..K.K..', '.K.O.K.', '.KOOOK.', 'YYYYYYY'] },
+  { name: "The Illuminator's Riddle", answers: ['snail', 'a snail', 'snails'],
+    verse: 'I carry my house and never move out. In the margins of old books, armoured knights lose duels to me.',
+    art: ['G.G......', 'G.G..PPP.', 'GGG.PYYYP', 'GGG.PYPYP', '.GG.PYPPP', '.GGGGPPP.', 'GGGGGGGGG'] },
+  { name: 'The Margin Riddle', answers: ['rabbit', 'a rabbit', 'bunny', 'hare', 'killer rabbit', 'rabbits'],
+    verse: 'Soft fur and long ears, harmless they say. Yet the monks drew me hunting knights and chasing them away.',
+    art: ['.WW.WW..', '.WW.WW..', '.WWWWW..', 'WWKWWWW.', 'WWWWWWW.', '.RWWWWWW', '..WWWWWW', '..WWWWWW', '.WWW.WWW'] },
+  { name: "The Fisherman's Riddle", answers: ['rooster', 'cock', 'cockerel', 'chicken', 'a rooster', 'the rooster'],
+    verse: 'I sing before the sun is up. Three times I spoke one night, and a fisherman wept.',
+    art: ['..RR....', '.RROO..G', 'YYOKO.GG', '..ROO.GG', '..ROOOOG', '...OOOOG', '....OOO.', '....Y.Y.', '...YY.YY'] },
+  { name: "The Merchant's Riddle", answers: ['ship', 'boat', 'a ship', 'a boat', 'sailing ship', 'galleon', 'cog'],
+    verse: 'I have a mast but grew from no seed. My belly is full but I never eat, and I sleep holding an anchor.',
+    art: ['....R....', '....KRR..', '...WK....', '..WWKW...', '.WWWKWW..', 'WWWWKWWW.', '....K....', 'OOOOOOOOO', '.OOOOOOO.'] },
+];
+const RIDDLE_BG = '.';
+
+function riddleLines(W, H) {
+  const mk = n => Array.from({ length: n }, () => []);
+  const L = { S: mk(W), L: mk(W + H - 1), V: mk(W + H - 1) };
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+    const i = r * W + c;
+    L.S[c].push(i);
+    L.L[c - r + H - 1].push(i);   // dawn light runs down and to the right
+    L.V[c + r].push(i);           // dusk light runs down and to the left
+  }
+  return L;
+}
+function lineCounts(line, board, bg) {
+  const out = {};
+  for (const i of line) { const p = board[i] || bg; out[p] = (out[p] || 0) + 1; }
+  return out;
+}
+
+// Choose the fewest "old glass" panes so pure counting logic finishes the
+// picture: line by line, a colour that is used up is ruled out, and a colour
+// that needs every remaining open pane fills them.
+function riddleGivens(W, H, sol, colors, extra, seed) {
+  const n = W * H;
+  const lines = Object.values(riddleLines(W, H)).flat();
+  const target = lines.map(l => lineCounts(l, sol, RIDDLE_BG));
+  function propagate(cand) {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      lines.forEach((line, li) => {
+        for (const col of colors) {
+          let fixed = 0, poss = 0;
+          for (const i of line) if (cand[i].has(col)) { if (cand[i].size === 1) fixed++; else poss++; }
+          if (!poss) continue;
+          const need = (target[li][col] || 0) - fixed;
+          if (need === 0) { for (const i of line) if (cand[i].size > 1 && cand[i].delete(col)) changed = true; }
+          else if (need === poss) { for (const i of line) if (cand[i].size > 1 && cand[i].has(col)) { cand[i] = new Set([col]); changed = true; } }
+        }
+      });
+    }
+    return cand.filter(s => s.size > 1).length;
+  }
+  const clone = cand => cand.map(s => new Set(s));
+  let cand = Array.from({ length: n }, () => new Set(colors));
+  const givens = [];
+  let open = propagate(cand);
+  while (open) {
+    // Greedy: set the pane that unlocks the most deductions.
+    let best = -1, bestOpen = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (cand[i].size === 1) continue;
+      const c2 = clone(cand); c2[i] = new Set([sol[i]]);
+      const o = propagate(c2);
+      if (o < bestOpen) { bestOpen = o; best = i; }
+    }
+    givens.push(best);
+    cand[best] = new Set([sol[best]]);
+    open = propagate(cand);
+  }
+  // Easier riddles get a few more panes for free.
+  const rng = mulberry32(seed);
+  const rest = shuffle([...Array(n).keys()].filter(i => !givens.includes(i) && sol[i] !== RIDDLE_BG), rng);
+  return givens.concat(rest.slice(0, extra));
+}
+
+function buildRiddle(id) {
+  const spec = RIDDLES[id];
+  const H = spec.art.length, W = spec.art[0].length;
+  if (!spec.art.every(row => row.length === W)) throw new Error('Ragged art in riddle ' + id);
+  const sol = spec.art.join('').split('');
+  const colors = [RIDDLE_BG, ...[...new Set(sol)].filter(c => c !== RIDDLE_BG).sort((a, b) => 'RYOGBPWK'.indexOf(a) - 'RYOGBPWK'.indexOf(b))];
+  const lines = riddleLines(W, H);
+  const clues = {};
+  for (const h of HOUR_ORDER) clues[h] = lines[h].map(l => lineCounts(l, sol, RIDDLE_BG));
+  const givens = riddleGivens(W, H, sol, colors, id < 2 ? 2 : 0, 300 + id);
+  return { id, ...spec, W, H, sol, colors, paint: colors.slice(1), lines, clues, givens };
+}
+// RIDDLE ENGINE END ----------------------------------------------------------
 
 // Palette for drawing glass and light.
 const GLASS = {
@@ -452,7 +584,7 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------------------------------------------------------------- state
 const SAVE_KEY = 'lumen.v1';
-let save = { unlocked: 0, solved: {}, sound: true, pilgrim: 0 };
+let save = { unlocked: 0, solved: {}, sound: true, pilgrim: 0, riddles: {}, seenRiddles: false };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = { ...save, ...s }; } catch (e) {}
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 
@@ -465,8 +597,12 @@ function getLevel(id) {
   return levelCache[id];
 }
 
+let MODE = 'light'; // 'light' (hours of light) or 'riddle'
 let G = null; // current game
 function startLevel(id, restore) {
+  MODE = 'light'; RG = null;
+  scene.style.touchAction = '';
+  $('#lore').hidden = false; $('#riddle').hidden = true;
   const lv = getLevel(id);
   G = {
     id, lv,
@@ -1055,6 +1191,7 @@ function setHour(h) {
 
 // ---------------------------------------------------------------- input
 scene.addEventListener('click', e => {
+  if (MODE !== 'light') return;
   if (G && G.won && !G.winShown) { showWin(); return; }
   if (!G || G.won) return;
   const pe = e.target.closest('[data-pane]');
@@ -1202,11 +1339,22 @@ function showLevels() {
       ${art}
       <span>${toRoman(i + 1)}</span></button>`;
   }).join('');
+  const rcells = RIDDLES.map((r, i) => {
+    const done = save.riddles[i] && save.riddles[i].solved;
+    const open = i === 0 || (save.riddles[i - 1] && save.riddles[i - 1].solved);
+    const art = done ? riddleThumb(i) : `<svg viewBox="0 0 64 64"><rect x="3" y="3" width="58" height="58" rx="4" fill="#09080b" stroke="#3a3342" stroke-width="2.5"/><text x="32" y="44" text-anchor="middle" font-family="UnifrakturMaguntia, Georgia, serif" font-size="34" fill="${open ? '#d6a542' : '#3a3342'}">?</text></svg>`;
+    return `<button class="rv${done ? ' done' : ''}" data-rd="${i}" ${open ? '' : 'disabled'} aria-label="Riddle ${i + 1}${done ? ', solved' : ''}">${art}<span>${toRoman(i + 1)}</span></button>`;
+  }).join('');
+  save.seenRiddles = true; persist();
   const pilOpen = save.unlocked >= CAMPAIGN.length;
   ov.innerHTML = `<div class="overlay">
     <h1>Lumen</h1>
-    <p>Set the glass so the sun paints the floor true at every hour of prayer. Each window you consecrate is leaded into a masterwork here.</p>
+    <p>Set the glass so the sun paints the floor true at every hour of prayer.</p>
+    <h3>Hours of light</h3>
     <div id="levels-grid">${cells}</div>
+    <h3>Riddle windows</h3>
+    <p class="sub">Read the riddle, then let the sun reveal the picture that answers it.</p>
+    <div id="riddle-grid">${rcells}</div>
     <div class="levels-actions">
       <button class="btn ghost" id="ov-pil" ${pilOpen ? '' : 'disabled style="opacity:.35"'}>Pilgrim road${save.pilgrim ? ' · ' + toRoman(save.pilgrim + 1) : ''}</button>
       <button class="btn ghost" id="ov-how">How to play</button>
@@ -1215,6 +1363,7 @@ function showLevels() {
     <button class="btn" id="ov-close">Return</button>
   </div>`;
   ov.querySelectorAll('[data-lv]').forEach(b => b.onclick = () => { closeOverlay(); startLevel(+b.dataset.lv); });
+  ov.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => startRiddle(+b.dataset.rd));
   $('#ov-close').onclick = closeOverlay;
   $('#ov-how').onclick = showHow;
   $('#ov-snd').onclick = () => { save.sound = !save.sound; persist(); $('#ov-snd').textContent = 'Sound ' + (save.sound ? 'on' : 'off'); };
@@ -1229,9 +1378,468 @@ function showHow() {
       <div><b>Follow the sun.</b> At dawn the light leans right, at dusk it leans left. The upper tier throws its light twice as far as the lower.</div>
       <div><b>Mingle colours.</b> Two beams on one stone blend: ruby and gold make amber, gold and cobalt make green, cobalt and ruby make violet. Clear glass adds light, lead adds shadow.</div>
       <div><b>Consecrate.</b> Use every glass in the tray and satisfy every mark at every hour.</div>
+      <div><b>Riddle windows.</b> A picture hides in one large window. Each floor stone counts the coloured panes its beam crosses: straight down at Sext, slanting at Lauds and Vespers. Paint until every count is true. Answer the riddle early and the glazier sketches the outline for you.</div>
     </div>
     <button class="btn" id="ov-close">Back</button></div>`;
   $('#ov-close').onclick = showLevels;
+}
+
+// ================================================================ riddle mode
+const RCOL = { R: '#b3122d', Y: '#d99412', O: '#d9661a', G: '#1f7a45', B: '#1b46b0', P: '#5e2a8c', W: '#e9e4d4', K: '#2a2630' };
+const RNAME = { R: 'Ruby', Y: 'Gold', O: 'Amber', G: 'Green', B: 'Cobalt', P: 'Violet', W: 'Pearl', K: 'Jet', '.': 'Plain' };
+const riddleCache = {};
+function getRiddle(id) { return riddleCache[id] || (riddleCache[id] = buildRiddle(id)); }
+let RG = null;  // the riddle being played
+let RGEO = null;
+const rLayers = {};
+
+function riddleGeo(rd) {
+  const { W, H } = rd;
+  const cs = Math.min(34, 290 / W, 300 / H);
+  const gw = W * cs, gh = H * cs, gx = 200 - gw / 2;
+  const archH = gw * .42, top = 14;
+  const gy = top + archH + 4;
+  const sill = gy + gh;
+  let maxChips = 1;
+  for (const h of HOUR_ORDER) for (const cl of rd.clues[h]) maxChips = Math.max(maxChips, Object.keys(cl).filter(k => k !== RIDDLE_BG).length);
+  const nd = W + H - 1;
+  const chipR = Math.min(8.5, (380 / nd) * .38);
+  const FT = sill + 52;
+  const FB = FT + 16 + maxChips * (2 * chipR + 3);
+  return { W, H, cs, gw, gh, gx, gy, archH, top, sill, chipR, FT, FB, VH: FB + 10 };
+}
+function stoneQuad(k, n) {
+  const g = RGEO, tl = 22, tw = 356 / n, bl = 4, bw = 392 / n;
+  return [[tl + k * tw, g.FT], [tl + (k + 1) * tw, g.FT], [bl + (k + 1) * bw, g.FB], [bl + k * bw, g.FB]];
+}
+const cellXY = i => [RGEO.gx + (i % RGEO.W) * RGEO.cs, RGEO.gy + Math.floor(i / RGEO.W) * RGEO.cs];
+const solved = (rd, board, i) => (board[i] && board[i] !== RIDDLE_BG ? board[i] : RIDDLE_BG) === rd.sol[i];
+
+function startRiddle(id, restore) {
+  MODE = 'riddle'; G = null;
+  closeOverlay();
+  const rd = getRiddle(id);
+  const n = rd.W * rd.H;
+  RG = { id, rd, board: new Array(n).fill(null), locked: new Array(n).fill(false), sel: rd.paint[0], hour: 'S',
+    won: false, master: false, winShown: false, peek: null, hints: 0, guessed: !!(save.riddles[id] && save.riddles[id].guessed) };
+  for (const i of rd.givens) { RG.board[i] = rd.sol[i]; RG.locked[i] = true; }
+  if (restore && restore.board) { RG.board = restore.board; RG.locked = restore.locked; RG.hour = restore.hour || 'S'; }
+  buildRiddleScene();
+  renderRiddleUI();
+  drawRiddle();
+}
+
+function buildRiddleScene() {
+  const rd = RG.rd;
+  RGEO = riddleGeo(rd);
+  const g = RGEO;
+  scene.setAttribute('viewBox', `0 0 400 ${g.VH.toFixed(0)}`);
+  scene.innerHTML = '';
+  scene.style.touchAction = 'none';
+  const defs = el('defs', {}, scene);
+  defs.innerHTML = `
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1520"/><stop offset="1" stop-color="#0d0b11"/></linearGradient>
+    <linearGradient id="pillar" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0e0c12"/><stop offset=".45" stop-color="#2b2532"/><stop offset="1" stop-color="#0e0c12"/></linearGradient>
+    <linearGradient id="floorg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d1922"/><stop offset="1" stop-color="#2a2430"/></linearGradient>
+    <radialGradient id="rsheen" cx=".3" cy=".25" r=".9"><stop offset="0" stop-color="#fff" stop-opacity=".4"/><stop offset=".6" stop-color="#fff" stop-opacity=".04"/><stop offset="1" stop-color="#000" stop-opacity=".22"/></radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>`;
+  el('rect', { x: 0, y: 0, width: 400, height: g.VH, fill: 'url(#wall)' }, scene);
+  el('rect', { x: 0, y: 0, width: 22, height: g.FT, fill: 'url(#pillar)' }, scene);
+  el('rect', { x: 378, y: 0, width: 22, height: g.FT, fill: 'url(#pillar)' }, scene);
+  // Window recess and arch head
+  const pad = 10, ox = g.gx - pad, ow = g.gw + pad * 2;
+  el('path', { d: `M${ox},${g.sill + 6}L${ox},${g.gy}Q${ox},${g.top + g.archH * .2} 200,${g.top - 6}Q${ox + ow},${g.top + g.archH * .2} ${ox + ow},${g.gy}L${ox + ow},${g.sill + 6}Z`,
+    fill: '#08070a', stroke: '#3a3342', 'stroke-width': 3 }, scene);
+  el('rect', { x: ox - 8, y: g.sill + 5, width: ow + 16, height: 8, rx: 2, fill: '#3a3342' }, scene);
+  layers.dial = el('g', { transform: 'translate(365,26)' }, scene);
+  el('path', { d: 'M-18,8A18,18 0 0 1 18,8', fill: 'none', stroke: '#5b5163', 'stroke-width': 1.2, 'stroke-dasharray': '2 3' }, layers.dial);
+  el('line', { x1: -24, y1: 8, x2: 24, y2: 8, stroke: '#5b5163', 'stroke-width': 1 }, layers.dial);
+  layers.sun = el('circle', { r: 4.5, fill: '#ffd36b' }, layers.dial);
+  rLayers.head = el('g', {}, scene);
+  rLayers.beams = el('g', { style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, scene);
+  rLayers.glass = el('g', {}, scene);
+  rLayers.master = el('g', {}, scene);
+  rLayers.sketch = el('g', { 'pointer-events': 'none' }, scene);
+  rLayers.floor = el('g', {}, scene);
+  rLayers.chips = el('g', { 'pointer-events': 'none' }, scene);
+  rLayers.peek = el('g', { 'pointer-events': 'none' }, scene);
+  drawRiddleHead(false);
+}
+
+// Rose in the arch head: dim until the picture is revealed.
+function drawRiddleHead(lit) {
+  const g = RGEO, gp = rLayers.head; gp.innerHTML = '';
+  const cy = g.top + g.archH * .58, R = Math.min(g.archH * .4, g.gw * .2);
+  const cols = lit ? RG.rd.paint.map(k => RCOL[k]) : ['#2a2531', '#241f2b'];
+  el('circle', { cx: 200, cy, r: R + 3, fill: '#09080b', stroke: '#3a3342', 'stroke-width': 2.5 }, gp);
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4 - Math.PI / 2;
+    const p0 = polar(200, cy, R * .25, a), p1 = polar(200, cy, R * .95, a);
+    const c1 = polar(200, cy, R * .6, a - .38), c2 = polar(200, cy, R * .6, a + .38);
+    el('path', { d: `M${fx(p0)}Q${fx(c1)} ${fx(p1)}Q${fx(c2)} ${fx(p0)}Z`, fill: cols[k % cols.length], stroke: CAME, 'stroke-width': 1.6 }, gp);
+  }
+  el('circle', { cx: 200, cy, r: R * .25, fill: lit ? GILT : '#332d3a', stroke: CAME, 'stroke-width': 1.6 }, gp);
+  for (const s of [-1, 1]) {
+    const x = 200 + s * (g.gw * .36), y = g.gy - g.archH * .18, r = Math.min(10, g.gw * .07);
+    el('circle', { cx: x, cy: y, r, fill: lit ? GILT : '#2a2531', stroke: CAME, 'stroke-width': 1.4 }, gp);
+  }
+}
+
+function riddleCounts(line) { return lineCounts(line, RG.board, RIDDLE_BG); }
+function stoneState(h, k) {
+  const tgt = RG.rd.clues[h][k], cur = riddleCounts(RG.rd.lines[h][k]);
+  const cols = RG.rd.paint.filter(c => (tgt[c] || 0) > 0 || (cur[c] || 0) > 0);
+  const chips = cols.map(c => ({ c, t: tgt[c] || 0, n: cur[c] || 0 }));
+  return { chips, done: chips.every(x => x.t === x.n) };
+}
+
+function drawRiddle() {
+  const rd = RG.rd, g = RGEO, h = RG.hour;
+  const s = HOURS[h].shift;
+  layers.sun.setAttribute('cx', (-s * 18).toFixed(1));
+  layers.sun.setAttribute('cy', (8 - 18 * Math.sqrt(1 - s * s)).toFixed(1));
+
+  // Panes
+  const gl = rLayers.glass; gl.innerHTML = '';
+  if (!RG.master) {
+    for (let i = 0; i < rd.W * rd.H; i++) {
+      const [x, y] = cellXY(i), p = RG.board[i];
+      if (!p) el('rect', { x, y, width: g.cs, height: g.cs, fill: '#13101a' }, gl);
+      else if (p === RIDDLE_BG) {
+        el('rect', { x, y, width: g.cs, height: g.cs, fill: '#2a2632' }, gl);
+        el('circle', { cx: x + g.cs / 2, cy: y + g.cs / 2, r: g.cs * .07, fill: '#5d5566' }, gl);
+      } else {
+        el('rect', { x, y, width: g.cs, height: g.cs, fill: RCOL[p] }, gl);
+        el('rect', { x, y, width: g.cs, height: g.cs, fill: 'url(#rsheen)' }, gl);
+      }
+      if (RG.locked[i]) el('circle', { cx: x + 4.5, cy: y + 4.5, r: 2, fill: GILT, stroke: CAME, 'stroke-width': .8 }, gl);
+    }
+    let d = '';
+    for (let c = 0; c <= rd.W; c++) d += `M${g.gx + c * g.cs},${g.gy}v${g.gh}`;
+    for (let r = 0; r <= rd.H; r++) d += `M${g.gx},${g.gy + r * g.cs}h${g.gw}`;
+    el('path', { d, stroke: CAME, 'stroke-width': 2.2, fill: 'none' }, gl);
+  }
+
+  // The glazier's cartoon, earned by answering the riddle.
+  const sk = rLayers.sketch; sk.innerHTML = '';
+  if (RG.guessed && !RG.master) {
+    let d = '';
+    const fig = i => rd.sol[i] !== RIDDLE_BG;
+    for (let i = 0; i < rd.W * rd.H; i++) {
+      if (!fig(i)) continue;
+      const c = i % rd.W, r = Math.floor(i / rd.W), [x, y] = cellXY(i);
+      if (r === 0 || !fig(i - rd.W)) d += `M${x},${y}h${g.cs}`;
+      if (r === rd.H - 1 || !fig(i + rd.W)) d += `M${x},${y + g.cs}h${g.cs}`;
+      if (c === 0 || !fig(i - 1)) d += `M${x},${y}v${g.cs}`;
+      if (c === rd.W - 1 || !fig(i + 1)) d += `M${x + g.cs},${y}v${g.cs}`;
+    }
+    el('path', { d, stroke: '#fff1c2', 'stroke-width': 1.6, 'stroke-dasharray': '3 2.5', fill: 'none', opacity: .7, 'stroke-linecap': 'round' }, sk);
+  }
+
+  // Beams, each tinted by the glass it passed through
+  const bm = rLayers.beams; bm.innerHTML = '';
+  const fl = rLayers.floor; fl.innerHTML = '';
+  const ch = rLayers.chips; ch.innerHTML = '';
+  const lines = rd.lines[h], n = lines.length;
+  el('polygon', { points: pts([[16, g.FT - 4], [384, g.FT - 4], [400, g.FB + 6], [0, g.FB + 6]]), fill: '#0d0b10' }, fl);
+  lines.forEach((line, k) => {
+    const q = stoneQuad(k, n);
+    const last = line[line.length - 1], [x, y] = cellXY(last);
+    let rgb = [0, 0, 0], m = 0;
+    for (const i of line) { const p = RG.board[i] || (RG.master ? rd.sol[i] : null); if (p && p !== RIDDLE_BG) { const v = rgbOf(RCOL[p]); rgb = rgb.map((a, j) => a + v[j]); m++; } }
+    const col = m ? `rgb(${rgb.map(v => Math.round(Math.min(255, v / m * 1.25)))})` : '#fff0cc';
+    el('polygon', { points: pts([[x + 2, y + g.cs], [x + g.cs - 2, y + g.cs], q[1], q[0]]), fill: col, opacity: m ? .22 : .07 }, bm);
+    const st = stoneState(h, k);
+    el('polygon', { points: pts(q), fill: 'url(#floorg)', stroke: '#0a090c', 'stroke-width': 1.5 }, fl);
+    if (m) el('polygon', { points: pts(q), fill: col, opacity: .28 }, fl);
+    if (st.done && st.chips.length) el('polygon', { points: pts(q), fill: '#ffe9a8', opacity: .12 }, fl);
+    // Count chips
+    const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, R = g.chipR;
+    if (!st.chips.length) { el('circle', { cx, cy: g.FT + 10 + R, r: 1.6, fill: '#5d5566' }, ch); return; }
+    st.chips.forEach((cp, j) => {
+      const cy = g.FT + 9 + R + j * (2 * R + 3);
+      const ring = cp.n === cp.t ? '#ffe9a8' : cp.n > cp.t ? '#ff5a5a' : '#09080b';
+      el('circle', { cx, cy, r: R, fill: RCOL[cp.c], stroke: ring, 'stroke-width': cp.n === cp.t || cp.n > cp.t ? 2 : 1.2, opacity: cp.t === 0 ? .8 : 1 }, ch);
+      const t = el('text', { x: cx, y: cy + R * .38, 'text-anchor': 'middle', 'font-size': (R * 1.15).toFixed(1), 'font-family': 'Georgia, serif', 'font-weight': 'bold',
+        fill: cp.c === 'W' || cp.c === 'Y' ? '#1a1208' : '#fff6e6' }, ch);
+      t.textContent = cp.t;
+    });
+  });
+
+  // Peek: the beam's path through the window
+  const pk = rLayers.peek; pk.innerHTML = '';
+  if (RG.peek !== null && RG.peek.hour === h) {
+    for (const i of lines[RG.peek.k]) { const [x, y] = cellXY(i); el('rect', { x: x + 1.5, y: y + 1.5, width: g.cs - 3, height: g.cs - 3, fill: '#fff3c4', 'fill-opacity': .12, stroke: '#fff3c4', 'stroke-width': 1.6, 'stroke-dasharray': '3 2' }, pk); }
+    el('polygon', { points: pts(stoneQuad(RG.peek.k, n)), fill: 'none', stroke: '#fff3c4', 'stroke-width': 1.6, 'stroke-dasharray': '3 2' }, pk);
+  }
+}
+
+// ---- riddle UI
+function rgemIcon(c) {
+  if (c === RIDDLE_BG) return `<svg viewBox="0 0 30 34"><rect x="4" y="5" width="22" height="26" rx="2" fill="#2a2632" stroke="#09080b" stroke-width="1.6"/><circle cx="15" cy="18" r="2.4" fill="#5d5566"/></svg>`;
+  const col = RCOL[c];
+  return `<svg viewBox="0 0 30 34"><path d="M15 2L27 12L22 32H8L3 12Z" fill="${col}"/><path d="M15 2L27 12L15 15L3 12Z" fill="#fff" opacity=".3"/><path d="M15 15L22 32H8Z" fill="#000" opacity=".2"/><path d="M15 2L27 12L22 32H8L3 12Z" fill="none" stroke="#09080b" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+function renderRiddleUI() {
+  const rd = RG.rd;
+  $('#lv-num').textContent = 'RIDDLE ' + toRoman(rd.id + 1) + ' OF ' + toRoman(RIDDLES.length);
+  $('#lv-name').textContent = rd.name;
+  $('#lv-name').classList.toggle('long', rd.name.length > 19);
+  $('#lore').hidden = true;
+  const box = $('#riddle'); box.hidden = false;
+  const ans = rd.answers[0];
+  box.innerHTML = `<p class="verse">“${rd.verse}”</p>` + (RG.guessed
+    ? `<p class="answered">Answered: <b>${ans}</b>. The glazier has sketched its outline.</p>`
+    : `<form id="guess" autocomplete="off"><input id="guess-in" type="text" placeholder="Name the answer" aria-label="Your answer" enterkeyhint="done"><button class="btn small" type="submit">Answer</button></form>`)
+    + (rd.help && !RG.master ? `<p class="help">${rd.help}</p>` : '');
+  const f = $('#guess');
+  if (f) f.addEventListener('submit', e => { e.preventDefault(); guessRiddle($('#guess-in').value); });
+  renderRiddleHours();
+  renderRiddleTray();
+}
+function renderRiddleHours() {
+  const box = $('#hours'); box.innerHTML = '';
+  for (const h of HOUR_ORDER) {
+    const n = RG.rd.lines[h].length;
+    let done = 0;
+    for (let k = 0; k < n; k++) if (stoneState(h, k).done) done++;
+    const b = document.createElement('button');
+    b.className = 'hour' + (RG.hour === h ? ' on' : '') + (done === n ? ' done' : '');
+    b.innerHTML = `${sunIcon(h, RG.hour === h)}<span class="hn">${HOURS[h].name}</span><span class="hs">${done} of ${n} true</span>`;
+    b.onclick = () => { if (RG.won && !RG.winShown) return; if (RG.hour !== h) { RG.hour = h; RG.peek = null; sfx.bell(h); renderRiddleHours(); drawRiddle(); } };
+    box.appendChild(b);
+  }
+}
+function renderRiddleTray() {
+  const box = $('#tray'); box.innerHTML = '';
+  for (const c of [...RG.rd.paint, RIDDLE_BG]) {
+    const b = document.createElement('button');
+    b.className = 'gem' + (RG.sel === c ? ' sel' : '');
+    b.innerHTML = `${rgemIcon(c)}<span class="gn">${RNAME[c]}</span>`;
+    b.setAttribute('aria-label', `${RNAME[c]} glass`);
+    b.onclick = () => { RG.sel = c; sfx.paint(c); renderRiddleTray(); };
+    box.appendChild(b);
+  }
+}
+function normAnswer(s) { return s.toLowerCase().replace(/[^a-z ]/g, '').replace(/^(a|an|the) /, '').trim(); }
+function guessRiddle(text) {
+  const g = normAnswer(text);
+  if (!g) return;
+  if (RG.rd.answers.map(normAnswer).includes(g)) {
+    RG.guessed = true;
+    save.riddles[RG.id] = { ...(save.riddles[RG.id] || {}), guessed: true };
+    persist();
+    sfx.bell('S');
+    toast('Correct. The glazier sketches the outline for you.');
+    renderRiddleUI(); drawRiddle();
+  } else {
+    const inp = $('#guess-in');
+    inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake');
+    toast('Not that. Read it again, or let the light tell you.');
+  }
+}
+
+// ---- painting
+function svgPoint(e) {
+  const p = scene.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+  return p.matrixTransform(scene.getScreenCTM().inverse());
+}
+function cellAt(p) {
+  const g = RGEO, c = Math.floor((p.x - g.gx) / g.cs), r = Math.floor((p.y - g.gy) / g.cs);
+  return c >= 0 && c < g.W && r >= 0 && r < g.H ? r * g.W + c : -1;
+}
+function stoneAt(p) {
+  const g = RGEO;
+  if (p.y < g.FT - 6 || p.y > g.FB + 6) return -1;
+  const n = RG.rd.lines[RG.hour].length, t = (p.y - g.FT) / (g.FB - g.FT);
+  const left = 22 + (4 - 22) * t, w = (356 + (392 - 356) * t) / n;
+  const k = Math.floor((p.x - left) / w);
+  return k >= 0 && k < n ? k : -1;
+}
+let lastPaintSound = 0;
+function paintCell(i) {
+  if (RG.locked[i]) return false;
+  const v = RG.dragMode === 'erase' ? null : RG.sel;
+  if (RG.board[i] === v) return false;
+  RG.board[i] = v;
+  const now = performance.now();
+  if (now - lastPaintSound > 45) { v ? sfx.paint(v) : sfx.lift(); lastPaintSound = now; }
+  return true;
+}
+scene.addEventListener('pointerdown', e => {
+  if (MODE !== 'riddle' || !RG) return;
+  if (RG.won && !RG.winShown) { showRiddleWin(); return; }
+  const p = svgPoint(e);
+  const i = cellAt(p);
+  if (i >= 0) {
+    if (RG.master) return;
+    if (RG.locked[i]) { toast('This pane is old glass, set long ago.'); return; }
+    RG.peek = null;
+    RG.dragMode = RG.board[i] === RG.sel ? 'erase' : 'paint';
+    RG.dragging = true;
+    try { scene.setPointerCapture(e.pointerId); } catch (err) {}
+    if (paintCell(i)) { drawRiddle(); renderRiddleHours(); }
+    return;
+  }
+  const k = stoneAt(p);
+  if (k >= 0) riddlePeek(k);
+});
+scene.addEventListener('pointermove', e => {
+  if (MODE !== 'riddle' || !RG || !RG.dragging) return;
+  const i = cellAt(svgPoint(e));
+  if (i >= 0 && paintCell(i)) { drawRiddle(); renderRiddleHours(); }
+});
+const endDrag = () => { if (MODE === 'riddle' && RG && RG.dragging) { RG.dragging = false; checkRiddleWin(); } };
+scene.addEventListener('pointerup', endDrag);
+scene.addEventListener('pointercancel', endDrag);
+
+let rPeekTimer;
+function riddlePeek(k) {
+  const h = RG.hour, line = RG.rd.lines[h][k], tgt = RG.rd.clues[h][k];
+  RG.peek = { hour: h, k };
+  const parts = RG.rd.paint.filter(c => tgt[c]).map(c => `${tgt[c]} ${RNAME[c].toLowerCase()}`);
+  const plain = tgt[RIDDLE_BG] || 0;
+  toast(`${line.length} panes: ` + (parts.length ? parts.join(', ') + (plain ? `, ${plain} plain` : '') : 'all plain'));
+  drawRiddle();
+  clearTimeout(rPeekTimer);
+  rPeekTimer = setTimeout(() => { if (RG && RG.peek && RG.peek.k === k) { RG.peek = null; drawRiddle(); } }, 2600);
+}
+
+function checkRiddleWin() {
+  const rd = RG.rd;
+  if (RG.won) return;
+  for (let i = 0; i < rd.W * rd.H; i++) if (!solved(rd, RG.board, i)) return;
+  RG.won = true;
+  save.riddles[RG.id] = { ...(save.riddles[RG.id] || {}), solved: true };
+  persist();
+  sfx.win();
+  RG.master = true;
+  RG.peek = null;
+  drawRiddleHead(true);
+  rLayers.master.innerHTML = '';
+  drawRiddleMaster(rLayers.master, rd, RGEO, 'rm', !reduceMotion);
+  drawRiddle();
+  const id = RG.id;
+  RG.winTimer = setTimeout(() => { if (RG && RG.id === id) showRiddleWin(); }, reduceMotion ? 300 : 2900);
+}
+
+// The revealed picture, re-leaded: pieces follow colour boundaries, the
+// ground becomes blue quarries, and a banner names the answer.
+function drawRiddleMaster(parent, rd, g, pfx, animate) {
+  const { W, H, sol } = rd, n = W * H, cs = g.cs;
+  const rng = mulberry32(900 + rd.id);
+  const root = el('g', {}, parent);
+  const defs = el('defs', {}, root);
+  const at = i => [g.gx + (i % W) * cs, g.gy + Math.floor(i / W) * cs];
+  const P = (tag, attrs, gp, row) => {
+    const e = el(tag, attrs, gp);
+    if (animate) { e.classList.add('mw'); e.style.animationDelay = (row / H * 1.5 + rng() * .2).toFixed(2) + 's'; }
+    return e;
+  };
+  // Connected pieces of one colour share one shade of glass.
+  const comp = new Array(n).fill(-1), shadeOf = [];
+  for (let i = 0; i < n; i++) {
+    if (comp[i] >= 0) continue;
+    const id = shadeOf.length, stack = [i];
+    shadeOf.push((rng() - .5) * .22);
+    comp[i] = id;
+    while (stack.length) {
+      const j = stack.pop(), c = j % W;
+      for (const k of [j - W, j + W, c > 0 ? j - 1 : -1, c < W - 1 ? j + 1 : -1]) {
+        if (k >= 0 && k < n && comp[k] < 0 && sol[k] === sol[j]) { comp[k] = id; stack.push(k); }
+      }
+    }
+  }
+  const bgClip = el('clipPath', { id: `${pfx}-bg` }, defs);
+  const figClip = el('clipPath', { id: `${pfx}-fig` }, defs);
+  for (let i = 0; i < n; i++) {
+    const [x, y] = at(i), r = Math.floor(i / W);
+    const isBg = sol[i] === RIDDLE_BG;
+    const base = isBg ? '#16348a' : RCOL[sol[i]];
+    P('rect', { x, y, width: cs + .4, height: cs + .4, fill: shade(base, shadeOf[comp[i]] + (isBg ? (rng() - .5) * .16 : 0)) }, root, r);
+    el('rect', { x, y, width: cs, height: cs }, isBg ? bgClip : figClip);
+  }
+  // Quarry lattice over the ground
+  const qg = el('g', { 'clip-path': `url(#${pfx}-bg)` }, root);
+  let d = '';
+  const step = cs * 1.1, span = g.gw + g.gh;
+  for (let t = -span; t < span * 2; t += step) {
+    d += `M${g.gx + t},${g.gy}l${g.gh},${g.gh}M${g.gx + t},${g.gy}l${-g.gh},${g.gh}`;
+  }
+  P('path', { d, stroke: CAME, 'stroke-width': 1.1, fill: 'none', opacity: .9 }, qg, H / 2);
+  // Light across the figure
+  const sg = el('g', { 'clip-path': `url(#${pfx}-fig)` }, root);
+  P('rect', { x: g.gx, y: g.gy, width: g.gw, height: g.gh, fill: 'url(#rsheen)' }, sg, H / 2);
+  // Lead only where the colour changes
+  d = '';
+  for (let i = 0; i < n; i++) {
+    const [x, y] = at(i), c = i % W;
+    if (c < W - 1 && sol[i] !== sol[i + 1]) d += `M${x + cs},${y}v${cs}`;
+    if (i + W < n && sol[i] !== sol[i + W]) d += `M${x},${y + cs}h${cs}`;
+  }
+  P('path', { d, stroke: CAME, 'stroke-width': 2.6, 'stroke-linecap': 'round', fill: 'none' }, root, H / 2);
+  // Jewelled frame
+  P('rect', { x: g.gx - 3, y: g.gy - 3, width: g.gw + 6, height: g.gh + 6, fill: 'none', stroke: '#a50f2a', 'stroke-width': 6 }, root, 0);
+  P('rect', { x: g.gx - 3, y: g.gy - 3, width: g.gw + 6, height: g.gh + 6, fill: 'none', stroke: GILT, 'stroke-width': 6, 'stroke-dasharray': '4 5' }, root, 0);
+  el('rect', { x: g.gx - 6, y: g.gy - 6, width: g.gw + 12, height: g.gh + 12, fill: 'none', stroke: CAME, 'stroke-width': 1.5 }, root);
+  el('rect', { x: g.gx, y: g.gy, width: g.gw, height: g.gh, fill: 'none', stroke: CAME, 'stroke-width': 1.5 }, root);
+  // Banner naming the answer
+  const by = g.sill + 14, bw = Math.min(200, g.gw * .9);
+  const ban = el('g', {}, root);
+  P('path', { d: `M${200 - bw / 2 - 12},${by - 9}h12v-2h${bw}v2h12l-7,9l7,9h-12v2h${-bw}v-2h-12l7,-9Z`, fill: '#e8d9a8', stroke: '#6b4f1d', 'stroke-width': 1.2 }, ban, H);
+  const t = P('text', { x: 200, y: by + 6, 'text-anchor': 'middle', 'font-family': 'UnifrakturMaguntia, Georgia, serif', 'font-size': 17, fill: '#3a2410' }, ban, H);
+  t.textContent = rd.answers[0].replace(/^\w/, c => c.toUpperCase());
+  if (animate) {
+    const fl = el('rect', { x: g.gx, y: g.gy, width: g.gw, height: g.gh, fill: '#fff4d0', class: 'mw-flash', style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, root);
+  }
+  return root;
+}
+function riddleThumb(id) {
+  const rd = getRiddle(id), g = riddleGeo(rd);
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `${g.gx - 8} ${g.gy - 8} ${g.gw + 16} ${g.gh + 16}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.innerHTML = `<defs><radialGradient id="rsheen" cx=".3" cy=".25" r=".9"><stop offset="0" stop-color="#fff" stop-opacity=".4"/><stop offset="1" stop-color="#000" stop-opacity=".2"/></radialGradient></defs>`;
+  const noBanner = { ...g, sill: -999 };
+  drawRiddleMaster(svg, rd, noBanner, 'rt' + id, false);
+  return svg.outerHTML;
+}
+
+function showRiddleWin() {
+  if (RG.winShown) return;
+  RG.winShown = true;
+  clearTimeout(RG.winTimer);
+  const rd = RG.rd, next = RG.id + 1, last = next >= RIDDLES.length;
+  const ans = rd.answers[0];
+  ov.innerHTML = `<div class="sheet">
+    <h1>Revealed</h1>
+    <h2>The answer was ${/^[aeiou]/.test(ans) ? 'an' : 'a'} ${ans}</h2>
+    <p class="inc">${RG.guessed ? 'You read the riddle before the glass was done.' : 'The light spelled it out before you could.'}</p>
+    ${RG.hints ? `<p>${RG.hints} pane${RG.hints > 1 ? 's' : ''} set by the master glazier.</p>` : ''}
+    <div class="levels-actions">
+      <button class="btn" id="ov-next">${last ? 'All riddles solved' : 'Next riddle'}</button>
+      <button class="btn ghost" id="ov-stay">Admire it</button>
+    </div></div>`;
+  $('#ov-next').onclick = () => { closeOverlay(); last ? showLevels() : startRiddle(next); };
+  $('#ov-stay').onclick = () => { closeOverlay(); renderRiddleUI(); };
+}
+function riddleHint() {
+  const rd = RG.rd, n = rd.W * rd.H;
+  if (RG.won) return;
+  const wrong = [], open = [];
+  for (let i = 0; i < n; i++) {
+    if (RG.locked[i]) continue;
+    if (RG.board[i] && !solved(rd, RG.board, i)) wrong.push(i);
+    else if (!RG.board[i] && rd.sol[i] !== RIDDLE_BG) open.push(i);
+  }
+  const pool = wrong.length ? wrong : open;
+  if (!pool.length) return;
+  const i = pool[Math.floor(Math.random() * pool.length)];
+  RG.board[i] = rd.sol[i]; RG.locked[i] = true; RG.hints++;
+  sfx.bell('S');
+  toast(wrong.length ? 'The glazier corrects a pane you had wrong.' : `The glazier sets a pane of ${RNAME[rd.sol[i]].toLowerCase()}.`);
+  drawRiddle(); renderRiddleHours();
+  checkRiddleWin();
 }
 
 // ---------------------------------------------------------------- sound
@@ -1259,21 +1867,30 @@ const sfx = (() => {
     tick(p) { if (p === 'L') { tone(110, .25, 'triangle', .2); tone(220, .12, 'square', .03); } else { tone(pitch[p], .35, 'sine', .12); tone(pitch[p] * 2.76, .12, 'sine', .03); } },
     lift() { tone(880, .12, 'triangle', .06); },
     bell(h) { const f = { L: 293.66, S: 392, V: 261.63 }[h] || 392; tone(f, 2.2, 'sine', .12); tone(f * 2.01, 1.2, 'sine', .05); tone(f * 2.76, .7, 'sine', .03); },
+    paint(c) { const f = { R: 1318.5, Y: 1567.98, O: 1396.9, G: 1174.66, B: 1046.5, P: 1244.5, W: 1975.5, K: 196, '.': 880 }[c] || 1200; tone(f, .22, c === 'K' ? 'triangle' : 'sine', .08); },
     win() { [293.66, 369.99, 440, 587.33].forEach((f, i) => { tone(f, 3, 'sine', .1, i * .22); tone(f * 2.01, 1.6, 'sine', .035, i * .22); }); },
   };
 })();
 
 // ---------------------------------------------------------------- boot
 $('#btn-menu').onclick = showLevels;
-$('#btn-hint').onclick = hint;
-$('#btn-reset').onclick = () => { if (G) { G.admiring = false; startLevel(G.id); } };
+$('#btn-hint').onclick = () => MODE === 'riddle' ? riddleHint() : hint();
+$('#btn-reset').onclick = () => {
+  if (MODE === 'riddle' && RG) startRiddle(RG.id);
+  else if (G) { G.admiring = false; startLevel(G.id); }
+};
 
-window.claude?.hot?.snapshot?.(() => G && !G.won ? { id: G.id, board: G.board, locked: G.locked, inv: G.inv, hour: G.hour, sel: G.sel } : {});
+window.claude?.hot?.snapshot?.(() => {
+  if (MODE === 'riddle' && RG && !RG.won) return { mode: 'riddle', id: RG.id, board: RG.board, locked: RG.locked, hour: RG.hour };
+  return G && !G.won ? { id: G.id, board: G.board, locked: G.locked, inv: G.inv, hour: G.hour, sel: G.sel } : {};
+});
 function boot(data) {
+  if (data && data.mode === 'riddle' && RIDDLES[data.id]) { startRiddle(data.id, data); return; }
   const id = data && typeof data.id === 'number' ? data.id : Math.min(save.unlocked, CAMPAIGN.length - 1);
   startLevel(id, data && data.board ? data : null);
 }
 window.claude?.hot?.ready ? window.claude.hot.ready(boot) : boot(window.claude?.hot?.data ?? {});
+if (!save.seenRiddles) setTimeout(() => toast('New: Riddle windows. Open the windows list.'), 900);
 </script>
 </body>
 </html>
