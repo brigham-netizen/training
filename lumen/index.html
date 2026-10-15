@@ -185,6 +185,27 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
   .gem { height: 50px; } .gem svg { width: 26px; height: 28px; }
   .hour { padding: 3px 4px 4px; }
 }
+/* The nave */
+.home { position: fixed; inset: 0; z-index: 10; background: #0b090e; overflow: hidden; animation: fadein .5s; }
+#home-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transition: transform .62s cubic-bezier(.5, 0, .7, .4), opacity .62s; }
+#home-svg.zoom { transform: scale(2.6); opacity: 0; }
+.home-top, .home-bottom { position: absolute; left: 0; right: 0; text-align: center; transition: opacity .3s;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); pointer-events: none; }
+.home-top { top: 0; padding-top: max(14px, env(safe-area-inset-top, 0px)); }
+.home-top h1 { font-family: var(--font-title); font-weight: normal; font-size: 54px; line-height: 1; margin: 0; color: var(--gilt); text-shadow: 0 2px 18px #000; }
+.home-top p { margin: 4px 0 0; font-family: var(--font-label); letter-spacing: .2em; font-size: 13px; color: var(--vellum-dim); text-transform: uppercase; }
+.home-bottom { bottom: 0; padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)); display: flex; gap: 10px; justify-content: center; }
+.home-bottom .btn { pointer-events: auto; background: #110e16cc; font-size: 15px; padding: 9px 18px; }
+.hwin { cursor: pointer; transition: filter .3s; }
+.hwin:hover, .hwin:focus-visible { filter: brightness(1.18); outline: none; }
+.hwin.chosen { filter: brightness(1.6) drop-shadow(0 0 12px #ffe7a0); }
+.hwin.soon { cursor: default; }
+.shaft { animation: shaft 7s ease-in-out infinite alternate; }
+@keyframes shaft { from { opacity: .7; } to { opacity: 1; } }
+.breathe { animation: shaft 5s ease-in-out infinite alternate; }
+.mote { opacity: 0; animation: mote 9s linear infinite; }
+@keyframes mote { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: .8; } 100% { opacity: 0; transform: translateY(-120px); } }
+
 /* Masterwork reveal */
 .mw { animation: glassIn .7s ease-out both; }
 @keyframes glassIn { from { opacity: 0; } }
@@ -210,6 +231,9 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
   .overlay, .gem.flash, .sheet, .mw, .mw-flash { animation: none; }
   .mw-flash { opacity: 0; }
   .twinkle { animation: none; opacity: .7; }
+  .home, .shaft, .breathe { animation: none; }
+  .mote { animation: none; opacity: .5; }
+  #home-svg { transition: none; }
 }
 </style>
 </head>
@@ -1327,61 +1351,237 @@ function admire() {
   $('#lore').innerHTML = '<span>Your window, finished and leaded. Switch hours to watch the light, or open the windows list to move on.</span>';
   renderHours(); draw();
 }
-function showLevels() {
-  const cells = CAMPAIGN.map((c, i) => {
-    const open = i <= save.unlocked;
-    const done = save.solved[i] !== undefined;
-    const art = done ? masterThumb(i) : `<svg viewBox="0 0 64 76"><path d="M4 74V30Q4 6 32 2Q60 6 60 30V74Z" fill="#09080b"/>
-      <path d="M9 72V31Q9 12 32 7V72Z" fill="#2a2531"/><path d="M55 72V31Q55 12 32 7V72Z" fill="#241f2b"/>
-      <circle cx="32" cy="30" r="8" fill="#2a2531" stroke="#09080b" stroke-width="2.5"/>
-      <path d="M4 74V30Q4 6 32 2Q60 6 60 30V74ZM32 7V72" fill="none" stroke="#3a3342" stroke-width="2.5"/></svg>`;
-    return `<button class="lv${done ? ' done' : ''}" data-lv="${i}" ${open ? '' : 'disabled'} aria-label="Window ${i + 1}${done ? ', consecrated' : ''}">
-      ${art}
-      <span>${toRoman(i + 1)}</span></button>`;
-  }).join('');
-  const rcells = RIDDLES.map((r, i) => {
-    const done = save.riddles[i] && save.riddles[i].solved;
-    const open = i === 0 || (save.riddles[i - 1] && save.riddles[i - 1].solved);
-    const art = done ? riddleThumb(i) : `<svg viewBox="0 0 64 64"><rect x="3" y="3" width="58" height="58" rx="4" fill="#09080b" stroke="#3a3342" stroke-width="2.5"/><text x="32" y="44" text-anchor="middle" font-family="UnifrakturMaguntia, Georgia, serif" font-size="34" fill="${open ? '#d6a542' : '#3a3342'}">?</text></svg>`;
-    return `<button class="rv${done ? ' done' : ''}" data-rd="${i}" ${open ? '' : 'disabled'} aria-label="Riddle ${i + 1}${done ? ', solved' : ''}">${art}<span>${toRoman(i + 1)}</span></button>`;
-  }).join('');
-  save.seenRiddles = true; persist();
-  const pilOpen = save.unlocked >= CAMPAIGN.length;
-  ov.innerHTML = `<div class="overlay">
-    <h1>Lumen</h1>
-    <p>Set the glass so the sun paints the floor true at every hour of prayer.</p>
-    <h3>Hours of light</h3>
-    <div id="levels-grid">${cells}</div>
-    <h3>Riddle windows</h3>
-    <p class="sub">Read the riddle, then let the sun reveal the picture that answers it.</p>
-    <div id="riddle-grid">${rcells}</div>
+// ---------------------------------------------------------------- the nave (home)
+// The game opens in the cathedral. Each great window leads to one game.
+function fitInto(g, box, slot) {
+  const s = Math.min(slot.w / box.w, slot.h / box.h);
+  const tx = slot.x + slot.w / 2 - (box.x + box.w / 2) * s;
+  const ty = slot.y + slot.h - (box.y + box.h) * s;
+  g.setAttribute('transform', `translate(${tx.toFixed(2)},${ty.toFixed(2)}) scale(${s.toFixed(4)})`);
+}
+function archD(x, y, w, h, rise) {
+  return `M${x},${y + h}L${x},${y + rise}Q${x},${y + rise * .25} ${x + w / 2},${y}Q${x + w},${y + rise * .25} ${x + w},${y + rise}L${x + w},${y + h}Z`;
+}
+const HOME_MOON = { id: 50, answers: [''], art: ['.......', '..YYY..', '.YY..W.', '.Y.....', '.Y..W..', '.Y.....', '.YY..W.', '..YYY..', '.......'] };
+
+function showHome() {
+  const lightDone = Object.keys(save.solved).filter(k => +k < CAMPAIGN.length).length;
+  const riddleDone = RIDDLES.filter((r, i) => save.riddles[i] && save.riddles[i].solved).length;
+  ov.innerHTML = `<div class="home">
+    <svg id="home-svg" viewBox="0 0 400 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The nave of the cathedral with three great windows"></svg>
+    <div class="home-top"><h1>Lumen</h1><p>Choose a window</p></div>
+    <div class="home-bottom">
+      <button class="btn ghost" id="h-how">How to play</button>
+      <button class="btn ghost" id="h-snd">Sound ${save.sound ? 'on' : 'off'}</button>
+    </div></div>`;
+  const svg = $('#home-svg');
+  svg.innerHTML = `<defs>
+    <linearGradient id="h-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b090e"/><stop offset=".55" stop-color="#1a1520"/><stop offset="1" stop-color="#120f16"/></linearGradient>
+    <linearGradient id="h-col" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0c0a10"/><stop offset=".45" stop-color="#342c3c"/><stop offset="1" stop-color="#0c0a10"/></linearGradient>
+    <linearGradient id="h-floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#15121a"/><stop offset="1" stop-color="#2a2430"/></linearGradient>
+    <linearGradient id="h-brass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e7c06a"/><stop offset="1" stop-color="#9a7228"/></linearGradient>
+    <radialGradient id="rsheen" cx=".3" cy=".25" r=".9"><stop offset="0" stop-color="#fff" stop-opacity=".4"/><stop offset=".6" stop-color="#fff" stop-opacity=".04"/><stop offset="1" stop-color="#000" stop-opacity=".22"/></radialGradient>
+    ${['#ff6a4a', '#ffd36b', '#7aa2ff'].map((c, i) => `<linearGradient id="h-shaft${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity=".34"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient>`).join('')}
+    <filter id="h-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+  </defs>`;
+  el('rect', { x: -40, y: 0, width: 480, height: 720, fill: 'url(#h-wall)' }, svg);
+  // Floor in perspective toward the apse
+  el('polygon', { points: '-40,720 440,720 330,520 70,520', fill: 'url(#h-floor)' }, svg);
+  let fd = '';
+  for (let k = 0; k <= 10; k++) { const t = k / 10; fd += `M${70 + 260 * t},520L${-40 + 480 * t},720`; }
+  for (const y of [536, 556, 582, 614, 656, 708]) { const t = (y - 520) / 200; fd += `M${70 - 110 * t},${y}L${330 + 110 * t},${y}`; }
+  el('path', { d: fd, stroke: '#0a090c', 'stroke-width': 1.4, fill: 'none' }, svg);
+  // Vault ribs
+  let vd = '';
+  for (const [w, top] of [[400, 18], [330, 44], [270, 66]]) vd += `M${200 - w / 2},250Q${200 - w / 2},${top + 30} 200,${top}Q${200 + w / 2},${top + 30} ${200 + w / 2},250`;
+  vd += 'M0,250L200,18L400,250M35,250Q120,120 200,66Q280,120 365,250';
+  el('path', { d: vd, stroke: '#3a3342', 'stroke-width': 2, fill: 'none', opacity: .7 }, svg);
+  // Apse wall
+  el('path', { d: archD(36, 96, 328, 424, 150), fill: '#141118', stroke: '#2c2633', 'stroke-width': 2 }, svg);
+
+  const slots = {
+    light: { x: 44, y: 168, w: 100, h: 270 },
+    soon: { x: 158, y: 222, w: 84, h: 216 },
+    riddle: { x: 256, y: 168, w: 100, h: 270 },
+  };
+  const shafts = el('g', { style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, svg);
+  const pools = [['light', 0, 26], ['soon', 1, 0], ['riddle', 2, -26]];
+  for (const [k, gi, lean] of pools) {
+    const s = slots[k];
+    el('polygon', { class: 'shaft', points: `${s.x + 10},${s.y + s.h} ${s.x + s.w - 10},${s.y + s.h} ${s.x + s.w + 40 + lean},680 ${s.x - 40 + lean},680`, fill: `url(#h-shaft${gi})`, opacity: k === 'soon' ? .35 : 1 }, shafts);
+    el('ellipse', { cx: s.x + s.w / 2 + lean, cy: 640, rx: 70, ry: 22, fill: ['#ff6a4a', '#ffd36b', '#7aa2ff'][gi], opacity: k === 'soon' ? .08 : .22, filter: 'url(#h-blur)' }, shafts);
+  }
+  // Rose above the centre
+  const rose = el('g', {}, svg);
+  const rc = [200, 150], R = 44;
+  el('circle', { cx: rc[0], cy: rc[1], r: R + 4, fill: CAME, stroke: '#3a3342', 'stroke-width': 3 }, rose);
+  const rcols = ['#a50f2a', '#173f9e', '#e0a21b', '#1f7a45', '#5e2a8c', '#d9661a'];
+  for (let k = 0; k < 16; k++) {
+    const a0 = k * Math.PI / 8 - Math.PI / 2, a1 = a0 + Math.PI / 8, r0 = R * .78, r1 = R;
+    el('path', { d: `M${fx(polar(...rc, r1, a0))}A${r1},${r1} 0 0 1 ${fx(polar(...rc, r1, a1))}L${fx(polar(...rc, r0, a1))}A${r0},${r0} 0 0 0 ${fx(polar(...rc, r0, a0))}Z`, fill: k % 2 ? rcols[(k >> 1) % 6] : '#16348a', stroke: CAME, 'stroke-width': 1.1 }, rose);
+  }
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4 - Math.PI / 2;
+    const p0 = polar(...rc, R * .22, a), p1 = polar(...rc, R * .76, a), c1 = polar(...rc, R * .52, a - .36), c2 = polar(...rc, R * .52, a + .36);
+    el('path', { d: `M${fx(p0)}Q${fx(c1)} ${fx(p1)}Q${fx(c2)} ${fx(p0)}Z`, fill: rcols[k % 6], stroke: CAME, 'stroke-width': 1.2 }, rose);
+  }
+  el('circle', { cx: rc[0], cy: rc[1], r: R * .22, fill: GILT, stroke: CAME, 'stroke-width': 1.4 }, rose);
+  el('circle', { cx: rc[0], cy: rc[1], r: R, fill: '#ffd76a', opacity: .12, filter: 'url(#h-blur)', class: 'breathe' }, rose);
+
+  // Window: Hours of Light, showing the latest window the player consecrated
+  const lit = el('g', { class: 'hwin', 'data-go': 'light', tabindex: 0, role: 'button', 'aria-label': 'Hours of Light' }, svg);
+  const s1 = slots.light;
+  el('path', { d: archD(s1.x - 8, s1.y - 10, s1.w + 16, s1.h + 18, 60), fill: '#08070a', stroke: '#3f3747', 'stroke-width': 3 }, lit);
+  const best = Object.keys(save.solved).map(Number).filter(k => k < CAMPAIGN.length).sort((a, b) => b - a)[0];
+  const lv = best !== undefined ? getLevel(best) : { id: 77, W: 3, H: 2 };
+  const board = best !== undefined ? lv.solution : ['R', 'Y', 'B', 'B', 'C', 'R'];
+  const lgeo = computeGeo(lv);
+  const lg = el('g', {}, lit);
+  drawMasterwork(lg, lv, board, lgeo, 'hl', false);
+  fitInto(lg, { x: lgeo.x0 - 14, y: lgeo.roseCy - lgeo.roseR - 8, w: lgeo.total + 28, h: lgeo.sill - lgeo.roseCy + lgeo.roseR + 8 }, s1);
+
+  // Window: Riddle Windows, showing the latest revealed picture
+  const rid = el('g', { class: 'hwin', 'data-go': 'riddle', tabindex: 0, role: 'button', 'aria-label': 'Riddle Windows' }, svg);
+  const s3 = slots.riddle;
+  el('path', { d: archD(s3.x - 8, s3.y - 10, s3.w + 16, s3.h + 18, 60), fill: '#08070a', stroke: '#3f3747', 'stroke-width': 3 }, rid);
+  const rbest = RIDDLES.map((r, i) => i).filter(i => save.riddles[i] && save.riddles[i].solved).pop();
+  let rd;
+  if (rbest !== undefined) rd = getRiddle(rbest);
+  else { const H = HOME_MOON.art.length, W = HOME_MOON.art[0].length; rd = { ...HOME_MOON, W, H, sol: HOME_MOON.art.join('').split('') }; }
+  const cs = 20, rg = { gx: 0, gy: 0, cs, gw: rd.W * cs, gh: rd.H * cs, sill: -999 };
+  const rgp = el('g', {}, rid);
+  // arch head above the picture
+  const headH = rg.gw * .55;
+  el('path', { d: `M-6,0Q-6,${-headH * .75} ${rg.gw / 2},${-headH}Q${rg.gw + 6},${-headH * .75} ${rg.gw + 6},0Z`, fill: '#16348a', stroke: CAME, 'stroke-width': 2 }, rgp);
+  el('circle', { cx: rg.gw / 2, cy: -headH * .45, r: headH * .28, fill: GILT, stroke: CAME, 'stroke-width': 2 }, rgp);
+  el('circle', { cx: rg.gw / 2, cy: -headH * .45, r: headH * .14, fill: '#a50f2a', stroke: CAME, 'stroke-width': 1.5 }, rgp);
+  drawRiddleMaster(rgp, rd, rg, 'hr', false);
+  fitInto(rgp, { x: -10, y: -headH - 4, w: rg.gw + 20, h: rg.gh + headH + 10 }, s3);
+
+  // The third window is still under scaffolding.
+  const soon = el('g', { class: 'hwin soon', 'data-go': 'soon', tabindex: 0, role: 'button', 'aria-label': 'A window still under repair' }, svg);
+  const s2 = slots.soon;
+  el('path', { d: archD(s2.x - 6, s2.y - 8, s2.w + 12, s2.h + 14, 50), fill: '#08070a', stroke: '#3f3747', 'stroke-width': 3 }, soon);
+  el('path', { d: archD(s2.x, s2.y, s2.w, s2.h, 44), fill: '#1c1a24' }, soon);
+  let qd = '';
+  for (let t = -s2.h; t < s2.w + s2.h; t += 14) qd += `M${s2.x + t},${s2.y}l${s2.h},${s2.h}M${s2.x + t},${s2.y}l${-s2.h},${s2.h}`;
+  const sc = el('clipPath', { id: 'h-soonclip' }, svg.querySelector('defs'));
+  el('path', { d: archD(s2.x, s2.y, s2.w, s2.h, 44) }, sc);
+  el('path', { d: qd, stroke: '#2e2a36', 'stroke-width': 1, 'clip-path': 'url(#h-soonclip)' }, soon);
+  for (const [y, rot] of [[s2.y + 70, -8], [s2.y + 120, 6], [s2.y + 170, -4]]) {
+    el('rect', { x: s2.x - 12, y, width: s2.w + 24, height: 13, rx: 1.5, fill: '#5a4128', stroke: '#2a1d10', 'stroke-width': 1.2, transform: `rotate(${rot} ${s2.x + s2.w / 2} ${y + 6})` }, soon);
+  }
+  for (const x of [s2.x - 14, s2.x + s2.w + 8]) el('rect', { x, y: s2.y - 20, width: 6, height: s2.h + 40, fill: '#4a3520', stroke: '#2a1d10', 'stroke-width': 1 }, soon);
+
+  // Columns
+  for (const x of [148, 246]) {
+    el('rect', { x: x - 3, y: 150, width: 14, height: 370, fill: 'url(#h-col)' }, svg);
+    el('rect', { x: x - 6, y: 146, width: 20, height: 6, rx: 1, fill: '#3a3342' }, svg);
+  }
+  for (const x of [-40, 372]) {
+    el('rect', { x, y: 0, width: 68, height: 720, fill: 'url(#h-col)' }, svg);
+  }
+
+  // Brass plaques
+  const plaque = (s, go, name, sub) => {
+    const g = el('g', { class: 'hwin', 'data-go': go }, svg);
+    const w = go === 'soon' ? 92 : 112, x = s.x + s.w / 2 - w / 2, y = 462;
+    el('rect', { x, y, width: w, height: 38, rx: 4, fill: 'url(#h-brass)', stroke: '#5d4214', 'stroke-width': 1.2 }, g);
+    const t1 = el('text', { x: x + w / 2, y: y + 16, 'text-anchor': 'middle', 'font-family': '"IM Fell English SC", Georgia, serif', 'font-size': 11.5, fill: '#24170a' }, g); t1.textContent = name;
+    const t2 = el('text', { x: x + w / 2, y: y + 30, 'text-anchor': 'middle', 'font-family': '"IM Fell English", Georgia, serif', 'font-style': 'italic', 'font-size': 10, fill: '#3d2a12' }, g); t2.textContent = sub;
+  };
+  plaque(slots.light, 'light', 'Hours of Light', `${lightDone} of ${CAMPAIGN.length} consecrated`);
+  plaque(slots.soon, 'soon', 'Under repair', 'Glaziers at work');
+  plaque(slots.riddle, 'riddle', 'Riddle Windows', `${riddleDone} of ${RIDDLES.length} revealed`);
+
+  // Dust in the light
+  const rng = mulberry32(7);
+  for (let k = 0; k < 22; k++) {
+    const s = [slots.light, slots.riddle, slots.soon][k % 3];
+    const m = el('circle', { cx: (s.x + rng() * s.w + (rng() - .5) * 60).toFixed(1), cy: (480 + rng() * 180).toFixed(1), r: (.6 + rng() * 1.1).toFixed(2), fill: '#fff4d6', class: 'mote', 'pointer-events': 'none' }, svg);
+    m.style.animationDelay = (rng() * 9).toFixed(2) + 's';
+    m.style.animationDuration = (7 + rng() * 6).toFixed(2) + 's';
+  }
+
+  const go = target => {
+    if (target === 'soon') { toast('The glaziers are still at work on this window.'); return; }
+    sfx.bell(target === 'light' ? 'L' : 'V');
+    const win = svg.querySelector(`.hwin[data-go="${target}"]`);
+    if (reduceMotion) { showLevels(target); return; }
+    // The frame is the first child; the glass inside has clipped paths with wide bounds.
+    const r = win.firstElementChild.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+    svg.style.transformOrigin = `${r.left - sr.left + r.width / 2}px ${r.top - sr.top + r.height / 2}px`;
+    win.classList.add('chosen');
+    svg.classList.add('zoom');
+    $('.home-top').style.opacity = 0; $('.home-bottom').style.opacity = 0;
+    setTimeout(() => showLevels(target), 620);
+  };
+  svg.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g) go(g.dataset.go); });
+  svg.addEventListener('keydown', e => { const g = e.target.closest('[data-go]'); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); go(g.dataset.go); } });
+  $('#h-how').onclick = () => showHow(showHome);
+  $('#h-snd').onclick = () => { save.sound = !save.sound; persist(); $('#h-snd').textContent = 'Sound ' + (save.sound ? 'on' : 'off'); };
+}
+
+function showLevels(mode) {
+  mode = mode === 'riddle' ? 'riddle' : 'light';
+  const inGame = mode === MODE && (mode === 'light' ? G : RG);
+  let body;
+  if (mode === 'light') {
+    const cells = CAMPAIGN.map((c, i) => {
+      const open = i <= save.unlocked;
+      const done = save.solved[i] !== undefined;
+      const art = done ? masterThumb(i) : `<svg viewBox="0 0 64 76"><path d="M4 74V30Q4 6 32 2Q60 6 60 30V74Z" fill="#09080b"/>
+        <path d="M9 72V31Q9 12 32 7V72Z" fill="#2a2531"/><path d="M55 72V31Q55 12 32 7V72Z" fill="#241f2b"/>
+        <circle cx="32" cy="30" r="8" fill="#2a2531" stroke="#09080b" stroke-width="2.5"/>
+        <path d="M4 74V30Q4 6 32 2Q60 6 60 30V74ZM32 7V72" fill="none" stroke="#3a3342" stroke-width="2.5"/></svg>`;
+      return `<button class="lv${done ? ' done' : ''}" data-lv="${i}" ${open ? '' : 'disabled'} aria-label="Window ${i + 1}${done ? ', consecrated' : ''}">${art}<span>${toRoman(i + 1)}</span></button>`;
+    }).join('');
+    const pilOpen = save.unlocked >= CAMPAIGN.length;
+    body = `<h1>Hours of Light</h1>
+      <p>Set the glass so the sun paints the floor true at every hour of prayer.</p>
+      <div id="levels-grid">${cells}</div>
+      <div class="levels-actions"><button class="btn ghost" id="ov-pil" ${pilOpen ? '' : 'disabled style="opacity:.35"'}>Pilgrim road${save.pilgrim ? ' · ' + toRoman(save.pilgrim + 1) : ''}</button></div>`;
+  } else {
+    const rcells = RIDDLES.map((r, i) => {
+      const done = save.riddles[i] && save.riddles[i].solved;
+      const open = i === 0 || (save.riddles[i - 1] && save.riddles[i - 1].solved);
+      const art = done ? riddleThumb(i) : `<svg viewBox="0 0 64 64"><rect x="3" y="3" width="58" height="58" rx="4" fill="#09080b" stroke="#3a3342" stroke-width="2.5"/><text x="32" y="44" text-anchor="middle" font-family="UnifrakturMaguntia, Georgia, serif" font-size="34" fill="${open ? '#d6a542' : '#3a3342'}">?</text></svg>`;
+      return `<button class="rv${done ? ' done' : ''}" data-rd="${i}" ${open ? '' : 'disabled'} aria-label="Riddle ${i + 1}${done ? ', solved' : ''}">${art}<span>${toRoman(i + 1)}</span></button>`;
+    }).join('');
+    body = `<h1>Riddle Windows</h1>
+      <p>Read the riddle, then let the sun reveal the picture that answers it.</p>
+      <div id="riddle-grid">${rcells}</div>`;
+  }
+  ov.innerHTML = `<div class="overlay">${body}
     <div class="levels-actions">
-      <button class="btn ghost" id="ov-pil" ${pilOpen ? '' : 'disabled style="opacity:.35"'}>Pilgrim road${save.pilgrim ? ' · ' + toRoman(save.pilgrim + 1) : ''}</button>
+      <button class="btn ghost" id="ov-nave">Back to the nave</button>
       <button class="btn ghost" id="ov-how">How to play</button>
-      <button class="btn ghost" id="ov-snd">Sound ${save.sound ? 'on' : 'off'}</button>
     </div>
-    <button class="btn" id="ov-close">Return</button>
+    ${inGame ? '<button class="btn" id="ov-close">Return to the window</button>' : ''}
   </div>`;
   ov.querySelectorAll('[data-lv]').forEach(b => b.onclick = () => { closeOverlay(); startLevel(+b.dataset.lv); });
   ov.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => startRiddle(+b.dataset.rd));
-  $('#ov-close').onclick = closeOverlay;
-  $('#ov-how').onclick = showHow;
-  $('#ov-snd').onclick = () => { save.sound = !save.sound; persist(); $('#ov-snd').textContent = 'Sound ' + (save.sound ? 'on' : 'off'); };
-  if (pilOpen) $('#ov-pil').onclick = () => { closeOverlay(); startLevel(CAMPAIGN.length + save.pilgrim); };
+  if (inGame) $('#ov-close').onclick = closeOverlay;
+  $('#ov-nave').onclick = showHome;
+  $('#ov-how').onclick = () => showHow(() => showLevels(mode), mode);
+  const pil = $('#ov-pil');
+  if (pil && !pil.disabled) pil.onclick = () => { closeOverlay(); startLevel(CAMPAIGN.length + save.pilgrim); };
 }
-function showHow() {
+function showHow(back, mode) {
+  const light = `
+      <div><b>Hours of Light.</b> Pick a glass from the tray, then tap an empty pane. Tap a set pane to take it back.</div>
+      <div><b>Read the floor.</b> Diamonds on the stones ask for a colour of light. Big diamonds belong to the hour you are viewing. Small ones belong to other hours: left for Lauds at dawn, middle for Sext at noon, right for Vespers at dusk.</div>
+      <div><b>Follow the sun.</b> At dawn the light leans right, at dusk it leans left. The upper tier throws its light twice as far as the lower.</div>
+      <div><b>Mingle colours.</b> Two beams on one stone blend: ruby and gold make amber, gold and cobalt make green, cobalt and ruby make violet. Clear glass adds light, lead adds shadow. Use every glass in the tray.</div>`;
+  const riddle = `
+      <div><b>Riddle Windows.</b> A picture hides in one large window. Each floor stone counts the coloured panes its beam crosses: straight down at Sext, slanting at Lauds and Vespers.</div>
+      <div><b>Paint.</b> Pick a colour and tap or drag across panes. Tap a stone to trace its beam. Mark panes you know are empty with Plain glass.</div>
+      <div><b>Answer.</b> Name the riddle's answer at any time. If you are right, the glazier sketches the outline for you.</div>`;
   ov.innerHTML = `<div class="overlay">
     <h2>How the light falls</h2>
-    <div class="howto">
-      <div><b>Set the glass.</b> Pick a glass from the tray, then tap an empty pane. Tap a set pane to take it back.</div>
-      <div><b>Read the floor.</b> Diamonds on the stones ask for a colour of light. Their position tells the hour: left for Lauds at dawn, middle for Sext at noon, right for Vespers at dusk.</div>
-      <div><b>Follow the sun.</b> At dawn the light leans right, at dusk it leans left. The upper tier throws its light twice as far as the lower.</div>
-      <div><b>Mingle colours.</b> Two beams on one stone blend: ruby and gold make amber, gold and cobalt make green, cobalt and ruby make violet. Clear glass adds light, lead adds shadow.</div>
-      <div><b>Consecrate.</b> Use every glass in the tray and satisfy every mark at every hour.</div>
-      <div><b>Riddle windows.</b> A picture hides in one large window. Each floor stone counts the coloured panes its beam crosses: straight down at Sext, slanting at Lauds and Vespers. Paint until every count is true. Answer the riddle early and the glazier sketches the outline for you.</div>
-    </div>
+    <div class="howto">${mode === 'riddle' ? riddle : mode === 'light' ? light : light + riddle}</div>
     <button class="btn" id="ov-close">Back</button></div>`;
-  $('#ov-close').onclick = showLevels;
+  $('#ov-close').onclick = back || showHome;
 }
 
 // ================================================================ riddle mode
@@ -1820,7 +2020,7 @@ function showRiddleWin() {
       <button class="btn" id="ov-next">${last ? 'All riddles solved' : 'Next riddle'}</button>
       <button class="btn ghost" id="ov-stay">Admire it</button>
     </div></div>`;
-  $('#ov-next').onclick = () => { closeOverlay(); last ? showLevels() : startRiddle(next); };
+  $('#ov-next').onclick = () => { closeOverlay(); last ? showLevels('riddle') : startRiddle(next); };
   $('#ov-stay').onclick = () => { closeOverlay(); renderRiddleUI(); };
 }
 function riddleHint() {
@@ -1873,7 +2073,8 @@ const sfx = (() => {
 })();
 
 // ---------------------------------------------------------------- boot
-$('#btn-menu').onclick = showLevels;
+$('#btn-menu').setAttribute('aria-label', 'Windows list');
+$('#btn-menu').onclick = () => showLevels(MODE);
 $('#btn-hint').onclick = () => MODE === 'riddle' ? riddleHint() : hint();
 $('#btn-reset').onclick = () => {
   if (MODE === 'riddle' && RG) startRiddle(RG.id);
@@ -1886,11 +2087,12 @@ window.claude?.hot?.snapshot?.(() => {
 });
 function boot(data) {
   if (data && data.mode === 'riddle' && RIDDLES[data.id]) { startRiddle(data.id, data); return; }
-  const id = data && typeof data.id === 'number' ? data.id : Math.min(save.unlocked, CAMPAIGN.length - 1);
-  startLevel(id, data && data.board ? data : null);
+  if (data && data.board && typeof data.id === 'number') { startLevel(data.id, data); return; }
+  // Load a window quietly behind the nave so the header has a game to return to.
+  startLevel(Math.min(save.unlocked, CAMPAIGN.length - 1));
+  showHome();
 }
 window.claude?.hot?.ready ? window.claude.hot.ready(boot) : boot(window.claude?.hot?.data ?? {});
-if (!save.seenRiddles) setTimeout(() => toast('New: Riddle windows. Open the windows list.'), 900);
 </script>
 </body>
 </html>
