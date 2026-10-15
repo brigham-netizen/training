@@ -185,6 +185,34 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
   .gem { height: 50px; } .gem svg { width: 26px; height: 28px; }
   .hour { padding: 3px 4px 4px; }
 }
+/* Workshop palette and zoom */
+#tray.palette { justify-content: flex-start; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 4px; scrollbar-width: none; }
+#tray.palette::-webkit-scrollbar { display: none; }
+.swatch { flex: none; width: 62px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 2px; border-radius: 10px; border: 1px solid transparent; scroll-snap-align: center; }
+.swatch .dot { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-family: Georgia, serif; font-weight: bold; font-size: 14px; border: 2px solid var(--lead); box-shadow: inset 0 -4px 8px #0006, inset 0 3px 6px #fff4; }
+.swatch .gn { font-family: var(--font-label); font-size: 11px; color: var(--vellum-dim); }
+.swatch .left { font-size: 10.5px; color: var(--vellum-dim); font-variant-numeric: tabular-nums; }
+.swatch.sel { border-color: var(--gilt); background: #2f2618; }
+.swatch.sel .gn { color: var(--vellum); }
+.swatch.done { opacity: .45; }
+#zoom-ctl { position: absolute; right: 4px; bottom: 6px; display: flex; flex-direction: column; gap: 8px; }
+#zoom-ctl .icon-btn { font-size: 22px; line-height: 1; background: #1b1621e6; }
+#scene.panzoom { cursor: grab; }
+.found { animation: found 1.4s ease-out 2; }
+@keyframes found { 0%, 100% { stroke: #09080b; stroke-width: 1.3; } 40% { stroke: #fff3c4; stroke-width: 4; } }
+.mlv { width: 64px; height: 64px; position: relative; display: grid; place-items: center; }
+.mlv svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mlv span { position: relative; font-family: var(--font-label); font-size: 15px; text-shadow: 0 1px 2px #000; }
+.mlv[disabled] { opacity: .3; cursor: default; }
+#mirror-grid { display: grid; grid-template-columns: repeat(3, 64px); gap: 14px; justify-content: center; }
+#paint-list { display: grid; gap: 12px; width: 100%; max-width: 340px; }
+.pcard { display: flex; gap: 12px; align-items: center; text-align: left; padding: 8px; border-radius: 12px; border: 1px solid var(--stone-hi); background: var(--stone); }
+.pcard svg { width: 76px; height: 76px; flex: none; }
+.pcard b { display: block; font-family: var(--font-label); font-weight: normal; font-size: 17px; color: var(--vellum); }
+.pcard small { display: block; color: var(--vellum-dim); font-size: 13.5px; font-style: italic; }
+.pcard .bar { height: 5px; border-radius: 3px; background: var(--lead); margin-top: 6px; overflow: hidden; }
+.pcard .bar i { display: block; height: 100%; background: var(--gilt); }
+
 /* The nave */
 .home { position: fixed; inset: 0; z-index: 10; background: #0b090e; overflow: hidden; animation: fadein .5s; }
 #home-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transition: transform .62s cubic-bezier(.5, 0, .7, .4), opacity .62s; }
@@ -254,6 +282,10 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
   <div id="scene-wrap">
     <svg id="scene" viewBox="0 0 400 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Stained glass window and the cathedral floor"></svg>
     <div class="toast" id="toast"></div>
+    <div id="zoom-ctl" hidden>
+      <button class="icon-btn" id="z-in" aria-label="Zoom in">+</button>
+      <button class="icon-btn" id="z-out" aria-label="Zoom out">&minus;</button>
+    </div>
   </div>
   <div class="lore" id="lore"></div>
   <div id="riddle" hidden></div>
@@ -588,6 +620,289 @@ function buildRiddle(id) {
   return { id, ...spec, W, H, sol, colors, paint: colors.slice(1), lines, clues, givens };
 }
 // RIDDLE ENGINE END ----------------------------------------------------------
+// MIRROR ENGINE START --------------------------------------------------------
+// Mirrors & Shutters: a chapel seen from above. Sun pours through windows in
+// the walls; shutters open or close each window and gilded mirrors turn.
+// Beams that cross mingle colours. Medallions on the floor ask for a colour,
+// or for shadow.
+const MIRROR_LEVELS = [
+  { name: 'The Sacristy', W: 5, H: 6, windows: 2, mirrors: 1, fixed: 1, pillars: 1, colors: ['R', 'B'], seed: 3,
+    lore: 'Tap a shutter to open or close its window. Tap a gilded mirror to turn it. Light each medallion its colour.' },
+  { name: 'The Vestry', W: 5, H: 6, windows: 3, mirrors: 2, fixed: 1, pillars: 1, colors: ['R', 'Y', 'B'], seed: 8,
+    lore: 'Where two beams cross, their colours mingle, just as on the cathedral floor.' },
+  { name: 'The Crypt Stair', W: 6, H: 7, windows: 3, mirrors: 2, fixed: 2, pillars: 2, colors: ['R', 'Y', 'B'], dark: true, seed: 14,
+    lore: 'A black medallion must stay in shadow. Some windows are better left shut.' },
+  { name: "The Bishop's Chapel", W: 6, H: 7, windows: 4, mirrors: 3, fixed: 2, pillars: 2, colors: ['R', 'Y', 'B'], seed: 21,
+    lore: 'The bishop wants his altar lit in colours no single window holds.' },
+  { name: 'The Treasury', W: 6, H: 8, windows: 4, mirrors: 4, fixed: 2, pillars: 3, colors: ['R', 'Y', 'B', 'C'], dark: true, seed: 33,
+    lore: 'Clear windows pour plain white light. White mixed with a colour stays that colour.' },
+  { name: 'The Hall of Mirrors', W: 6, H: 8, windows: 5, mirrors: 4, fixed: 3, pillars: 2, colors: ['R', 'Y', 'B', 'C'], dark: true, seed: 47,
+    lore: 'Every surface throws the sun somewhere else. Trace each beam before you turn a thing.' },
+];
+function mEntry(W, H, w) {
+  if (w.side === 'T') return [w.i, 0, 0, 1];
+  if (w.side === 'B') return [w.i, H - 1, 0, -1];
+  if (w.side === 'L') return [0, w.i, 1, 0];
+  return [W - 1, w.i, -1, 0];
+}
+function mEntryPoint(W, H, w) {
+  if (w.side === 'T') return [w.i + .5, 0];
+  if (w.side === 'B') return [w.i + .5, H];
+  if (w.side === 'L') return [0, w.i + .5];
+  return [W, w.i + .5];
+}
+// cfg.open[k]: window k unshuttered; cfg.rot[j]: orientation of turnable mirror j
+// (0 is "/", 1 is "\").
+function mTrace(lv, cfg) {
+  const { W, H } = lv, n = W * H;
+  const mask = new Array(n).fill(0), lit = new Array(n).fill(false), beams = [];
+  const mir = {}, pil = new Set(lv.pillars);
+  for (const m of lv.mirrors) mir[m.y * W + m.x] = m.fixed ? m.o : cfg.rot[m.j];
+  lv.windows.forEach((w, k) => {
+    if (!cfg.open[k]) return;
+    let [x, y, dx, dy] = mEntry(W, H, w);
+    const pts = [mEntryPoint(W, H, w)], seen = new Set(), bit = PIECES[w.c].mask, cells = [];
+    for (;;) {
+      if (x < 0 || x >= W || y < 0 || y >= H) { pts.push([x + .5 - dx * .5, y + .5 - dy * .5]); break; }
+      const i = y * W + x;
+      if (pil.has(i)) { pts.push([x + .5 - dx * .34, y + .5 - dy * .34]); break; }
+      const key = i * 9 + (dx + 1) * 3 + (dy + 1);
+      if (seen.has(key)) break;
+      seen.add(key);
+      lit[i] = true; mask[i] |= bit; cells.push(i);
+      const o = mir[i];
+      if (o !== undefined) { pts.push([x + .5, y + .5]); [dx, dy] = o === 0 ? [-dy, -dx] : [dy, dx]; }
+      x += dx; y += dy;
+    }
+    beams.push({ c: w.c, pts, cells });
+  });
+  const codes = lit.map((l, i) => l ? MASK_TO_LIGHT[mask[i]] : 'D');
+  return { codes, beams };
+}
+function mCfg(lv, bits) {
+  const nW = lv.windows.length;
+  return { open: lv.windows.map((w, k) => !!(bits >> k & 1)), rot: lv.mirrors.filter(m => !m.fixed).map((m, j) => bits >> (nW + j) & 1) };
+}
+function genMirrorLevel(spec, id) {
+  const { W, H } = spec;
+  const rng = mulberry32(spec.seed * 7919 + 11);
+  const slots = [];
+  for (let i = 0; i < W; i++) slots.push({ side: 'T', i }, { side: 'B', i });
+  for (let i = 0; i < H; i++) slots.push({ side: 'L', i }, { side: 'R', i });
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const cols = shuffle([...spec.colors], rng);
+    const windows = shuffle([...slots], rng).slice(0, spec.windows).map((s, k) => ({ ...s, c: cols[k % cols.length] }));
+    const interior = shuffle([...Array(W * H).keys()], rng);
+    const pillars = interior.slice(0, spec.pillars);
+    const used = new Set(pillars);
+    const lv = { W, H, windows, pillars, mirrors: [] };
+    let ok = true;
+    const total = spec.mirrors + spec.fixed;
+    for (let k = 0; k < total && ok; k++) {
+      // Put each mirror somewhere a beam already passes, so it matters.
+      const cfg = { open: windows.map(() => true), rot: lv.mirrors.filter(m => !m.fixed).map(() => 0) };
+      const paths = mTrace(lv, cfg).beams.map(b => b.cells.filter(i => !used.has(i) && !lv.mirrors.some(m => m.y * W + m.x === i)));
+      const pool = paths.flat();
+      if (!pool.length) { ok = false; break; }
+      const i = pool[Math.floor(rng() * pool.length)];
+      const fixed = k >= spec.mirrors;
+      lv.mirrors.push({ x: i % W, y: Math.floor(i / W), fixed, o: rng() < .5 ? 0 : 1 });
+      used.add(i);
+    }
+    if (!ok) continue;
+    let j = 0;
+    for (const m of lv.mirrors) if (!m.fixed) m.j = j++;
+    const nBits = windows.length + spec.mirrors, nCfg = 1 << nBits;
+    const results = [];
+    for (let b = 0; b < nCfg; b++) results.push(mTrace(lv, mCfg(lv, b)).codes);
+    const openCount = b => windows.filter((w, k) => b >> k & 1).length;
+    const goodSols = [];
+    for (let b = 0; b < nCfg; b++) {
+      const oc = openCount(b);
+      if (oc >= Math.max(1, Math.ceil(windows.length / 2)) && (windows.length < 3 || oc < windows.length)) goodSols.push(b);
+    }
+    const sol = goodSols[Math.floor(rng() * goodSols.length)];
+    const blocked = new Set([...pillars, ...lv.mirrors.map(m => m.y * W + m.x)]);
+    const cands = [];
+    for (let i = 0; i < W * H; i++) {
+      if (blocked.has(i)) continue;
+      const code = results[sol][i];
+      // Cells whose light changes between arrangements carry information.
+      let varies = 0;
+      for (let b = 0; b < nCfg; b += Math.max(1, nCfg >> 5)) if (results[b][i] !== code) varies++;
+      if (!varies) continue;
+      if (code === 'D' && !spec.dark) continue;
+      const bonus = (/[OGPK]/.test(code) ? .5 : 0) + (code === 'D' ? (spec.dark ? .45 : -.3) : 0) + (code === 'W' ? -.15 : 0);
+      cands.push({ i, code, key: rng() - bonus });
+    }
+    cands.sort((a, b) => a.key - b.key);
+    let matches = [...Array(nCfg).keys()], targets = [];
+    for (const c of cands) {
+      if (matches.length === 1) break;
+      const next = matches.filter(b => results[b][c.i] === c.code);
+      if (next.length < matches.length) { targets.push(c); matches = next; }
+    }
+    if (matches.length !== 1) continue;
+    for (const t of shuffle([...targets], rng)) {
+      const rest = targets.filter(x => x !== t);
+      let m = 0;
+      for (let b = 0; b < nCfg && m < 2; b++) if (rest.every(x => results[b][x.i] === x.code)) m++;
+      if (m === 1) targets = rest;
+    }
+    if (targets.length < 2 || targets.length > 8) continue;
+    if (!targets.some(t => t.code !== 'D')) continue;
+    if (spec.dark && !targets.some(t => t.code === 'D')) continue;
+    // Start with every shutter open and the mirrors turned wrong somewhere.
+    let start = (1 << windows.length) - 1;
+    for (let k = 0; k < spec.mirrors; k++) if (rng() < .5) start |= 1 << (windows.length + k);
+    if (start === sol) start ^= 1 << windows.length;
+    if (start === sol) start ^= 1;
+    return { id, ...spec, ...lv, targets: targets.map(({ i, code }) => ({ i, code })), sol, start };
+  }
+  throw new Error('Could not build mirror level ' + id);
+}
+// MIRROR ENGINE END ----------------------------------------------------------
+// PAINT ENGINE START ---------------------------------------------------------
+// The Glazier's Workshop: elaborate windows built from hundreds of numbered
+// pieces. Every piece is cut exactly, so pieces tile without overlaps.
+const PAINT_COLORS = {
+  ruby: { name: 'Ruby', c: '#a50f2a' }, cobalt: { name: 'Cobalt', c: '#173f9e' }, gold: { name: 'Gold', c: '#e0a21b' },
+  emerald: { name: 'Emerald', c: '#1f7a45' }, violet: { name: 'Violet', c: '#5e2a8c' }, amber: { name: 'Amber', c: '#d9661a' },
+  pearl: { name: 'Pearl', c: '#e6dfc0' }, night: { name: 'Midnight', c: '#141a4e' }, rose: { name: 'Rose', c: '#c94f7c' },
+  sky: { name: 'Sky', c: '#4f8fd6' }, moss: { name: 'Moss', c: '#6f8f2a' }, garnet: { name: 'Garnet', c: '#5c0c1e' },
+};
+const clampFs = v => Math.max(3.2, Math.min(13, v));
+const P_ = (cx, cy, r, a) => polar(cx, cy, r, a);
+function pSector(out, cx, cy, r0, r1, a0, a1, col) {
+  const lg = a1 - a0 > Math.PI ? 1 : 0;
+  const d = `M${fx(P_(cx, cy, r1, a0))}A${r1},${r1} 0 ${lg} 1 ${fx(P_(cx, cy, r1, a1))}` +
+    (r0 > 0 ? `L${fx(P_(cx, cy, r0, a1))}A${r0},${r0} 0 ${lg} 0 ${fx(P_(cx, cy, r0, a0))}Z` : `L${cx},${cy}Z`);
+  const rm = r0 > 0 ? (r0 + r1) / 2 : r1 * .6;
+  const [lx, ly] = P_(cx, cy, rm, (a0 + a1) / 2);
+  out.push({ d, col, lx, ly, fs: clampFs(Math.min(r1 - r0, (a1 - a0) * rm) * .42) });
+}
+function pCircle(out, cx, cy, r, col) {
+  out.push({ d: `M${cx - r},${cy}a${r},${r} 0 1 0 ${2 * r},0a${r},${r} 0 1 0 ${-2 * r},0Z`, col, lx: cx, ly: cy, fs: clampFs(r * .8) });
+}
+// A pointed petal inside a ring sector, plus the two slivers beside it.
+function pPetal(out, cx, cy, r0, r1, a0, a1, cPetal, cSide) {
+  const a = (a0 + a1) / 2, half = (a1 - a0) / 2, h = half * .92, dr = r1 - r0, rm = (r0 + r1) / 2;
+  const p0 = P_(cx, cy, r0, a), p1 = P_(cx, cy, r1, a);
+  const l1 = P_(cx, cy, r0 + dr * .25, a - h), l2 = P_(cx, cy, r0 + dr * .75, a - h);
+  const q1 = P_(cx, cy, r0 + dr * .25, a + h), q2 = P_(cx, cy, r0 + dr * .75, a + h);
+  out.push({ d: `M${fx(P_(cx, cy, r0, a0))}L${fx(P_(cx, cy, r1, a0))}A${r1},${r1} 0 0 1 ${fx(p1)}C${fx(l2)} ${fx(l1)} ${fx(p0)}A${r0},${r0} 0 0 0 ${fx(P_(cx, cy, r0, a0))}Z`,
+    col: cSide, ...lab(P_(cx, cy, rm, a0 + (half - h * .7) * .5), Math.min(dr * .35, rm * (half - h * .7) * .55)) });
+  out.push({ d: `M${fx(p0)}C${fx(l1)} ${fx(l2)} ${fx(p1)}C${fx(q2)} ${fx(q1)} ${fx(p0)}Z`, col: cPetal, ...lab(P_(cx, cy, rm, a), Math.min(dr * .3, rm * h * .9)) });
+  out.push({ d: `M${fx(p0)}A${r0},${r0} 0 0 1 ${fx(P_(cx, cy, r0, a1))}L${fx(P_(cx, cy, r1, a1))}A${r1},${r1} 0 0 0 ${fx(p1)}C${fx(q2)} ${fx(q1)} ${fx(p0)}Z`,
+    col: cSide, ...lab(P_(cx, cy, rm, a1 - (half - h * .7) * .5), Math.min(dr * .35, rm * (half - h * .7) * .55)) });
+}
+function lab([lx, ly], size) { return { lx, ly, fs: clampFs(size) }; }
+// A ring sector cut into four triangles meeting at its middle.
+function pCross(out, cx, cy, r0, r1, a0, a1, cOut, cIn, cSide) {
+  const am = (a0 + a1) / 2, rm = (r0 + r1) / 2, m = P_(cx, cy, rm, am), dr = r1 - r0, arc = (a1 - a0) * rm;
+  const s = clampFs(Math.min(dr, arc) * .26);
+  out.push({ d: `M${fx(P_(cx, cy, r1, a0))}A${r1},${r1} 0 0 1 ${fx(P_(cx, cy, r1, a1))}L${fx(m)}Z`, col: cOut, ...lab(P_(cx, cy, r0 + dr * .8, am), s) });
+  out.push({ d: `M${fx(P_(cx, cy, r0, a0))}L${fx(m)}L${fx(P_(cx, cy, r0, a1))}A${r0},${r0} 0 0 0 ${fx(P_(cx, cy, r0, a0))}Z`, col: cIn, ...lab(P_(cx, cy, r0 + dr * .2, am), s) });
+  out.push({ d: `M${fx(P_(cx, cy, r0, a0))}L${fx(P_(cx, cy, r1, a0))}L${fx(m)}Z`, col: cSide, ...lab(P_(cx, cy, rm, a0 + (a1 - a0) * .2), s) });
+  out.push({ d: `M${fx(P_(cx, cy, r0, a1))}L${fx(P_(cx, cy, r1, a1))}L${fx(m)}Z`, col: cSide, ...lab(P_(cx, cy, rm, a1 - (a1 - a0) * .2), s) });
+}
+// A ring sector cut along one diagonal.
+function pDiag(out, cx, cy, r0, r1, a0, a1, flip, cA, cB) {
+  const A0 = P_(cx, cy, r0, a0), A1 = P_(cx, cy, r0, a1), B0 = P_(cx, cy, r1, a0), B1 = P_(cx, cy, r1, a1);
+  const avg = (...ps) => [ps.reduce((s, p) => s + p[0], 0) / ps.length, ps.reduce((s, p) => s + p[1], 0) / ps.length];
+  const s = Math.min(r1 - r0, (a1 - a0) * (r0 + r1) / 2) * .3;
+  if (!flip) {
+    out.push({ d: `M${fx(A0)}L${fx(B0)}A${r1},${r1} 0 0 1 ${fx(B1)}Z`, col: cA, ...lab(avg(A0, B0, B1, B1), s) });
+    out.push({ d: `M${fx(A0)}L${fx(B1)}L${fx(A1)}A${r0},${r0} 0 0 0 ${fx(A0)}Z`, col: cB, ...lab(avg(A0, A1, A1, B1), s) });
+  } else {
+    out.push({ d: `M${fx(A1)}L${fx(B1)}A${r1},${r1} 0 0 0 ${fx(B0)}Z`, col: cA, ...lab(avg(A1, B1, B0, B0), s) });
+    out.push({ d: `M${fx(A1)}L${fx(B0)}L${fx(A0)}A${r0},${r0} 0 0 1 ${fx(A1)}Z`, col: cB, ...lab(avg(A1, A0, A0, B0), s) });
+  }
+}
+// Square panel with an inscribed roundel: four corners, and the roundel left
+// for the caller to fill.
+function pCorners(out, x, y, s, col) {
+  const r = s / 2, cx = x + r, cy = y + r, f = clampFs(s * .075), k = s * .11;
+  out.push({ d: `M${x},${y}L${cx},${y}A${r},${r} 0 0 0 ${x},${cy}Z`, col, lx: x + k, ly: y + k + f * .35, fs: f });
+  out.push({ d: `M${x + s},${y}L${x + s},${cy}A${r},${r} 0 0 0 ${cx},${y}Z`, col, lx: x + s - k, ly: y + k + f * .35, fs: f });
+  out.push({ d: `M${x + s},${y + s}L${cx},${y + s}A${r},${r} 0 0 0 ${x + s},${cy}Z`, col, lx: x + s - k, ly: y + s - k + f * .35, fs: f });
+  out.push({ d: `M${x},${y + s}L${x},${cy}A${r},${r} 0 0 0 ${cx},${y + s}Z`, col, lx: x + k, ly: y + s - k + f * .35, fs: f });
+}
+function pRect(out, x, y, w, h, col) {
+  out.push({ d: `M${x},${y}h${w}v${h}h${-w}Z`, col, lx: x + w / 2, ly: y + h / 2, fs: clampFs(Math.min(w, h) * .5) });
+}
+
+const PAINT_DESIGNS = [
+  { name: 'The Great Rose', blurb: 'Twelve-fold, from the west front.', build() {
+    const o = [], cx = 200, cy = 200, T = Math.PI * 2, st = -Math.PI / 2;
+    const ring = (n, r0, r1, fn) => { for (let k = 0; k < n; k++) fn(k, r0, r1, st + k * T / n, st + (k + 1) * T / n); };
+    pCircle(o, cx, cy, 15, 'gold');
+    ring(12, 15, 26, (k, r0, r1, a0, a1) => pSector(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'pearl' : 'ruby'));
+    ring(12, 26, 80, (k, r0, r1, a0, a1) => pPetal(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'cobalt' : 'ruby', 'night'));
+    ring(24, 80, 92, (k, r0, r1, a0, a1) => pSector(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'emerald' : 'gold'));
+    ring(12, 92, 142, (k, r0, r1, a0, a1) => k % 2 ? pPetal(o, cx, cy, r0, r1, a0, a1, 'amber', 'cobalt') : pCross(o, cx, cy, r0, r1, a0, a1, 'violet', 'gold', 'sky'));
+    ring(48, 142, 152, (k, r0, r1, a0, a1) => pSector(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'pearl' : 'ruby'));
+    ring(24, 152, 186, (k, r0, r1, a0, a1) => pDiag(o, cx, cy, r0, r1, a0, a1, k % 2, k % 4 < 2 ? 'cobalt' : 'emerald', k % 4 < 2 ? 'sky' : 'moss'));
+    return { pieces: o, box: [10, 10, 380, 380] };
+  } },
+  { name: 'The Lily Lancet', blurb: 'Eight roundels under a rounded arch.', build() {
+    const o = [], T = Math.PI;
+    const x0 = 110, w = 180, b = 12, s = 78, top = 150, rows = 4;
+    // Arch head: half rose sitting on the lancet
+    const acx = 200, acy = top, ring = (n, r0, r1, fn) => { for (let k = 0; k < n; k++) fn(k, r0, r1, T + k * T / n, T + (k + 1) * T / n); };
+    pSector(o, acx, acy, 0, 14, T, 2 * T, 'gold');
+    ring(6, 14, 52, (k, r0, r1, a0, a1) => pPetal(o, acx, acy, r0, r1, a0, a1, k % 2 ? 'rose' : 'ruby', 'night'));
+    ring(12, 52, 76, (k, r0, r1, a0, a1) => pCross(o, acx, acy, r0, r1, a0, a1, k % 2 ? 'emerald' : 'cobalt', 'gold', 'sky'));
+    ring(18, 76, 90, (k, r0, r1, a0, a1) => pSector(o, acx, acy, r0, r1, a0, a1, k % 2 ? 'pearl' : 'garnet'));
+    // Side borders
+    const bot = top + rows * s;
+    const seg = s / 3;
+    for (let k = 0; k < rows * 3; k++) {
+      pRect(o, x0, top + k * seg, b, seg, k % 2 ? 'gold' : 'ruby');
+      pRect(o, x0 + w - b, top + k * seg, b, seg, k % 2 ? 'gold' : 'ruby');
+    }
+    // Panels: corners plus a petalled roundel
+    for (let r = 0; r < rows; r++) for (let c = 0; c < 2; c++) {
+      const x = x0 + b + c * s, y = top + r * s, cx = x + s / 2, cy = y + s / 2, alt = (r + c) % 2;
+      pCorners(o, x, y, s, alt ? 'cobalt' : 'night');
+      pCircle(o, cx, cy, 8, 'gold');
+      for (let k = 0; k < 8; k++) {
+        const a0 = -Math.PI / 2 + k * Math.PI / 4, a1 = a0 + Math.PI / 4;
+        pPetal(o, cx, cy, 8, 30, a0, a1, alt ? (k % 2 ? 'pearl' : 'gold') : (k % 2 ? 'rose' : 'pearl'), alt ? 'emerald' : 'violet');
+      }
+      for (let k = 0; k < 16; k++) {
+        const a0 = -Math.PI / 2 + k * Math.PI / 8;
+        pSector(o, cx, cy, 30, 39, a0, a0 + Math.PI / 8, k % 2 ? 'ruby' : 'gold');
+      }
+    }
+    // Donor's panel at the foot
+    for (let k = 0; k < 5; k++) pRect(o, x0 + k * w / 5, bot, w / 5, 26, k % 2 ? 'emerald' : 'amber');
+    return { pieces: o, box: [x0 - 6, top - 96, w + 12, bot + 26 - top + 102] };
+  } },
+  { name: 'The Sunburst', blurb: 'Sixteen rays for the south transept.', build() {
+    const o = [], cx = 200, cy = 200, T = Math.PI * 2, st = -Math.PI / 2;
+    const ring = (n, r0, r1, fn) => { for (let k = 0; k < n; k++) fn(k, r0, r1, st + k * T / n, st + (k + 1) * T / n); };
+    pCircle(o, cx, cy, 14, 'pearl');
+    ring(8, 14, 42, (k, r0, r1, a0, a1) => pPetal(o, cx, cy, r0, r1, a0, a1, 'gold', 'ruby'));
+    ring(16, 42, 64, (k, r0, r1, a0, a1) => pCross(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'amber' : 'gold', 'garnet', 'ruby'));
+    ring(16, 64, 128, (k, r0, r1, a0, a1) => pPetal(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'amber' : 'gold', k % 2 ? 'sky' : 'cobalt'));
+    ring(32, 128, 140, (k, r0, r1, a0, a1) => pSector(o, cx, cy, r0, r1, a0, a1, k % 2 ? 'emerald' : 'pearl'));
+    ring(16, 140, 186, (k, r0, r1, a0, a1) => pDiag(o, cx, cy, r0, r1, a0, a1, k % 2, k % 2 ? 'violet' : 'night', k % 2 ? 'rose' : 'cobalt'));
+    return { pieces: o, box: [10, 10, 380, 380] };
+  } },
+];
+const paintCache = {};
+function getDesign(id) {
+  if (paintCache[id]) return paintCache[id];
+  const spec = PAINT_DESIGNS[id];
+  const { pieces, box } = spec.build();
+  // Number the colours in order of first appearance from the centre out.
+  const order = [];
+  for (const p of pieces) if (!order.includes(p.col)) order.push(p.col);
+  for (const p of pieces) p.n = order.indexOf(p.col);
+  return paintCache[id] = { id, name: spec.name, blurb: spec.blurb, pieces, box, colors: order.map(k => PAINT_COLORS[k]) };
+}
+// PAINT ENGINE END -----------------------------------------------------------
 
 // Palette for drawing glass and light.
 const GLASS = {
@@ -608,8 +923,9 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------------------------------------------------------------- state
 const SAVE_KEY = 'lumen.v1';
-let save = { unlocked: 0, solved: {}, sound: true, pilgrim: 0, riddles: {}, seenRiddles: false };
+let save = { unlocked: 0, solved: {}, sound: true, pilgrim: 0, riddles: {}, mirror: {}, paint: {} };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = { ...save, ...s }; } catch (e) {}
+save.mirror = save.mirror || {}; save.paint = save.paint || {}; save.riddles = save.riddles || {};
 function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
 
 const levelCache = {};
@@ -624,9 +940,8 @@ function getLevel(id) {
 let MODE = 'light'; // 'light' (hours of light) or 'riddle'
 let G = null; // current game
 function startLevel(id, restore) {
-  MODE = 'light'; RG = null;
-  scene.style.touchAction = '';
-  $('#lore').hidden = false; $('#riddle').hidden = true;
+  MODE = 'light'; RG = null; MG = null; PG = null;
+  setChrome('light');
   const lv = getLevel(id);
   G = {
     id, lv,
@@ -1367,6 +1682,8 @@ const HOME_MOON = { id: 50, answers: [''], art: ['.......', '..YYY..', '.YY..W.'
 function showHome() {
   const lightDone = Object.keys(save.solved).filter(k => +k < CAMPAIGN.length).length;
   const riddleDone = RIDDLES.filter((r, i) => save.riddles[i] && save.riddles[i].solved).length;
+  const mirrorDone = MIRROR_LEVELS.filter((m, i) => save.mirror[i]).length;
+  const paintDone = PAINT_DESIGNS.filter((d, i) => (save.paint[i] || '').indexOf('0') < 0 && save.paint[i]).length;
   ov.innerHTML = `<div class="home">
     <svg id="home-svg" viewBox="0 0 400 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The nave of the cathedral with three great windows"></svg>
     <div class="home-top"><h1>Lumen</h1><p>Choose a window</p></div>
@@ -1401,32 +1718,26 @@ function showHome() {
 
   const slots = {
     light: { x: 44, y: 168, w: 100, h: 270 },
-    soon: { x: 158, y: 222, w: 84, h: 216 },
+    mirror: { x: 158, y: 250, w: 84, h: 188 },
     riddle: { x: 256, y: 168, w: 100, h: 270 },
   };
   const shafts = el('g', { style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, svg);
-  const pools = [['light', 0, 26], ['soon', 1, 0], ['riddle', 2, -26]];
+  const pools = [['light', 0, 26], ['mirror', 1, 0], ['riddle', 2, -26]];
   for (const [k, gi, lean] of pools) {
     const s = slots[k];
-    el('polygon', { class: 'shaft', points: `${s.x + 10},${s.y + s.h} ${s.x + s.w - 10},${s.y + s.h} ${s.x + s.w + 40 + lean},680 ${s.x - 40 + lean},680`, fill: `url(#h-shaft${gi})`, opacity: k === 'soon' ? .35 : 1 }, shafts);
-    el('ellipse', { cx: s.x + s.w / 2 + lean, cy: 640, rx: 70, ry: 22, fill: ['#ff6a4a', '#ffd36b', '#7aa2ff'][gi], opacity: k === 'soon' ? .08 : .22, filter: 'url(#h-blur)' }, shafts);
+    el('polygon', { class: 'shaft', points: `${s.x + 10},${s.y + s.h} ${s.x + s.w - 10},${s.y + s.h} ${s.x + s.w + 40 + lean},680 ${s.x - 40 + lean},680`, fill: `url(#h-shaft${gi})`, opacity: 1 }, shafts);
+    el('ellipse', { cx: s.x + s.w / 2 + lean, cy: 640, rx: 70, ry: 22, fill: ['#ff6a4a', '#ffd36b', '#7aa2ff'][gi], opacity: .22, filter: 'url(#h-blur)' }, shafts);
   }
-  // Rose above the centre
-  const rose = el('g', {}, svg);
-  const rc = [200, 150], R = 44;
-  el('circle', { cx: rc[0], cy: rc[1], r: R + 4, fill: CAME, stroke: '#3a3342', 'stroke-width': 3 }, rose);
-  const rcols = ['#a50f2a', '#173f9e', '#e0a21b', '#1f7a45', '#5e2a8c', '#d9661a'];
-  for (let k = 0; k < 16; k++) {
-    const a0 = k * Math.PI / 8 - Math.PI / 2, a1 = a0 + Math.PI / 8, r0 = R * .78, r1 = R;
-    el('path', { d: `M${fx(polar(...rc, r1, a0))}A${r1},${r1} 0 0 1 ${fx(polar(...rc, r1, a1))}L${fx(polar(...rc, r0, a1))}A${r0},${r0} 0 0 0 ${fx(polar(...rc, r0, a0))}Z`, fill: k % 2 ? rcols[(k >> 1) % 6] : '#16348a', stroke: CAME, 'stroke-width': 1.1 }, rose);
-  }
-  for (let k = 0; k < 8; k++) {
-    const a = k * Math.PI / 4 - Math.PI / 2;
-    const p0 = polar(...rc, R * .22, a), p1 = polar(...rc, R * .76, a), c1 = polar(...rc, R * .52, a - .36), c2 = polar(...rc, R * .52, a + .36);
-    el('path', { d: `M${fx(p0)}Q${fx(c1)} ${fx(p1)}Q${fx(c2)} ${fx(p0)}Z`, fill: rcols[k % 6], stroke: CAME, 'stroke-width': 1.2 }, rose);
-  }
-  el('circle', { cx: rc[0], cy: rc[1], r: R * .22, fill: GILT, stroke: CAME, 'stroke-width': 1.4 }, rose);
-  el('circle', { cx: rc[0], cy: rc[1], r: R, fill: '#ffd76a', opacity: .12, filter: 'url(#h-blur)', class: 'breathe' }, rose);
+  // The rose is the Glazier's Workshop: it shows the Great Rose as painted so far.
+  const rose = el('g', { class: 'hwin', 'data-go': 'paint', tabindex: 0, role: 'button', 'aria-label': "The Glazier's Workshop" }, svg);
+  const rc = [200, 132], R = 52;
+  el('circle', { cx: rc[0], cy: rc[1], r: R + 5, fill: CAME, stroke: '#3f3747', 'stroke-width': 3 }, rose);
+  const ds0 = getDesign(0), f0 = paintSaved(0, ds0.pieces.length), any0 = f0.some(Boolean);
+  const rg0 = el('g', { transform: `translate(${rc[0] - 200 * R / 186},${rc[1] - 200 * R / 186}) scale(${R / 186})` }, rose);
+  // Unstarted, it shows the finished design as a promise; once begun, only what is painted.
+  ds0.pieces.forEach((pc, i) => el('path', { d: pc.d, fill: f0[i] || !any0 ? ds0.colors[pc.n].c : '#2c2733', stroke: CAME, 'stroke-width': 2.4 }, rg0));
+  const rglow = el('g', { opacity: .14, 'pointer-events': 'none' }, rose);
+  el('circle', { cx: rc[0], cy: rc[1], r: R, fill: '#ffd76a', filter: 'url(#h-blur)', class: 'breathe' }, rglow);
 
   // Window: Hours of Light, showing the latest window the player consecrated
   const lit = el('g', { class: 'hwin', 'data-go': 'light', tabindex: 0, role: 'button', 'aria-label': 'Hours of Light' }, svg);
@@ -1458,20 +1769,27 @@ function showHome() {
   drawRiddleMaster(rgp, rd, rg, 'hr', false);
   fitInto(rgp, { x: -10, y: -headH - 4, w: rg.gw + 20, h: rg.gh + headH + 10 }, s3);
 
-  // The third window is still under scaffolding.
-  const soon = el('g', { class: 'hwin soon', 'data-go': 'soon', tabindex: 0, role: 'button', 'aria-label': 'A window still under repair' }, svg);
-  const s2 = slots.soon;
-  el('path', { d: archD(s2.x - 6, s2.y - 8, s2.w + 12, s2.h + 14, 50), fill: '#08070a', stroke: '#3f3747', 'stroke-width': 3 }, soon);
-  el('path', { d: archD(s2.x, s2.y, s2.w, s2.h, 44), fill: '#1c1a24' }, soon);
+  // Mirrors & Shutters: silver glass with beams bouncing between mirrors.
+  const mw = el('g', { class: 'hwin', 'data-go': 'mirror', tabindex: 0, role: 'button', 'aria-label': 'Mirrors and Shutters' }, svg);
+  const s2 = slots.mirror;
+  el('path', { d: archD(s2.x - 6, s2.y - 8, s2.w + 12, s2.h + 14, 50), fill: '#08070a', stroke: '#3f3747', 'stroke-width': 3 }, mw);
+  const mclip = el('clipPath', { id: 'h-mclip' }, svg.querySelector('defs'));
+  el('path', { d: archD(s2.x, s2.y, s2.w, s2.h, 44) }, mclip);
+  const mg = el('g', { 'clip-path': 'url(#h-mclip)' }, mw);
+  el('rect', { x: s2.x, y: s2.y, width: s2.w, height: s2.h, fill: '#1c2a4a' }, mg);
   let qd = '';
   for (let t = -s2.h; t < s2.w + s2.h; t += 14) qd += `M${s2.x + t},${s2.y}l${s2.h},${s2.h}M${s2.x + t},${s2.y}l${-s2.h},${s2.h}`;
-  const sc = el('clipPath', { id: 'h-soonclip' }, svg.querySelector('defs'));
-  el('path', { d: archD(s2.x, s2.y, s2.w, s2.h, 44) }, sc);
-  el('path', { d: qd, stroke: '#2e2a36', 'stroke-width': 1, 'clip-path': 'url(#h-soonclip)' }, soon);
-  for (const [y, rot] of [[s2.y + 70, -8], [s2.y + 120, 6], [s2.y + 170, -4]]) {
-    el('rect', { x: s2.x - 12, y, width: s2.w + 24, height: 13, rx: 1.5, fill: '#5a4128', stroke: '#2a1d10', 'stroke-width': 1.2, transform: `rotate(${rot} ${s2.x + s2.w / 2} ${y + 6})` }, soon);
-  }
-  for (const x of [s2.x - 14, s2.x + s2.w + 8]) el('rect', { x, y: s2.y - 20, width: 6, height: s2.h + 40, fill: '#4a3520', stroke: '#2a1d10', 'stroke-width': 1 }, soon);
+  el('path', { d: qd, stroke: '#0d1426', 'stroke-width': 1.2 }, mg);
+  const bounce = (x0, y0, step, col) => {
+    const pts = []; let x = x0, y = y0, dir = 1;
+    while (y < s2.y + s2.h + 20) { pts.push([x, y]); x = dir > 0 ? s2.x + s2.w - 12 : s2.x + 12; y += step; dir = -dir; }
+    el('polyline', { points: pts.map(p => p.join(',')).join(' '), fill: 'none', stroke: col, 'stroke-width': 7, opacity: .3 }, mg);
+    el('polyline', { points: pts.map(p => p.join(',')).join(' '), fill: 'none', stroke: col, 'stroke-width': 2.4 }, mg);
+    pts.slice(1).forEach(([px, py]) => el('path', { d: `M${px - 7},${py - 7}L${px + 7},${py + 7}`, transform: `rotate(${px < 200 ? 90 : 0} ${px} ${py})`, stroke: '#e3e8ef', 'stroke-width': 4, 'stroke-linecap': 'round' }, mg));
+  };
+  bounce(s2.x + 14, s2.y + 30, 44, '#ff3b4f');
+  bounce(s2.x + s2.w - 14, s2.y + 52, 44, '#ffc23a');
+  el('path', { d: archD(s2.x, s2.y, s2.w, s2.h, 44), fill: 'none', stroke: CAME, 'stroke-width': 2.5 }, mw);
 
   // Columns
   for (const x of [148, 246]) {
@@ -1485,27 +1803,27 @@ function showHome() {
   // Brass plaques
   const plaque = (s, go, name, sub) => {
     const g = el('g', { class: 'hwin', 'data-go': go }, svg);
-    const w = go === 'soon' ? 92 : 112, x = s.x + s.w / 2 - w / 2, y = 462;
+    const w = go === 'mirror' ? 98 : go === 'paint' ? 118 : 112, x = s.x + s.w / 2 - w / 2, y = s.py || 462;
     el('rect', { x, y, width: w, height: 38, rx: 4, fill: 'url(#h-brass)', stroke: '#5d4214', 'stroke-width': 1.2 }, g);
-    const t1 = el('text', { x: x + w / 2, y: y + 16, 'text-anchor': 'middle', 'font-family': '"IM Fell English SC", Georgia, serif', 'font-size': 11.5, fill: '#24170a' }, g); t1.textContent = name;
+    const t1 = el('text', { x: x + w / 2, y: y + 16, 'text-anchor': 'middle', 'font-family': '"IM Fell English SC", Georgia, serif', 'font-size': name.length > 16 ? 9.6 : 11.5, fill: '#24170a' }, g); t1.textContent = name;
     const t2 = el('text', { x: x + w / 2, y: y + 30, 'text-anchor': 'middle', 'font-family': '"IM Fell English", Georgia, serif', 'font-style': 'italic', 'font-size': 10, fill: '#3d2a12' }, g); t2.textContent = sub;
   };
   plaque(slots.light, 'light', 'Hours of Light', `${lightDone} of ${CAMPAIGN.length} consecrated`);
-  plaque(slots.soon, 'soon', 'Under repair', 'Glaziers at work');
+  plaque(slots.mirror, 'mirror', 'Mirrors & Shutters', `${mirrorDone} of ${MIRROR_LEVELS.length} lit`);
+  plaque({ x: 141, w: 118, py: 192 }, 'paint', "Glazier's Workshop", `${paintDone} of ${PAINT_DESIGNS.length} complete`);
   plaque(slots.riddle, 'riddle', 'Riddle Windows', `${riddleDone} of ${RIDDLES.length} revealed`);
 
   // Dust in the light
   const rng = mulberry32(7);
   for (let k = 0; k < 22; k++) {
-    const s = [slots.light, slots.riddle, slots.soon][k % 3];
+    const s = [slots.light, slots.riddle, slots.mirror][k % 3];
     const m = el('circle', { cx: (s.x + rng() * s.w + (rng() - .5) * 60).toFixed(1), cy: (480 + rng() * 180).toFixed(1), r: (.6 + rng() * 1.1).toFixed(2), fill: '#fff4d6', class: 'mote', 'pointer-events': 'none' }, svg);
     m.style.animationDelay = (rng() * 9).toFixed(2) + 's';
     m.style.animationDuration = (7 + rng() * 6).toFixed(2) + 's';
   }
 
   const go = target => {
-    if (target === 'soon') { toast('The glaziers are still at work on this window.'); return; }
-    sfx.bell(target === 'light' ? 'L' : 'V');
+    sfx.bell(target === 'light' ? 'L' : target === 'riddle' ? 'V' : 'S');
     const win = svg.querySelector(`.hwin[data-go="${target}"]`);
     if (reduceMotion) { showLevels(target); return; }
     // The frame is the first child; the glass inside has clipped paths with wide bounds.
@@ -1523,10 +1841,30 @@ function showHome() {
 }
 
 function showLevels(mode) {
-  mode = mode === 'riddle' ? 'riddle' : 'light';
-  const inGame = mode === MODE && (mode === 'light' ? G : RG);
+  if (!['light', 'riddle', 'mirror', 'paint'].includes(mode)) mode = 'light';
+  const inGame = mode === MODE && { light: G, riddle: RG, mirror: MG, paint: PG }[mode];
   let body;
-  if (mode === 'light') {
+  if (mode === 'mirror') {
+    const cells = MIRROR_LEVELS.map((m, i) => {
+      const done = !!save.mirror[i], open = i === 0 || !!save.mirror[i - 1];
+      return `<button class="mlv" data-ml="${i}" ${open ? '' : 'disabled'} aria-label="Chapel ${i + 1}${done ? ', illuminated' : ''}">
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="${done ? '#2f2618' : '#09080b'}" stroke="${done ? '#d6a542' : '#3a3342'}" stroke-width="2.5"/>
+        ${done ? '<path d="M6 40L32 22L58 40" stroke="#ff3b4f" stroke-width="2.5" fill="none" opacity=".8"/><path d="M6 24L32 42L58 24" stroke="#4f7dff" stroke-width="2.5" fill="none" opacity=".8"/>' : ''}</svg>
+        <span>${toRoman(i + 1)}</span></button>`;
+    }).join('');
+    body = `<h1>Mirrors &amp; Shutters</h1>
+      <p>Open and close the shutters, turn the mirrors, and steer the sun onto every medallion.</p>
+      <div id="mirror-grid">${cells}</div>`;
+  } else if (mode === 'paint') {
+    const cards = PAINT_DESIGNS.map((d, i) => {
+      const ds = getDesign(i), f = paintSaved(i, ds.pieces.length), pct = Math.round(f.filter(Boolean).length / f.length * 100);
+      return `<button class="pcard" data-pd="${i}">${paintThumb(i)}<div><b>${ds.name}</b><small>${ds.blurb} ${ds.pieces.length} pieces.</small>
+        <div class="bar"><i style="width:${pct}%"></i></div><small>${pct === 100 ? 'Completed' : pct ? pct + '% painted' : 'Not started'}</small></div></button>`;
+    }).join('');
+    body = `<h1>The Glazier's Workshop</h1>
+      <p>Paint by number. Pick a colour, tap its pieces, and watch the window come alive. Pinch or use + and &minus; to zoom.</p>
+      <div id="paint-list">${cards}</div>`;
+  } else if (mode === 'light') {
     const cells = CAMPAIGN.map((c, i) => {
       const open = i <= save.unlocked;
       const done = save.solved[i] !== undefined;
@@ -1561,9 +1899,12 @@ function showLevels(mode) {
   </div>`;
   ov.querySelectorAll('[data-lv]').forEach(b => b.onclick = () => { closeOverlay(); startLevel(+b.dataset.lv); });
   ov.querySelectorAll('[data-rd]').forEach(b => b.onclick = () => startRiddle(+b.dataset.rd));
+  ov.querySelectorAll('[data-ml]').forEach(b => b.onclick = () => startMirror(+b.dataset.ml));
+  ov.querySelectorAll('[data-pd]').forEach(b => b.onclick = () => startPaint(+b.dataset.pd));
   if (inGame) $('#ov-close').onclick = closeOverlay;
   $('#ov-nave').onclick = showHome;
   $('#ov-how').onclick = () => showHow(() => showLevels(mode), mode);
+  if (mode === 'paint') $('#ov-how').hidden = true;
   const pil = $('#ov-pil');
   if (pil && !pil.disabled) pil.onclick = () => { closeOverlay(); startLevel(CAMPAIGN.length + save.pilgrim); };
 }
@@ -1577,9 +1918,14 @@ function showHow(back, mode) {
       <div><b>Riddle Windows.</b> A picture hides in one large window. Each floor stone counts the coloured panes its beam crosses: straight down at Sext, slanting at Lauds and Vespers.</div>
       <div><b>Paint.</b> Pick a colour and tap or drag across panes. Tap a stone to trace its beam. Mark panes you know are empty with Plain glass.</div>
       <div><b>Answer.</b> Name the riddle's answer at any time. If you are right, the glazier sketches the outline for you.</div>`;
+  const mirror = `
+      <div><b>Mirrors &amp; Shutters.</b> You look down on a chapel. Sun pours in through the windows in its walls. Tap a window to shut or open it. Tap a mirror with a gilded ring to turn it.</div>
+      <div><b>Medallions.</b> Each medallion asks for a colour of light. Crossing beams mingle like on the cathedral floor. Black medallions must stay in shadow.</div>`;
+  const paint = `
+      <div><b>The Glazier's Workshop.</b> Paint by number. Pick a colour below, then tap the pieces with its number. Pinch, drag, or use + and &minus; to zoom. The drop button finds a piece you missed.</div>`;
   ov.innerHTML = `<div class="overlay">
     <h2>How the light falls</h2>
-    <div class="howto">${mode === 'riddle' ? riddle : mode === 'light' ? light : light + riddle}</div>
+    <div class="howto">${mode === 'riddle' ? riddle : mode === 'light' ? light : mode === 'mirror' ? mirror : light + riddle + mirror + paint}</div>
     <button class="btn" id="ov-close">Back</button></div>`;
   $('#ov-close').onclick = back || showHome;
 }
@@ -1616,8 +1962,9 @@ const cellXY = i => [RGEO.gx + (i % RGEO.W) * RGEO.cs, RGEO.gy + Math.floor(i / 
 const solved = (rd, board, i) => (board[i] && board[i] !== RIDDLE_BG ? board[i] : RIDDLE_BG) === rd.sol[i];
 
 function startRiddle(id, restore) {
-  MODE = 'riddle'; G = null;
+  MODE = 'riddle'; G = null; MG = null; PG = null;
   closeOverlay();
+  setChrome('riddle');
   const rd = getRiddle(id);
   const n = rd.W * rd.H;
   RG = { id, rd, board: new Array(n).fill(null), locked: new Array(n).fill(false), sel: rd.paint[0], hour: 'S',
@@ -1635,7 +1982,6 @@ function buildRiddleScene() {
   const g = RGEO;
   scene.setAttribute('viewBox', `0 0 400 ${g.VH.toFixed(0)}`);
   scene.innerHTML = '';
-  scene.style.touchAction = 'none';
   const defs = el('defs', {}, scene);
   defs.innerHTML = `
     <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1520"/><stop offset="1" stop-color="#0d0b11"/></linearGradient>
@@ -1785,8 +2131,7 @@ function renderRiddleUI() {
   $('#lv-num').textContent = 'RIDDLE ' + toRoman(rd.id + 1) + ' OF ' + toRoman(RIDDLES.length);
   $('#lv-name').textContent = rd.name;
   $('#lv-name').classList.toggle('long', rd.name.length > 19);
-  $('#lore').hidden = true;
-  const box = $('#riddle'); box.hidden = false;
+  const box = $('#riddle');
   const ans = rd.answers[0];
   box.innerHTML = `<p class="verse">“${rd.verse}”</p>` + (RG.guessed
     ? `<p class="answered">Answered: <b>${ans}</b>. The glazier has sketched its outline.</p>`
@@ -2042,6 +2387,375 @@ function riddleHint() {
   checkRiddleWin();
 }
 
+// ================================================================ shared chrome
+function setChrome(mode) {
+  $('#lore').hidden = !(mode === 'light' || mode === 'mirror');
+  $('#riddle').hidden = mode !== 'riddle';
+  $('#hours').hidden = !(mode === 'light' || mode === 'riddle');
+  $('#tray').hidden = mode === 'mirror';
+  $('#tray').classList.toggle('palette', mode === 'paint');
+  $('#zoom-ctl').hidden = mode !== 'paint';
+  scene.style.touchAction = mode === 'riddle' || mode === 'paint' ? 'none' : '';
+  scene.classList.toggle('panzoom', mode === 'paint');
+}
+
+// ================================================================ mirrors & shutters
+const mirrorCache = {};
+function getMirror(id) { return mirrorCache[id] || (mirrorCache[id] = genMirrorLevel(MIRROR_LEVELS[id], id)); }
+let MG = null, MGEO = null;
+const BEAM = { R: '#ff3b4f', Y: '#ffc23a', B: '#4f7dff', C: '#fff2d6' };
+
+function startMirror(id) {
+  MODE = 'mirror'; G = null; RG = null; PG = null;
+  closeOverlay();
+  const lv = getMirror(id);
+  const st = mCfg(lv, lv.start);
+  MG = { id, lv, open: st.open.slice(), rot: st.rot.slice(), locked: { win: new Set(), mir: new Set() }, won: false, winShown: false, hints: 0 };
+  setChrome('mirror');
+  $('#lv-num').textContent = 'CHAPEL ' + toRoman(id + 1) + ' OF ' + toRoman(MIRROR_LEVELS.length);
+  $('#lv-name').textContent = lv.name;
+  $('#lv-name').classList.toggle('long', lv.name.length > 19);
+  buildMirrorScene();
+  drawMirror();
+}
+function buildMirrorScene() {
+  const lv = MG.lv, W = lv.W, H = lv.H;
+  const cs = Math.min(54, 320 / W, 400 / H), wall = 18;
+  const bw = W * cs, bh = H * cs, ox = 200 - bw / 2, oy = wall + 26;
+  MGEO = { cs, wall, ox, oy, bw, bh, VH: oy + bh + wall + 22 };
+  scene.setAttribute('viewBox', `0 0 400 ${MGEO.VH.toFixed(0)}`);
+  scene.innerHTML = `<defs>
+    <radialGradient id="m-pillar" cx=".35" cy=".35" r=".8"><stop offset="0" stop-color="#5a5162"/><stop offset="1" stop-color="#1c1820"/></radialGradient>
+    <linearGradient id="m-wood" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7a5632"/><stop offset="1" stop-color="#4a3018"/></linearGradient>
+    <linearGradient id="m-silver" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f2f5fa"/><stop offset=".5" stop-color="#9aa6b6"/><stop offset="1" stop-color="#e3e8ef"/></linearGradient>
+    <filter id="m-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+  </defs>`;
+  el('rect', { x: 0, y: 0, width: 400, height: MGEO.VH, fill: '#0e0c12' }, scene);
+  // Walls and floor
+  el('rect', { x: ox - wall, y: oy - wall, width: bw + wall * 2, height: bh + wall * 2, rx: 4, fill: '#2b2532', stroke: '#3f3747', 'stroke-width': 2 }, scene);
+  const fl = el('g', {}, scene);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    el('rect', { x: ox + x * cs, y: oy + y * cs, width: cs, height: cs, fill: (x + y) % 2 ? '#1d1922' : '#221d27' }, fl);
+  }
+  el('rect', { x: ox, y: oy, width: bw, height: bh, fill: 'none', stroke: '#0a090c', 'stroke-width': 2 }, scene);
+  rLayers.mTint = el('g', { 'pointer-events': 'none' }, scene);
+  rLayers.mTargets = el('g', { 'pointer-events': 'none' }, scene);
+  rLayers.mBeams = el('g', { style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, scene);
+  rLayers.mPieces = el('g', {}, scene);
+  rLayers.mWindows = el('g', {}, scene);
+}
+const mX = x => MGEO.ox + x * MGEO.cs, mY = y => MGEO.oy + y * MGEO.cs;
+function mWindowRect(w) {
+  const { cs, wall, ox, oy, bw, bh } = MGEO, len = cs * .72, off = (cs - len) / 2;
+  if (w.side === 'T') return { x: ox + w.i * cs + off, y: oy - wall, w: len, h: wall };
+  if (w.side === 'B') return { x: ox + w.i * cs + off, y: oy + bh, w: len, h: wall };
+  if (w.side === 'L') return { x: ox - wall, y: oy + w.i * cs + off, w: wall, h: len };
+  return { x: ox + bw, y: oy + w.i * cs + off, w: wall, h: len };
+}
+function mirrorState() { return mTrace(MG.lv, { open: MG.open, rot: MG.rot }); }
+function drawMirror() {
+  const lv = MG.lv, { cs } = MGEO, W = lv.W;
+  const { codes, beams } = mirrorState();
+  // Floor tint where light falls
+  const tg = rLayers.mTint; tg.innerHTML = '';
+  codes.forEach((c, i) => { if (c !== 'D') el('rect', { x: mX(i % W), y: mY(Math.floor(i / W)), width: cs, height: cs, fill: LIGHT[c], opacity: .13 }, tg); });
+  // Beams
+  const bg = rLayers.mBeams; bg.innerHTML = '';
+  for (const b of beams) {
+    const p = b.pts.map(([x, y]) => `${mX(x).toFixed(1)},${mY(y).toFixed(1)}`).join(' ');
+    el('polyline', { points: p, fill: 'none', stroke: BEAM[b.c], 'stroke-width': cs * .34, opacity: .28, filter: 'url(#m-glow)', 'stroke-linejoin': 'round' }, bg);
+    el('polyline', { points: p, fill: 'none', stroke: BEAM[b.c], 'stroke-width': 3.2, opacity: .95, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, bg);
+  }
+  // Medallions
+  const md = rLayers.mTargets; md.innerHTML = '';
+  let met = 0;
+  for (const t of lv.targets) {
+    const cx = mX(t.i % W + .5), cy = mY(Math.floor(t.i / W) + .5), r = cs * .3, cur = codes[t.i], ok = cur === t.code;
+    if (ok) { met++; el('circle', { cx, cy, r: r * 1.6, fill: t.code === 'D' ? '#cfc6e0' : LIGHT[t.code], opacity: .3, filter: 'url(#m-glow)' }, md); }
+    el('circle', { cx, cy, r: r + 3, fill: '#0c0a10', stroke: ok ? '#ffe9a8' : '#3a3342', 'stroke-width': ok ? 2.2 : 1.5 }, md);
+    el('circle', { cx, cy, r, fill: t.code === 'D' ? '#0c0a10' : LIGHT[t.code], stroke: CAME, 'stroke-width': 1.5 }, md);
+    if (t.code === 'D') el('path', { d: `M${cx + r * .15},${cy - r * .55}a${r * .5},${r * .5} 0 1 0 0,${r * 1.1}a${r * .38},${r * .38} 0 1 1 0,${-r * 1.1}`, fill: '#cfc6e0' }, md);
+    else el('circle', { cx, cy, r: r * .42, fill: cur === 'D' ? '#15121a' : LIGHT[cur], stroke: CAME, 'stroke-width': 1 }, md);
+  }
+  // Pillars and mirrors
+  const pc = rLayers.mPieces; pc.innerHTML = '';
+  for (const i of lv.pillars) el('circle', { cx: mX(i % W + .5), cy: mY(Math.floor(i / W) + .5), r: cs * .34, fill: 'url(#m-pillar)', stroke: CAME, 'stroke-width': 1.5 }, pc);
+  lv.mirrors.forEach((m, k) => {
+    const cx = mX(m.x + .5), cy = mY(m.y + .5), L = cs * .33;
+    const o = m.fixed ? m.o : MG.rot[m.j];
+    const g = el('g', m.fixed ? {} : { 'data-mir': m.j, class: 'pane-hit' }, pc);
+    el('circle', { cx, cy, r: cs * .44, fill: '#16131b', stroke: m.fixed ? '#3a3342' : MG.locked.mir.has(m.j) ? '#8a6a2c' : GILT, 'stroke-width': m.fixed ? 1.5 : 2, 'stroke-dasharray': m.fixed ? '' : '3 2' }, g);
+    const d = o === 0 ? `M${cx - L},${cy + L}L${cx + L},${cy - L}` : `M${cx - L},${cy - L}L${cx + L},${cy + L}`;
+    el('path', { d, stroke: CAME, 'stroke-width': 8, 'stroke-linecap': 'round' }, g);
+    el('path', { d, stroke: 'url(#m-silver)', 'stroke-width': 4.5, 'stroke-linecap': 'round' }, g);
+  });
+  // Windows and shutters
+  const wg = rLayers.mWindows; wg.innerHTML = '';
+  lv.windows.forEach((w, k) => {
+    const r = mWindowRect(w), open = MG.open[k];
+    const g = el('g', { 'data-win': k, class: 'pane-hit' }, wg);
+    el('rect', { x: r.x - 6, y: r.y - 6, width: r.w + 12, height: r.h + 12, fill: 'transparent' }, g);
+    el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, fill: open ? GLASS[w.c].hi : shade(GLASS[w.c].base, -.4), stroke: CAME, 'stroke-width': 2 }, g);
+    if (open) el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, fill: BEAM[w.c], opacity: .5, filter: 'url(#m-glow)' }, g);
+    else {
+      el('rect', { x: r.x - 1.5, y: r.y - 1.5, width: r.w + 3, height: r.h + 3, rx: 1.5, fill: 'url(#m-wood)', stroke: '#2a1d10', 'stroke-width': 1.2 }, g);
+      const horiz = r.w > r.h;
+      for (let q = 1; q < 3; q++) el('line', horiz ? { x1: r.x + r.w * q / 3, y1: r.y, x2: r.x + r.w * q / 3, y2: r.y + r.h, stroke: '#2a1d10', 'stroke-width': 1 } : { x1: r.x, y1: r.y + r.h * q / 3, x2: r.x + r.w, y2: r.y + r.h * q / 3, stroke: '#2a1d10', 'stroke-width': 1 }, g);
+    }
+    if (MG.locked.win.has(k)) el('circle', { cx: r.x + r.w / 2, cy: r.y + r.h / 2, r: 2.4, fill: GILT, stroke: CAME, 'stroke-width': .8 }, g);
+  });
+  $('#lore').innerHTML = `<span>${lv.lore}<br><b>${met} of ${lv.targets.length} medallions true</b></span>`;
+  return met === lv.targets.length;
+}
+scene.addEventListener('click', e => {
+  if (MODE !== 'mirror' || !MG) return;
+  if (MG.won) { if (!MG.winShown) showMirrorWin(); return; }
+  const w = e.target.closest('[data-win]'), m = e.target.closest('[data-mir]');
+  if (w) {
+    const k = +w.dataset.win;
+    if (MG.locked.win.has(k)) { toast('The glazier has fixed this shutter.'); return; }
+    MG.open[k] = !MG.open[k];
+    sfx.lift(); if (MG.open[k]) sfx.paint('Y');
+  } else if (m) {
+    const j = +m.dataset.mir;
+    if (MG.locked.mir.has(j)) { toast('The glazier has fixed this mirror.'); return; }
+    MG.rot[j] ^= 1;
+    sfx.paint('W');
+  } else return;
+  if (drawMirror()) mirrorWon();
+});
+function mirrorWon() {
+  MG.won = true;
+  save.mirror[MG.id] = true; persist();
+  sfx.win();
+  const fl = el('rect', { x: 0, y: 0, width: 400, height: MGEO.VH, fill: '#fff4d0', class: 'mw-flash', style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, scene);
+  fl.style.animationDelay = '0s';
+  MG.winTimer = setTimeout(showMirrorWin, reduceMotion ? 300 : 1400);
+}
+function showMirrorWin() {
+  if (MG.winShown) return;
+  MG.winShown = true; clearTimeout(MG.winTimer);
+  const next = MG.id + 1, last = next >= MIRROR_LEVELS.length;
+  ov.innerHTML = `<div class="sheet"><h1>Illuminated</h1><h2>${MG.lv.name}</h2>
+    <p class="inc">Every medallion shines true.</p>
+    ${MG.hints ? `<p>${MG.hints} piece${MG.hints > 1 ? 's' : ''} set by the master glazier.</p>` : ''}
+    <div class="levels-actions"><button class="btn" id="ov-next">${last ? 'All chapels lit' : 'Next chapel'}</button><button class="btn ghost" id="ov-stay">Admire it</button></div></div>`;
+  $('#ov-next').onclick = () => { closeOverlay(); last ? showLevels('mirror') : startMirror(next); };
+  $('#ov-stay').onclick = closeOverlay;
+}
+function mirrorHint() {
+  if (MG.won) return;
+  const sol = mCfg(MG.lv, MG.lv.sol);
+  const wrong = [];
+  MG.open.forEach((o, k) => { if (o !== sol.open[k] && !MG.locked.win.has(k)) wrong.push(['win', k]); });
+  MG.rot.forEach((o, j) => { if (o !== sol.rot[j] && !MG.locked.mir.has(j)) wrong.push(['mir', j]); });
+  if (!wrong.length) return;
+  const [kind, k] = wrong[Math.floor(Math.random() * wrong.length)];
+  if (kind === 'win') { MG.open[k] = sol.open[k]; MG.locked.win.add(k); toast(sol.open[k] ? 'The glazier opens a shutter and fixes it.' : 'The glazier closes a shutter and fixes it.'); }
+  else { MG.rot[k] = sol.rot[k]; MG.locked.mir.add(k); toast('The glazier turns a mirror and fixes it.'); }
+  MG.hints++; sfx.bell('S');
+  if (drawMirror()) mirrorWon();
+}
+
+// ================================================================ the glazier's workshop
+let PG = null;
+function lum(h) { const [r, g, b] = rgbOf(h); return (.299 * r + .587 * g + .114 * b) / 255; }
+function paintSaved(id, n) {
+  const s = save.paint[id];
+  return Array.from({ length: n }, (_, i) => s ? s[i] === '1' : false);
+}
+function startPaint(id) {
+  MODE = 'paint'; G = null; RG = null; MG = null;
+  closeOverlay();
+  const ds = getDesign(id);
+  const filled = paintSaved(id, ds.pieces.length);
+  const firstOpen = ds.pieces.find((p, i) => !filled[i]);
+  PG = { id, ds, filled, sel: firstOpen ? firstOpen.n : 0, view: null, won: filled.every(Boolean), winShown: true };
+  setChrome('paint');
+  $('#lv-num').textContent = "THE GLAZIER'S WORKSHOP";
+  $('#lv-name').textContent = ds.name;
+  $('#lv-name').classList.toggle('long', ds.name.length > 19);
+  buildPaintScene();
+  renderPalette();
+}
+function paintBase() { const [x, y, w, h] = PG.ds.box; return { x: x - 8, y: y - 8, w: w + 16, h: h + 16 }; }
+function setView(v) {
+  const b = paintBase();
+  const w = Math.max(b.w / 7, Math.min(b.w, v.w)), h = w * b.h / b.w;
+  const x = Math.max(b.x - w * .4, Math.min(b.x + b.w - w * .6, v.x));
+  const y = Math.max(b.y - h * .4, Math.min(b.y + b.h - h * .6, v.y));
+  PG.view = { x, y, w, h };
+  scene.setAttribute('viewBox', `${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)}`);
+}
+function buildPaintScene() {
+  const ds = PG.ds, b = paintBase();
+  scene.innerHTML = `<defs><radialGradient id="pz-sun" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#fff6d8" stop-opacity=".7"/><stop offset="1" stop-color="#fff6d8" stop-opacity="0"/></radialGradient></defs>`;
+  el('rect', { x: b.x - 2000, y: b.y - 2000, width: b.w + 4000, height: b.h + 4000, fill: '#0e0c12' }, scene);
+  const pg = el('g', {}, scene), lg = el('g', { 'pointer-events': 'none' }, scene);
+  PG.els = ds.pieces.map((p, i) => {
+    const path = el('path', { d: p.d, 'data-p': i, stroke: CAME, 'stroke-width': 1.3, 'stroke-linejoin': 'round' }, pg);
+    const t = el('text', { x: p.lx.toFixed(1), y: (p.ly + p.fs * .36).toFixed(1), 'font-size': p.fs.toFixed(1), 'text-anchor': 'middle', 'font-family': 'Georgia, serif', fill: '#4a3c28' }, lg);
+    t.textContent = p.n + 1;
+    return { path, t };
+  });
+  PG.glow = el('g', { 'pointer-events': 'none' }, scene);
+  setView(b);
+  refreshPaint();
+  if (PG.won) paintGlow(false);
+}
+function pieceFill(i) {
+  const p = PG.ds.pieces[i], col = PG.ds.colors[p.n].c;
+  if (PG.filled[i]) return col;
+  return p.n === PG.sel ? shade(col, .62) : '#d6cbb0';
+}
+function refreshPaint(only) {
+  const list = only !== undefined ? [only] : PG.ds.pieces.map((p, i) => i);
+  for (const i of list) {
+    const e = PG.els[i];
+    e.path.setAttribute('fill', pieceFill(i));
+    e.t.style.display = PG.filled[i] ? 'none' : '';
+    e.t.setAttribute('font-weight', PG.ds.pieces[i].n === PG.sel ? 'bold' : 'normal');
+  }
+}
+function paintCounts() {
+  const left = PG.ds.colors.map(() => 0);
+  PG.ds.pieces.forEach((p, i) => { if (!PG.filled[i]) left[p.n]++; });
+  return left;
+}
+function renderPalette() {
+  const box = $('#tray'); box.innerHTML = '';
+  const left = paintCounts();
+  PG.ds.colors.forEach((c, n) => {
+    const b = document.createElement('button');
+    b.className = 'swatch' + (PG.sel === n ? ' sel' : '') + (left[n] ? '' : ' done');
+    b.innerHTML = `<span class="dot" style="background:${c.c};color:${lum(c.c) > .55 ? '#1a1208' : '#fff6e6'}">${left[n] ? n + 1 : '✓'}</span><span class="gn">${c.name}</span><span class="left">${left[n] ? left[n] + ' left' : 'done'}</span>`;
+    b.setAttribute('aria-label', `Colour ${n + 1}, ${c.name}, ${left[n]} pieces left`);
+    b.onclick = () => { PG.sel = n; sfx.paint('Y'); renderPalette(); refreshPaint(); };
+    box.appendChild(b);
+  });
+  const sel = box.querySelector('.sel');
+  if (sel) try { sel.scrollIntoView({ inline: 'center', block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' }); } catch (e) {}
+}
+function fillPiece(i) {
+  const p = PG.ds.pieces[i];
+  if (PG.filled[i]) return;
+  if (p.n !== PG.sel) { toast(`That piece is number ${p.n + 1}, ${PG.ds.colors[p.n].name.toLowerCase()}.`); sfx.lift(); return; }
+  PG.filled[i] = true;
+  save.paint[PG.id] = PG.filled.map(f => f ? 1 : 0).join('');
+  persist();
+  sfx.paint(['R', 'Y', 'O', 'G', 'B', 'P', 'W'][p.n % 7]);
+  refreshPaint(i);
+  const left = paintCounts();
+  if (!left[PG.sel]) {
+    const nx = left.findIndex(v => v > 0);
+    if (nx >= 0) { toast(`${PG.ds.colors[PG.sel].name} is finished.`); PG.sel = nx; refreshPaint(); }
+    renderPalette();
+  } else {
+    const sw = $('#tray').children[PG.sel];
+    if (sw) sw.querySelector('.left').textContent = left[PG.sel] + ' left';
+  }
+  if (PG.filled.every(Boolean)) paintWon();
+}
+function paintGlow(animate) {
+  const b = paintBase(), g = PG.glow; g.innerHTML = '';
+  el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, fill: 'url(#pz-sun)', style: 'mix-blend-mode:screen', class: animate ? 'mw-flash' : '' , opacity: animate ? '' : .35 }, g);
+  const rng = mulberry32(PG.id + 5);
+  for (let k = 0; k < 9; k++) {
+    const x = b.x + b.w * (.15 + rng() * .7), y = b.y + b.h * (.15 + rng() * .7), s = b.w * (.012 + rng() * .012);
+    const st = el('path', { d: `M${x},${y - s}Q${x},${y} ${x + s},${y}Q${x},${y} ${x},${y + s}Q${x},${y} ${x - s},${y}Q${x},${y} ${x},${y - s}Z`, fill: '#fffbe8', class: 'twinkle' }, g);
+    st.style.animationDelay = (rng() * 3).toFixed(2) + 's';
+  }
+}
+function paintWon() {
+  PG.won = true; PG.winShown = false;
+  sfx.win();
+  setView(paintBase());
+  paintGlow(!reduceMotion);
+  PG.winTimer = setTimeout(showPaintWin, reduceMotion ? 300 : 1800);
+}
+function showPaintWin() {
+  if (PG.winShown) return;
+  PG.winShown = true; clearTimeout(PG.winTimer);
+  const next = PG.id + 1, last = next >= PAINT_DESIGNS.length;
+  ov.innerHTML = `<div class="sheet"><h1>Completed</h1><h2>${PG.ds.name}</h2>
+    <p class="inc">${PG.ds.pieces.length} pieces cut, painted and leaded.</p>
+    <div class="levels-actions"><button class="btn" id="ov-next">${last ? 'Back to the workshop' : 'Next window'}</button><button class="btn ghost" id="ov-stay">Admire it</button></div></div>`;
+  $('#ov-next').onclick = () => { closeOverlay(); last ? showLevels('paint') : startPaint(next); };
+  $('#ov-stay').onclick = closeOverlay;
+}
+// Find: zoom to an unfinished piece of the chosen colour.
+function paintFind() {
+  if (PG.won) return;
+  let i = PG.ds.pieces.findIndex((p, k) => !PG.filled[k] && p.n === PG.sel);
+  if (i < 0) i = PG.filled.findIndex(f => !f);
+  if (i < 0) return;
+  const p = PG.ds.pieces[i], b = paintBase(), w = b.w / 3.2, h = w * b.h / b.w;
+  setView({ x: p.lx - w / 2, y: p.ly - h / 2, w, h });
+  const e = PG.els[i].path;
+  e.classList.remove('found'); void e.getBBox(); e.classList.add('found');
+}
+// Pan, pinch and tap
+const ptrs = new Map();
+let pz = null;
+function invAt(clientX, clientY, inv) { const p = scene.createSVGPoint(); p.x = clientX; p.y = clientY; return p.matrixTransform(inv); }
+scene.addEventListener('pointerdown', e => {
+  if (MODE !== 'paint' || !PG) return;
+  if (PG.won && !PG.winShown) { showPaintWin(); return; }
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  try { scene.setPointerCapture(e.pointerId); } catch (err) {}
+  const inv = scene.getScreenCTM().inverse();
+  if (ptrs.size === 1) pz = { mode: 'tap', sx: e.clientX, sy: e.clientY, inv, view0: { ...PG.view }, start: invAt(e.clientX, e.clientY, inv) };
+  else if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    pz = { mode: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y), inv, view0: { ...PG.view }, m0: invAt(mid.x, mid.y, inv) };
+  }
+});
+scene.addEventListener('pointermove', e => {
+  if (MODE !== 'paint' || !PG || !pz || !ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pz.mode === 'tap' && Math.hypot(e.clientX - pz.sx, e.clientY - pz.sy) > 8) pz.mode = 'pan';
+  if (pz.mode === 'pan') {
+    const c = invAt(e.clientX, e.clientY, pz.inv);
+    setView({ ...pz.view0, x: pz.view0.x - (c.x - pz.start.x), y: pz.view0.y - (c.y - pz.start.y) });
+  } else if (pz.mode === 'pinch' && ptrs.size >= 2) {
+    const [a, b] = [...ptrs.values()];
+    const f = pz.d0 / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y));
+    const c0 = invAt((a.x + b.x) / 2, (a.y + b.y) / 2, pz.inv), v0 = pz.view0;
+    const w = v0.w * f, h = v0.h * f;
+    setView({ x: pz.m0.x - (c0.x - v0.x) * f, y: pz.m0.y - (c0.y - v0.y) * f, w, h });
+  }
+});
+function endPtr(e) {
+  if (MODE !== 'paint' || !PG || !ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  if (pz && pz.mode === 'tap' && e.type === 'pointerup') {
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const pe = hit && hit.closest && hit.closest('[data-p]');
+    if (pe && !PG.won) fillPiece(+pe.dataset.p);
+  }
+  if (!ptrs.size) pz = null;
+  else if (pz) pz.mode = 'done';
+}
+scene.addEventListener('pointerup', endPtr);
+scene.addEventListener('pointercancel', endPtr);
+scene.addEventListener('wheel', e => {
+  if (MODE !== 'paint' || !PG) return;
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? 1.15 : 1 / 1.15);
+}, { passive: false });
+function zoomAt(clientX, clientY, f) {
+  const inv = scene.getScreenCTM().inverse(), m = invAt(clientX, clientY, inv), v = PG.view;
+  setView({ x: m.x - (m.x - v.x) * f, y: m.y - (m.y - v.y) * f, w: v.w * f, h: v.h * f });
+}
+function zoomCentre(f) { const r = scene.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, f); }
+function paintThumb(id, dim) {
+  const ds = getDesign(id), filled = paintSaved(id, ds.pieces.length);
+  const [x, y, w, h] = ds.box;
+  return `<svg viewBox="${x - 4} ${y - 4} ${w + 8} ${h + 8}" preserveAspectRatio="xMidYMid meet">` +
+    ds.pieces.map((p, i) => `<path d="${p.d}" fill="${filled[i] ? ds.colors[p.n].c : dim ? '#2a2531' : '#d6cbb0'}" stroke="#09080b" stroke-width="1.4"/>`).join('') + '</svg>';
+}
+
 // ---------------------------------------------------------------- sound
 const sfx = (() => {
   let ctx = null;
@@ -2073,11 +2787,15 @@ const sfx = (() => {
 })();
 
 // ---------------------------------------------------------------- boot
+$('#z-in').onclick = () => zoomCentre(1 / 1.4);
+$('#z-out').onclick = () => zoomCentre(1.4);
 $('#btn-menu').setAttribute('aria-label', 'Windows list');
 $('#btn-menu').onclick = () => showLevels(MODE);
-$('#btn-hint').onclick = () => MODE === 'riddle' ? riddleHint() : hint();
+$('#btn-hint').onclick = () => MODE === 'riddle' ? riddleHint() : MODE === 'mirror' ? mirrorHint() : MODE === 'paint' ? paintFind() : hint();
 $('#btn-reset').onclick = () => {
-  if (MODE === 'riddle' && RG) startRiddle(RG.id);
+  if (MODE === 'paint' && PG) setView(paintBase());
+  else if (MODE === 'mirror' && MG) startMirror(MG.id);
+  else if (MODE === 'riddle' && RG) startRiddle(RG.id);
   else if (G) { G.admiring = false; startLevel(G.id); }
 };
 
