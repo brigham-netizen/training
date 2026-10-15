@@ -53,6 +53,7 @@ button:focus-visible { outline: 2px solid var(--gilt); outline-offset: 2px; bord
 header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .title-block { flex: 1; min-width: 0; text-align: center; line-height: 1.05; }
 .title-block .num { font-family: var(--font-label); font-size: 12px; letter-spacing: .18em; color: var(--gilt); }
+.title-block .name.long { font-size: 18px; }
 .title-block .name { font-family: var(--font-title); font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .icon-btn {
   width: 40px; height: 40px; border-radius: 50%;
@@ -132,13 +133,14 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 .btn:active { transform: translateY(1px); }
 
 #levels-grid {
-  display: grid; grid-template-columns: repeat(4, 64px); gap: 12px; justify-content: center;
+  display: grid; grid-template-columns: repeat(4, 70px); gap: 10px; justify-content: center;
 }
 .lv {
-  width: 64px; height: 76px; position: relative;
+  width: 70px; height: 92px; position: relative;
   display: flex; align-items: flex-end; justify-content: center;
 }
 .lv svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lv.done span { background: #09080bcc; border-radius: 6px; padding: 0 5px 1px; margin-bottom: 4px; }
 .lv span { position: relative; font-family: var(--font-label); font-size: 15px; padding-bottom: 8px; text-shadow: 0 1px 2px #000; }
 .lv[disabled] { opacity: .3; cursor: default; }
 .levels-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
@@ -160,8 +162,31 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
   .gem { height: 50px; } .gem svg { width: 26px; height: 28px; }
   .hour { padding: 3px 4px 4px; }
 }
+/* Masterwork reveal */
+.mw { animation: glassIn .7s ease-out both; }
+@keyframes glassIn { from { opacity: 0; } }
+.mw-flash { opacity: 0; animation: mwflash 1.6s ease-out 1.5s both; }
+@keyframes mwflash { 0% { opacity: 0; } 25% { opacity: .6; } 100% { opacity: 0; } }
+.twinkle { opacity: 0; transform-box: fill-box; transform-origin: center; animation: twinkle 3.2s ease-in-out infinite both; }
+@keyframes twinkle { 0%, 70%, 100% { opacity: 0; transform: scale(.2); } 85% { opacity: 1; transform: scale(1); } }
+
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  padding: 26px max(16px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(#110e1600, #110e16 30px);
+  animation: sheetIn .45s ease-out;
+}
+@keyframes sheetIn { from { transform: translateY(40px); opacity: 0; } }
+.sheet h1 { font-family: var(--font-title); font-weight: normal; font-size: 40px; margin: 0; color: var(--gilt); line-height: 1; }
+.sheet h2 { font-family: var(--font-label); font-weight: normal; font-size: 17px; letter-spacing: .08em; margin: 0; }
+.sheet p { margin: 0; max-width: 34ch; color: var(--vellum-dim); font-size: 14.5px; }
+.sheet p.inc { font-style: italic; color: var(--vellum); }
+
 @media (prefers-reduced-motion: reduce) {
-  .overlay, .gem.flash { animation: none; }
+  .overlay, .gem.flash, .sheet, .mw, .mw-flash { animation: none; }
+  .mw-flash { opacity: 0; }
+  .twinkle { animation: none; opacity: .7; }
 }
 </style>
 </head>
@@ -451,7 +476,7 @@ function startLevel(id, restore) {
     sel: lv.palette.find(p => lv.inventory[p] > 0),
     hour: lv.hours[0],
     s: HOURS[lv.hours[0]].shift,
-    won: false, hints: 0, peek: null,
+    won: false, hints: 0, peek: null, master: false,
   };
   if (restore && restore.id === id) {
     G.board = restore.board; G.locked = restore.locked; G.inv = restore.inv; G.hour = restore.hour;
@@ -563,6 +588,7 @@ function buildScene() {
 
   layers.rose = el('g', {}, scene);
   layers.glass = el('g', {}, scene);
+  layers.master = el('g', {}, scene);
   layers.floor = el('g', {}, scene);
   layers.floorLit = el('g', {}, scene);
   layers.beams = el('g', { style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, scene);
@@ -597,6 +623,236 @@ function drawRose() {
   if (sol.length) el('circle', { cx, cy, r: R, fill: '#ffd76a', opacity: .18, filter: 'url(#glow)' }, g);
 }
 
+// ---------------------------------------------------------------- masterwork
+// The reward: once solved, the plain panes are re-leaded into a full
+// figurative window, coloured by the glass the player set.
+const RICH = { R: '#a50f2a', Y: '#e0a21b', B: '#173f9e', O: '#d9661a', G: '#1f7a45', P: '#5e2a8c', W: '#e6dfc0', K: '#7a4a22', D: '#1a1440' };
+const GILT = '#e8c25a', PEARL = '#f3ecd2', CAME = '#09080b';
+const richCode = p => p === 'C' ? 'W' : p === 'L' ? 'D' : p;
+function rgbOf(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function shade(h, t) {
+  const a = rgbOf(h), to = t < 0 ? 0 : 255, k = Math.abs(t);
+  return '#' + a.map(v => Math.round(v + (to - v) * k).toString(16).padStart(2, '0')).join('');
+}
+function lancetD(x, w, tip, base, bot) {
+  const xm = x + w / 2, ah = base - tip;
+  return `M${x},${bot}L${x},${base}Q${x},${base - ah * .55} ${xm},${tip}Q${x + w},${base - ah * .55} ${x + w},${base}L${x + w},${bot}Z`;
+}
+const polar = (cx, cy, r, a) => [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+const fx = p => p.map(v => v.toFixed(2)).join(',');
+
+// Motifs live in a unit circle; c = { p: main, s: ring, g: gilt, w: pearl }.
+const MOTIFS = [
+  function fleur(m, c) {
+    m('path', { d: 'M0,-1C0.32,-0.62 0.3,-0.18 0,0.22C-0.3,-0.18 -0.32,-0.62 0,-1Z' }, c.p);
+    const side = 'M0.12,0.12C0.3,-0.45 0.95,-0.42 0.85,0.05C0.8,0.28 0.55,0.25 0.5,0.1C0.62,0.08 0.66,-0.08 0.55,-0.12C0.4,-0.12 0.3,0.05 0.28,0.22Z';
+    m('path', { d: side }, c.p);
+    m('path', { d: side, transform: 'scale(-1,1)' }, c.p);
+    m('path', { d: 'M-0.22,0.35L0.22,0.35L0,0.85Z' }, c.p);
+    m('rect', { x: -0.5, y: 0.17, width: 1, height: 0.18 }, c.g);
+  },
+  function star(m, c) {
+    const p = [];
+    for (let k = 0; k < 16; k++) p.push(fx(polar(0, 0, k % 2 ? .42 : 1, k * Math.PI / 8 - Math.PI / 2)));
+    m('polygon', { points: p.join(' ') }, c.g);
+    m('circle', { r: .27 }, c.p);
+  },
+  function flower(m, c) {
+    for (let k = 0; k < 6; k++) { const [x, y] = polar(0, 0, .52, k * Math.PI / 3); m('circle', { cx: x, cy: y, r: .34 }, c.p); }
+    m('circle', { r: .3 }, c.g);
+  },
+  function cross(m, c) {
+    for (const [x, y] of [[0, -.8], [0, .8], [-.8, 0], [.8, 0]]) m('circle', { cx: x, cy: y, r: .18 }, c.g);
+    m('path', { d: 'M-0.15,-0.75h0.3v1.5h-0.3z' }, c.p);
+    m('path', { d: 'M-0.75,-0.15v0.3h1.5v-0.3z' }, c.p);
+    m('path', { d: 'M0,-0.3L0.3,0L0,0.3L-0.3,0Z' }, c.g);
+  },
+  function sun(m, c) {
+    for (let k = 0; k < 12; k++) {
+      const a = k * Math.PI / 6;
+      m('polygon', { points: [polar(0, 0, .42, a - .17), polar(0, 0, 1, a), polar(0, 0, .42, a + .17)].map(fx).join(' ') }, k % 2 ? c.p : c.g);
+    }
+    m('circle', { r: .45 }, c.g);
+    m('circle', { r: .26 }, c.w);
+  },
+  function chalice(m, c) {
+    for (let k = 0; k < 8; k++) { const a = -Math.PI / 2 + (k - 3.5) * .28; m('polygon', { points: [polar(0, -.8, .22, a - .08), polar(0, -.8, .5, a), polar(0, -.8, .22, a + .08)].map(fx).join(' ') }, c.g); }
+    m('circle', { cx: 0, cy: -0.8, r: .2 }, c.w);
+    m('path', { d: 'M-0.55,-0.5L0.55,-0.5C0.5,0.05 0.2,0.15 0.08,0.2L0.08,0.55L0.42,0.8L-0.42,0.8L-0.08,0.55L-0.08,0.2C-0.2,0.15 -0.5,0.05 -0.55,-0.5Z' }, c.g);
+    m('rect', { x: -0.4, y: -0.35, width: .8, height: .12 }, c.p);
+  },
+  function dove(m, c) {
+    m('circle', { cx: .55, cy: -.12, r: .3 }, c.g);
+    m('path', { d: 'M-0.45,0.12L-0.95,-0.12L-0.88,0.34Z' }, c.w);
+    m('ellipse', { cx: .02, cy: .1, rx: .58, ry: .23 }, c.w);
+    m('path', { d: 'M-0.1,0.02L0.22,-0.85L0.42,0.0Z' }, c.w);
+    m('circle', { cx: .55, cy: -.12, r: .16 }, c.w);
+    m('path', { d: 'M0.2,0.3Q0.3,0.6 0.1,0.85M0.2,0.55L0.42,0.5M0.18,0.72L-0.02,0.66' , fill: 'none' }, 'none', c.p);
+  },
+  function tree(m, c) {
+    m('path', { d: 'M-0.09,0.88L-0.09,-0.1L0.09,-0.1L0.09,0.88Z' }, c.s);
+    m('circle', { cx: -0.42, cy: -0.05, r: .3 }, c.p);
+    m('circle', { cx: 0.42, cy: -0.05, r: .3 }, c.p);
+    m('circle', { cx: 0, cy: -0.48, r: .4 }, c.p);
+    for (const [x, y] of [[-.42, -.05], [.42, -.05], [0, -.55], [-.15, -.35], [.17, -.38]]) m('circle', { cx: x, cy: y, r: .08 }, c.g);
+  },
+  function moon(m, c) {
+    m('path', { d: 'M0.2,-0.85A0.85,0.85 0 1 0 0.2,0.85A0.68,0.68 0 1 1 0.2,-0.85Z' }, c.g);
+    for (const [x, y, r] of [[.55, -.35, .12], [.62, .3, .09], [.25, .05, .07]]) {
+      const p = [];
+      for (let k = 0; k < 8; k++) p.push(fx(polar(x, y, k % 2 ? r * .4 : r, k * Math.PI / 4)));
+      m('polygon', { points: p.join(' ') }, c.w);
+    }
+  },
+];
+
+function drawMasterwork(parent, lv, board, geo, pfx, animate) {
+  const rng = mulberry32((lv.id + 1) * 7777);
+  const { W, H } = lv;
+  const top0 = geo.roseCy - geo.roseR, bot0 = geo.sill;
+  const root = el('g', {}, parent);
+  const defs = el('defs', {}, root);
+  // Pieces fill with light from the top of the window downward.
+  const P = (tag, attrs, g, y) => {
+    const e = el(tag, attrs, g);
+    if (animate) { e.classList.add('mw'); e.style.animationDelay = (((y - top0) / (bot0 - top0)) * 1.5 + rng() * .25).toFixed(2) + 's'; }
+    return e;
+  };
+  const lead = (w = 1.2) => ({ stroke: CAME, 'stroke-width': w, 'stroke-linejoin': 'round' });
+  const used = [];
+  board.forEach(p => { const k = richCode(p); if (!used.includes(k)) used.push(k); });
+  for (let c = 0; c < W; c++) { const k = lightFrom([c, (H - 1) * W + c], board); if (!used.includes(k)) used.push(k); }
+  const cols = used.map(k => RICH[k]);
+
+  for (let c = 0; c < W; c++) {
+    const x = geo.x0 + c * (geo.lw + geo.gap), w = geo.lw;
+    const tip = geo.archTop, base = geo.paneTop, bot = geo.sill;
+    const topC = richCode(board[c]), btmC = richCode(board[(H - 1) * W + c]);
+    const mixC = lightFrom([c, (H - 1) * W + c], board);
+    const d = lancetD(x, w, tip, base, bot);
+    const clip = el('clipPath', { id: `${pfx}-cl${c}` }, defs);
+    el('path', { d }, clip);
+    const g = el('g', { 'clip-path': `url(#${pfx}-cl${c})` }, root);
+
+    // Mottled quarries
+    const field = shade(RICH[btmC], btmC === 'W' ? -.12 : -.35);
+    const dw = w / 3, dh = dw * 1.35;
+    for (let j = 0, cy = tip - dh / 2; cy < bot + dh; j++, cy += dh / 2) {
+      for (let cx = x + (j % 2 ? 0 : dw / 2) - dw; cx < x + w + dw; cx += dw) {
+        P('polygon', { points: `${fx([cx, cy - dh / 2])} ${fx([cx + dw / 2, cy])} ${fx([cx, cy + dh / 2])} ${fx([cx - dw / 2, cy])}`,
+          fill: shade(field, (rng() - .5) * .34), ...lead(1) }, g, cy);
+      }
+    }
+    // Jewelled border
+    const bd = lancetD(x + 3, w - 6, tip + 5, base, bot - 3);
+    P('path', { d: bd, fill: 'none', stroke: shade(RICH[topC], .05), 'stroke-width': 6 }, g, tip);
+    P('path', { d: bd, fill: 'none', stroke: GILT, 'stroke-width': 6, 'stroke-dasharray': '4 6' }, g, tip);
+    el('path', { d: lancetD(x + 6, w - 12, tip + 10, base, bot - 6), fill: 'none', ...lead(1.2) }, g);
+
+    // Trefoil in the arch head
+    const tcx = x + w / 2, tcy = tip + (base - tip) * .68, tr = w * .12;
+    for (let k = 0; k < 3; k++) { const [px, py] = polar(tcx, tcy, tr * .85, -Math.PI / 2 + k * 2 * Math.PI / 3); P('circle', { cx: px, cy: py, r: tr, fill: GILT, ...lead() }, g, tcy); }
+    P('circle', { cx: tcx, cy: tcy, r: tr * .7, fill: RICH[mixC], ...lead() }, g, tcy);
+
+    // Medallions with figures
+    const ph = geo.ph;
+    const centres = H === 1 ? [base + ph * .27, base + ph * .73] : [base + ph * .5, base + ph * 1.5];
+    const mr = w * .4;
+    centres.forEach((cy, k) => {
+      const cx = x + w / 2;
+      const ringC = k === 0 ? topC : btmC;
+      const ring = RICH[ringC];
+      const bg = ringC === 'B' || ringC === 'D' ? '#7d0c22' : '#16348a';
+      const pc = RICH[mixC] === ring || mixC === 'D' ? GILT : RICH[mixC];
+      if ((c + k) % 2 === 0) {
+        P('circle', { cx, cy, r: mr, fill: ring, ...lead(1.6) }, g, cy);
+        P('circle', { cx, cy, r: mr * .78, fill: bg, ...lead(1.4) }, g, cy);
+        for (let q = 0; q < 10; q++) { const [px, py] = polar(cx, cy, mr * .89, q * Math.PI / 5); P('circle', { cx: px, cy: py, r: mr * .065, fill: PEARL, ...lead(.8) }, g, cy); }
+      } else {
+        const o = mr * .45, rr = mr * .55;
+        for (const [ox, oy] of [[o, 0], [-o, 0], [0, o], [0, -o]]) P('circle', { cx: cx + ox, cy: cy + oy, r: rr, fill: ring, ...lead(1.6) }, g, cy);
+        for (const [ox, oy] of [[o, 0], [-o, 0], [0, o], [0, -o]]) P('circle', { cx: cx + ox, cy: cy + oy, r: rr * .74, fill: bg }, g, cy);
+        P('rect', { x: cx - o, y: cy - o, width: o * 2, height: o * 2, fill: bg }, g, cy);
+      }
+      const motif = MOTIFS[(lv.id * 3 + c * 2 + k) % MOTIFS.length];
+      const mg = el('g', { transform: `translate(${cx.toFixed(1)},${cy.toFixed(1)}) scale(${(mr * .6).toFixed(2)})` }, g);
+      const colors = { p: pc, s: shade(ring, .25), g: GILT, w: PEARL };
+      motif((tag, attrs, fill, stroke) => P(tag, { fill, ...attrs, stroke: stroke || CAME, 'stroke-width': 1.1, 'vector-effect': 'non-scaling-stroke' }, mg, cy), colors);
+    });
+    // Donor's band at the foot
+    P('rect', { x: x + 6, y: bot - 14, width: w - 12, height: 7, fill: GILT, ...lead(1) }, g, bot);
+    for (let q = 1; q < 5; q++) el('line', { x1: x + 6 + (w - 12) * q / 5, y1: bot - 14, x2: x + 6 + (w - 12) * q / 5, y2: bot - 7, ...lead(.8) }, g);
+    el('path', { d, fill: 'none', ...lead(3.5) }, root);
+  }
+
+  // Roundels in the spandrels between lancet heads
+  for (let c = 0; c < W - 1; c++) {
+    const cx = geo.x0 + (c + 1) * (geo.lw + geo.gap) - geo.gap / 2, cy = geo.archTop + geo.ah * .3;
+    const r = Math.min(11, (geo.gap + .4 * geo.lw) / 2 - 3);
+    P('circle', { cx, cy, r, fill: GILT, ...lead(1.6) }, root, cy);
+    const p = [];
+    for (let k = 0; k < 10; k++) p.push(fx(polar(cx, cy, k % 2 ? r * .35 : r * .75, k * Math.PI / 5 - Math.PI / 2)));
+    P('polygon', { points: p.join(' '), fill: cols[c % cols.length], ...lead(1) }, root, cy);
+  }
+
+  // The rose
+  const cx = 200, cy = geo.roseCy, R = geo.roseR;
+  el('circle', { cx, cy, r: R + 3, fill: CAME, stroke: '#3a3342', 'stroke-width': 3 }, root);
+  P('circle', { cx, cy, r: R, fill: GILT, ...lead(1.5) }, root, cy - R);
+  const seg = 16;
+  for (let k = 0; k < seg; k++) {
+    const a0 = k * 2 * Math.PI / seg - Math.PI / 2, a1 = a0 + 2 * Math.PI / seg;
+    const r0 = R * .8, r1 = R * .97;
+    P('path', { d: `M${fx(polar(cx, cy, r1, a0))}A${r1},${r1} 0 0 1 ${fx(polar(cx, cy, r1, a1))}L${fx(polar(cx, cy, r0, a1))}A${r0},${r0} 0 0 0 ${fx(polar(cx, cy, r0, a0))}Z`,
+      fill: k % 2 ? cols[(k >> 1) % cols.length] : '#16348a', ...lead(1.1) }, root, cy - R + k);
+  }
+  P('circle', { cx, cy, r: R * .8, fill: '#120f2a', ...lead(1.2) }, root, cy);
+  const pet = 8;
+  for (let k = 0; k < pet; k++) {
+    const a = k * 2 * Math.PI / pet - Math.PI / 2;
+    const p0 = polar(cx, cy, R * .27, a), p1 = polar(cx, cy, R * .78, a);
+    const c1 = polar(cx, cy, R * .55, a - .36), c2 = polar(cx, cy, R * .55, a + .36);
+    P('path', { d: `M${fx(p0)}Q${fx(c1)} ${fx(p1)}Q${fx(c2)} ${fx(p0)}Z`, fill: cols[k % cols.length], ...lead(1.2) }, root, cy + Math.sin(a) * R * .5);
+    const [bx, by] = polar(cx, cy, R * .66, a + Math.PI / pet);
+    P('circle', { cx: bx, cy: by, r: R * .08, fill: PEARL, ...lead(.9) }, root, by);
+  }
+  P('circle', { cx, cy, r: R * .27, fill: '#16348a', ...lead(1.4) }, root, cy);
+  const sp = [];
+  for (let k = 0; k < 16; k++) sp.push(fx(polar(cx, cy, k % 2 ? R * .1 : R * .22, k * Math.PI / 8)));
+  P('polygon', { points: sp.join(' '), fill: GILT, ...lead(1) }, root, cy);
+  return root;
+}
+
+// Light breaking through the finished glass.
+function addGlints(parent, geo, animate) {
+  const rng = mulberry32(42);
+  if (animate) {
+    const fl = el('g', { class: 'mw-flash', style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, parent);
+    for (let c = 0; c < geo.W; c++) {
+      const x = geo.x0 + c * (geo.lw + geo.gap);
+      el('path', { d: lancetD(x, geo.lw, geo.archTop, geo.paneTop, geo.sill), fill: '#fff4d0' }, fl);
+    }
+    el('circle', { cx: 200, cy: geo.roseCy, r: geo.roseR, fill: '#fff4d0' }, fl);
+  }
+  for (let k = 0; k < 7; k++) {
+    const x = geo.x0 + rng() * geo.total, y = geo.roseCy - geo.roseR * .6 + rng() * (geo.sill - geo.roseCy);
+    const s = 3 + rng() * 3.5;
+    const st = el('path', { d: `M${x},${y - s}Q${x},${y} ${x + s},${y}Q${x},${y} ${x},${y + s}Q${x},${y} ${x - s},${y}Q${x},${y} ${x},${y - s}Z`,
+      fill: '#fffbe8', class: 'twinkle', 'pointer-events': 'none' }, parent);
+    st.style.animationDelay = (2.2 + rng() * 3).toFixed(2) + 's';
+  }
+}
+function masterThumb(id) {
+  const lv = getLevel(id), geo = computeGeo(lv);
+  const x = geo.x0 - 12, y = geo.roseCy - geo.roseR - 10, w = geo.total + 24, h = geo.sill + 8 - y;
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMax meet');
+  el('rect', { x, y, width: w, height: h, rx: 6, fill: '#08070a' }, svg);
+  drawMasterwork(svg, lv, lv.solution, geo, 'th' + id, false);
+  return svg.outerHTML;
+}
+
 function drawFloorBase() {
   const g = layers.floor;
   // Nave floor perspective slab
@@ -628,7 +884,7 @@ function draw() {
   // Glass
   const gg = layers.glass; gg.innerHTML = '';
   const peekSet = new Set(G.peek ? G.peek.panes : []);
-  for (let i = 0; i < W * H; i++) {
+  for (let i = 0; i < W * H && !G.master; i++) {
     const p = board[i];
     const d = panePath(i);
     if (!p) {
@@ -667,7 +923,8 @@ function draw() {
     const { c, r, x, y, w, h } = paneRect(i);
     const f = c + s * (H - r) + H;
     const q = tileQuad(f);
-    const ys = y + h - 4;
+    // Over the finished window, beams leave from the sill so the art stays clear.
+    const ys = G.master ? GEO.sill + 6 : y + h - 4;
     const dim = G.peek && !peekSet.has(i) ? .35 : 1;
     el('polygon', { points: pts([[x + 3, ys], [x + w - 3, ys], q[2], q[3]]), fill: `url(#beam-${p})`, opacity: dim }, bg);
   }
@@ -732,6 +989,7 @@ function renderUI() {
   const isPil = G.id >= CAMPAIGN.length;
   $('#lv-num').textContent = isPil ? 'THE PILGRIM ROAD' : 'WINDOW ' + toRoman(G.id + 1) + ' OF ' + toRoman(CAMPAIGN.length);
   $('#lv-name').textContent = lv.name;
+  $('#lv-name').classList.toggle('long', lv.name.length > 19);
   $('#lore').innerHTML = `<span>${lv.lore}</span>`;
   renderHours();
   renderTray();
@@ -797,6 +1055,7 @@ function setHour(h) {
 
 // ---------------------------------------------------------------- input
 scene.addEventListener('click', e => {
+  if (G && G.won && !G.winShown) { showWin(); return; }
   if (!G || G.won) return;
   const pe = e.target.closest('[data-pane]');
   const te = e.target.closest('[data-tile]');
@@ -804,6 +1063,7 @@ scene.addEventListener('click', e => {
   else if (te) tapTile(+te.dataset.tile);
 });
 function tapPane(i) {
+  if (G.master) return;
   G.peek = null;
   if (G.locked[i]) { toast('This pane is old glass, set long ago.'); return; }
   const cur = G.board[i];
@@ -857,17 +1117,27 @@ function checkWin() {
   else save.pilgrim = Math.max(save.pilgrim, G.id - CAMPAIGN.length + 1);
   persist();
   sfx.win();
-  drawRose();
-  // Let the sun walk the whole day across the finished window.
+  revealMasterwork(true);
+  draw();
+  // Let the new glass fill with light, then walk the sun across the day.
   const seq = [1, 0, -1];
   let k = 0;
+  const id = G.id;
   const next = () => {
-    if (k >= seq.length) { setTimeout(showWin, 350); return; }
+    if (G.id !== id || G.winShown) return;
+    if (k >= seq.length) { G.winTimer = setTimeout(showWin, 300); return; }
     const to = seq[k++];
-    animateSun(to, 900, () => setTimeout(next, 380));
+    animateSun(to, 850, () => { G.winTimer = setTimeout(next, 300); });
   };
-  draw();
-  setTimeout(next, 300);
+  G.winTimer = setTimeout(next, reduceMotion ? 200 : 2600);
+}
+function revealMasterwork(animate) {
+  G.master = true;
+  layers.rose.innerHTML = '';
+  layers.glass.innerHTML = '';
+  layers.master.innerHTML = '';
+  drawMasterwork(layers.master, G.lv, G.board, GEO, 'mw', animate && !reduceMotion);
+  addGlints(layers.master, GEO, animate && !reduceMotion);
 }
 
 function hint() {
@@ -896,10 +1166,13 @@ function hint() {
 const ov = $('#overlay-root');
 function closeOverlay() { ov.innerHTML = ''; }
 function showWin() {
+  if (G.winShown) return;
+  G.winShown = true;
+  clearTimeout(G.winTimer);
   const next = G.id + 1;
   const isLast = G.id === CAMPAIGN.length - 1;
   const lines = ['The light falls true.', 'The brothers fall silent at the sight.', 'Even the abbot looks up from his ledger.', 'Pilgrims will kneel here.'];
-  ov.innerHTML = `<div class="overlay">
+  ov.innerHTML = `<div class="sheet">
     <h1>Consecrated</h1>
     <h2>${G.lv.name}</h2>
     <p class="inc">${isLast ? 'The cathedral is complete. Every hour of the day now falls in colour across the nave.' : lines[G.id % lines.length]}</p>
@@ -914,27 +1187,25 @@ function showWin() {
 function admire() {
   // Allow scrolling the hours over the finished glass.
   G.won = false; G.locked = G.locked.map(() => true); G.admiring = true;
-  $('#lore').innerHTML = '<span>Finished. Switch hours to watch it, or open the windows list to move on.</span>';
+  $('#lore').innerHTML = '<span>Your window, finished and leaded. Switch hours to watch the light, or open the windows list to move on.</span>';
   renderHours(); draw();
 }
 function showLevels() {
   const cells = CAMPAIGN.map((c, i) => {
     const open = i <= save.unlocked;
     const done = save.solved[i] !== undefined;
-    const lv = done ? getLevel(i) : null;
-    const cols = lv ? lv.solution.filter(p => p !== 'L').slice(0, 4).map(p => GLASS[p].base) : ['#2a2531', '#241f2b', '#2a2531', '#241f2b'];
-    while (cols.length < 4) cols.push(cols[0]);
-    return `<button class="lv" data-lv="${i}" ${open ? '' : 'disabled'} aria-label="Window ${i + 1}${done ? ', consecrated' : ''}">
-      <svg viewBox="0 0 64 76"><path d="M4 74V30Q4 6 32 2Q60 6 60 30V74Z" fill="#09080b"/>
-      <path d="M9 72V31Q9 12 32 7V72Z" fill="${cols[0]}"/><path d="M55 72V31Q55 12 32 7V72Z" fill="${cols[1]}"/>
-      <path d="M9 50H55V72H9Z" fill="${cols[2]}" opacity=".85"/><circle cx="32" cy="30" r="8" fill="${cols[3]}" stroke="#09080b" stroke-width="2.5"/>
-      <path d="M4 74V30Q4 6 32 2Q60 6 60 30V74ZM32 7V72M9 50H55" fill="none" stroke="${done ? '#d6a542' : '#3a3342'}" stroke-width="2.5"/></svg>
+    const art = done ? masterThumb(i) : `<svg viewBox="0 0 64 76"><path d="M4 74V30Q4 6 32 2Q60 6 60 30V74Z" fill="#09080b"/>
+      <path d="M9 72V31Q9 12 32 7V72Z" fill="#2a2531"/><path d="M55 72V31Q55 12 32 7V72Z" fill="#241f2b"/>
+      <circle cx="32" cy="30" r="8" fill="#2a2531" stroke="#09080b" stroke-width="2.5"/>
+      <path d="M4 74V30Q4 6 32 2Q60 6 60 30V74ZM32 7V72" fill="none" stroke="#3a3342" stroke-width="2.5"/></svg>`;
+    return `<button class="lv${done ? ' done' : ''}" data-lv="${i}" ${open ? '' : 'disabled'} aria-label="Window ${i + 1}${done ? ', consecrated' : ''}">
+      ${art}
       <span>${toRoman(i + 1)}</span></button>`;
   }).join('');
   const pilOpen = save.unlocked >= CAMPAIGN.length;
   ov.innerHTML = `<div class="overlay">
     <h1>Lumen</h1>
-    <p>Set the glass so the sun paints the floor true at every hour of prayer.</p>
+    <p>Set the glass so the sun paints the floor true at every hour of prayer. Each window you consecrate is leaded into a masterwork here.</p>
     <div id="levels-grid">${cells}</div>
     <div class="levels-actions">
       <button class="btn ghost" id="ov-pil" ${pilOpen ? '' : 'disabled style="opacity:.35"'}>Pilgrim road${save.pilgrim ? ' · ' + toRoman(save.pilgrim + 1) : ''}</button>
