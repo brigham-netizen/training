@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#110e16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Lumen</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=UnifrakturMaguntia&display=swap">
+<style>
+/* Layout: one-screen portrait app. Header strip, the nave (SVG scene) fills the middle, controls docked below. */
+:root {
+  --night: #110e16;        /* nave in darkness */
+  --stone: #241f2b;        /* dressed stone */
+  --stone-hi: #3a3342;     /* worn edges */
+  --lead: #09080b;         /* lead came */
+  --vellum: #eadfc6;       /* text */
+  --vellum-dim: #a89c86;
+  --gilt: #d6a542;         /* accent: gilding */
+  --gilt-dim: #8a6a2c;
+  --font-title: "UnifrakturMaguntia", "Old English Text MT", Georgia, serif;
+  --font-label: "IM Fell English SC", "Palatino Linotype", Georgia, serif;
+  --font-body: "IM Fell English", "Palatino Linotype", Georgia, serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--night);
+  color: var(--vellum);
+  font-family: var(--font-body);
+  font-size: 16px;
+  overflow: hidden;
+  user-select: none; -webkit-user-select: none;
+  touch-action: manipulation;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+button:focus-visible { outline: 2px solid var(--gilt); outline-offset: 2px; border-radius: 4px; }
+
+#app {
+  height: 100%;
+  display: flex; flex-direction: column;
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-block: 8px;
+  max-width: 560px; margin: 0 auto;
+  gap: 6px;
+}
+
+header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.title-block { flex: 1; min-width: 0; text-align: center; line-height: 1.05; }
+.title-block .num { font-family: var(--font-label); font-size: 12px; letter-spacing: .18em; color: var(--gilt); }
+.title-block .name { font-family: var(--font-title); font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid var(--stone-hi); background: var(--stone);
+  color: var(--vellum);
+}
+.icon-btn svg { width: 20px; height: 20px; }
+.icon-btn:active { transform: scale(.94); }
+
+#scene-wrap { flex: 1; min-height: 0; position: relative; }
+#scene { width: 100%; height: 100%; display: block; }
+.pane-hit { cursor: pointer; }
+.tile-hit { cursor: pointer; }
+
+.lore {
+  font-style: italic; font-size: 14.5px; line-height: 1.35; color: var(--vellum-dim);
+  text-align: center; min-height: 2.7em; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center;
+}
+.lore b { font-style: normal; color: var(--vellum); font-weight: normal; font-family: var(--font-label); letter-spacing: .04em; }
+
+#hours { display: flex; gap: 6px; justify-content: center; }
+.hour {
+  flex: 1; max-width: 130px;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 4px 6px; border-radius: 10px;
+  border: 1px solid var(--stone-hi); background: var(--stone);
+}
+.hour svg { width: 34px; height: 16px; }
+.hour .hn { font-family: var(--font-label); font-size: 14px; letter-spacing: .06em; }
+.hour .hs { font-size: 11.5px; color: var(--vellum-dim); font-variant-numeric: tabular-nums; }
+.hour.on { border-color: var(--gilt); background: #2f2618; box-shadow: 0 0 14px #d6a54233 inset; }
+.hour.done .hs { color: var(--gilt); }
+
+#tray { display: flex; gap: 8px; justify-content: center; padding-top: 2px; }
+.gem {
+  position: relative; width: 54px; height: 58px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px;
+  border-radius: 10px; padding-top: 5px;
+  border: 1px solid transparent;
+}
+.gem svg { width: 30px; height: 34px; }
+.gem .gn { font-family: var(--font-label); font-size: 11px; letter-spacing: .05em; color: var(--vellum-dim); }
+.gem .ct {
+  position: absolute; top: 1px; right: 3px; min-width: 18px; height: 18px; border-radius: 9px;
+  background: var(--lead); border: 1px solid var(--stone-hi);
+  font-size: 12px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.gem.sel { border-color: var(--gilt); background: #2f2618; }
+.gem.sel .gn { color: var(--vellum); }
+.gem.empty { opacity: .35; }
+.gem.flash { animation: flash .4s; }
+@keyframes flash { 50% { background: #5a1f1f; } }
+
+/* Overlays */
+.overlay {
+  position: fixed; inset: 0; z-index: 10;
+  background: #0a080df7;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  text-align: center; gap: 14px;
+  animation: fadein .35s;
+}
+@keyframes fadein { from { opacity: 0; } }
+.overlay h1 { font-family: var(--font-title); font-weight: normal; font-size: 46px; margin: 0; color: var(--gilt); text-wrap: balance; }
+.overlay h2 { font-family: var(--font-title); font-weight: normal; font-size: 32px; margin: 0; text-wrap: balance; }
+.overlay p { max-width: 34ch; margin: 0; line-height: 1.45; color: var(--vellum-dim); }
+.overlay p.inc { font-style: italic; color: var(--vellum); }
+.btn {
+  font-family: var(--font-label); font-size: 18px; letter-spacing: .08em;
+  padding: 11px 26px; border-radius: 999px;
+  background: linear-gradient(#e2b453, #a87b27); color: #1a1208;
+  box-shadow: 0 2px 0 #5d4214, 0 0 24px #d6a54244;
+}
+.btn.ghost { background: none; color: var(--vellum); border: 1px solid var(--stone-hi); box-shadow: none; }
+.btn:active { transform: translateY(1px); }
+
+#levels-grid {
+  display: grid; grid-template-columns: repeat(4, 64px); gap: 12px; justify-content: center;
+}
+.lv {
+  width: 64px; height: 76px; position: relative;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.lv svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lv span { position: relative; font-family: var(--font-label); font-size: 15px; padding-bottom: 8px; text-shadow: 0 1px 2px #000; }
+.lv[disabled] { opacity: .3; cursor: default; }
+.levels-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+.howto { text-align: left; max-width: 36ch; display: grid; gap: 10px; font-size: 15px; line-height: 1.4; }
+.howto div { color: var(--vellum-dim); }
+.howto b { color: var(--vellum); font-weight: normal; font-family: var(--font-label); }
+
+.toast {
+  position: absolute; left: 50%; top: 8px; transform: translateX(-50%);
+  background: #1b1621f2; border: 1px solid var(--stone-hi); border-radius: 999px;
+  padding: 6px 14px; font-size: 14px; font-style: italic; white-space: nowrap;
+  pointer-events: none; opacity: 0; transition: opacity .25s;
+}
+.toast.show { opacity: 1; }
+
+@media (max-height: 640px) {
+  .lore { font-size: 13px; min-height: 2.4em; }
+  .gem { height: 50px; } .gem svg { width: 26px; height: 28px; }
+  .hour { padding: 3px 4px 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .gem.flash { animation: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="icon-btn" id="btn-menu" aria-label="Windows">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 21V10a7 7 0 0 1 14 0v11z"/><path d="M12 3v18M5 13h14"/></svg>
+    </button>
+    <div class="title-block"><div class="num" id="lv-num">WINDOW I</div><div class="name" id="lv-name">Lumen</div></div>
+    <button class="icon-btn" id="btn-hint" aria-label="Hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3c-2 3-5 5-5 9a5 5 0 0 0 10 0c0-4-3-6-5-9z"/><path d="M12 17v-3"/></svg>
+    </button>
+    <button class="icon-btn" id="btn-reset" aria-label="Clear the window">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v4h4"/></svg>
+    </button>
+  </header>
+  <div id="scene-wrap">
+    <svg id="scene" viewBox="0 0 400 560" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Stained glass window and the cathedral floor"></svg>
+    <div class="toast" id="toast"></div>
+  </div>
+  <div class="lore" id="lore"></div>
+  <div id="hours"></div>
+  <div id="tray"></div>
+</div>
+<div id="overlay-root"></div>
+
+<script>
+// ENGINE START ---------------------------------------------------------------
+// The window is W lancets wide and H tiers tall. Row 0 is the top tier.
+// Sunlight through pane (c, r) lands on the floor at c + shift * (H - r):
+// higher panes throw their light further. Shifts per canonical hour:
+const HOURS = {
+  L: { key: 'L', name: 'Lauds',   sub: 'dawn', shift: 1 },
+  S: { key: 'S', name: 'Sext',    sub: 'noon', shift: 0 },
+  V: { key: 'V', name: 'Vespers', sub: 'dusk', shift: -1 },
+};
+const HOUR_ORDER = ['L', 'S', 'V'];
+
+// Glass. mask = primaries it tints with (R=1, Y=2, B=4); lead blocks light.
+const PIECES = {
+  R: { name: 'Ruby',   mask: 1 },
+  Y: { name: 'Gold',   mask: 2 },
+  B: { name: 'Cobalt', mask: 4 },
+  C: { name: 'Clear',  mask: 0 },
+  L: { name: 'Lead',   mask: -1 },
+};
+const PIECE_ORDER = ['R', 'Y', 'B', 'C', 'L'];
+// Light falling on a stone: union of primaries, or D for shadow.
+const MASK_TO_LIGHT = ['W', 'R', 'Y', 'O', 'B', 'P', 'G', 'K'];
+const LIGHT_NAMES = { W: 'white', R: 'ruby', Y: 'gold', O: 'amber', B: 'blue', P: 'violet', G: 'green', K: 'umber', D: 'shadow' };
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function shuffle(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function floorWidth(W, H) { return W + 2 * H; }
+function landing(W, H, idx, hour) {
+  const c = idx % W, r = Math.floor(idx / W);
+  return c + HOURS[hour].shift * (H - r) + H;
+}
+// For each hour, the panes that feed each floor stone.
+function feeders(W, H, hour) {
+  const out = Array.from({ length: floorWidth(W, H) }, () => []);
+  for (let i = 0; i < W * H; i++) out[landing(W, H, i, hour)].push(i);
+  return out;
+}
+function lightFrom(panes, board) {
+  let lit = false, mask = 0;
+  for (const i of panes) {
+    const p = board[i];
+    if (!p || p === 'L') continue;
+    lit = true; mask |= PIECES[p].mask;
+  }
+  return lit ? MASK_TO_LIGHT[mask] : 'D';
+}
+function floorLight(level, board, hour) {
+  return feeders(level.W, level.H, hour).map(f => lightFrom(f, board));
+}
+function targetMet(level, board, t) {
+  return lightFrom(feeders(level.W, level.H, t.hour)[t.tile], board) === t.color;
+}
+
+// Count arrangements of the inventory into the free panes that satisfy all
+// targets, stopping at `limit`.
+function countSolutions(W, H, targets, fixed, inv, limit) {
+  const n = W * H;
+  const board = new Array(n).fill(null);
+  const free = [];
+  for (let i = 0; i < n; i++) { if (fixed[i]) board[i] = fixed[i]; else free.push(i); }
+  const pos = new Array(n).fill(-1);
+  free.forEach((i, k) => pos[i] = k);
+  const fmap = {};
+  for (const h of HOUR_ORDER) fmap[h] = feeders(W, H, h);
+  const checkAt = Array.from({ length: free.length }, () => []);
+  for (const t of targets) {
+    const panes = fmap[t.hour][t.tile];
+    let last = -1;
+    for (const i of panes) last = Math.max(last, pos[i]);
+    if (last < 0) { if (lightFrom(panes, board) !== t.color) return 0; }
+    else checkAt[last].push({ panes, color: t.color });
+  }
+  const counts = { ...inv };
+  const types = Object.keys(counts);
+  let found = 0;
+  function rec(k) {
+    if (k === free.length) { found++; return found >= limit; }
+    const i = free[k];
+    for (const ty of types) {
+      if (!counts[ty]) continue;
+      counts[ty]--; board[i] = ty;
+      let ok = true;
+      for (const c of checkAt[k]) if (lightFrom(c.panes, board) !== c.color) { ok = false; break; }
+      if (ok && rec(k + 1)) { counts[ty]++; board[i] = null; return true; }
+      counts[ty]++;
+    }
+    board[i] = null;
+    return false;
+  }
+  rec(0);
+  return found;
+}
+
+// Build a puzzle: pick a hidden window, then reveal the fewest floor
+// requirements that pin it down uniquely.
+function generateLevel(spec) {
+  const { W, H, hours, palette } = spec;
+  const rng = mulberry32(spec.seed);
+  const n = W * H;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const sol = [];
+    for (let i = 0; i < n; i++) sol.push(palette[Math.floor(rng() * palette.length)]);
+    // Every glass on the palette must appear; lead stays rare.
+    if (n >= palette.length && !palette.every(p => sol.includes(p))) continue;
+    if (sol.filter(p => p === 'L').length > Math.max(1, Math.floor(n / 4))) continue;
+    const top = {};
+    for (const p of sol) top[p] = (top[p] || 0) + 1;
+    if (Math.max(...Object.values(top)) > Math.ceil(n / 2)) continue;
+
+    const fixed = new Array(n).fill(null);
+    const order = shuffle([...Array(n).keys()], rng);
+    for (let k = 0; k < (spec.fixed || 0); k++) fixed[order[k]] = sol[order[k]];
+
+    const cands = [];
+    for (const h of hours) {
+      const f = feeders(W, H, h);
+      f.forEach((panes, tile) => {
+        if (!panes.length) return;
+        const color = lightFrom(panes, sol);
+        // Prefer blended light and shadow: they make the deductions.
+        const bonus = (color === 'D' ? 0.5 : 0) + (panes.length > 1 ? 0.35 : 0) + (color === 'W' ? -0.2 : 0);
+        cands.push({ tile, hour: h, color, key: rng() - bonus });
+      });
+    }
+    cands.sort((a, b) => a.key - b.key);
+
+    const invOf = () => {
+      const inv = {};
+      for (const p of palette) inv[p] = 0;
+      sol.forEach((p, i) => { if (!fixed[i]) inv[p]++; });
+      return inv;
+    };
+    let targets = [];
+    let unique = countSolutions(W, H, targets, fixed, invOf(), 2) === 1;
+    for (const c of cands) {
+      if (unique) break;
+      targets.push(c);
+      unique = countSolutions(W, H, targets, fixed, invOf(), 2) === 1;
+    }
+    // Some symmetries can't be told apart by light alone: set an old pane.
+    let guard = 0;
+    while (!unique && guard++ < n) {
+      const free = order.filter(i => !fixed[i]);
+      const i = free[0];
+      fixed[i] = sol[i];
+      unique = countSolutions(W, H, targets, fixed, invOf(), 2) === 1;
+    }
+    if (!unique) continue;
+    if (spec.prune !== false) {
+      for (const t of shuffle([...targets], rng)) {
+        const without = targets.filter(x => x !== t);
+        if (countSolutions(W, H, without, fixed, invOf(), 2) === 1) targets = without;
+      }
+    }
+    if (targets.length < (spec.minTargets || 2)) continue;
+    targets = targets.map(({ tile, hour, color }) => ({ tile, hour, color }));
+    targets.sort((a, b) => a.tile - b.tile || HOUR_ORDER.indexOf(a.hour) - HOUR_ORDER.indexOf(b.hour));
+    return { W, H, hours: HOUR_ORDER.filter(h => hours.includes(h)), palette, solution: sol, fixed, inventory: invOf(), targets };
+  }
+  throw new Error('Could not generate level ' + spec.seed);
+}
+
+const CAMPAIGN = [
+  { name: "St. Agnes's Lancet", W: 3, H: 1, hours: ['S'], palette: ['R', 'Y', 'B'], prune: false, seed: 11,
+    lore: 'At <b>Sext</b> the noon sun shines straight down. Pick a glass below, then tap an empty pane. Make each marked stone glow its colour.' },
+  { name: 'The Eastern Light', W: 3, H: 1, hours: ['L', 'V'], palette: ['R', 'Y', 'B'], seed: 23,
+    lore: 'The sun moves. At <b>Lauds</b> it rises in the east and throws light one stone to the right. At <b>Vespers</b> it leans the other way.' },
+  { name: 'Clear as Matins', W: 4, H: 1, hours: ['L', 'S', 'V'], palette: ['R', 'Y', 'B', 'C'], seed: 37,
+    lore: 'Clear glass lets plain white light through. Each mark sits where its sun stands: left for Lauds, middle for Sext, right for Vespers.' },
+  { name: 'Two Tiers of Saints', W: 3, H: 2, hours: ['S'], palette: ['R', 'Y', 'B'], seed: 41,
+    lore: 'Two tiers now. At Sext both panes of a lancet fall on one stone and their light mingles: ruby and gold make <b>amber</b>, gold and cobalt <b>green</b>, cobalt and ruby <b>violet</b>.' },
+  { name: 'Long Shadows of Morning', W: 3, H: 2, hours: ['L', 'S'], palette: ['R', 'Y', 'B'], seed: 52,
+    lore: 'The upper tier sits higher, so its light travels twice as far. Tap a floor stone to see which panes feed it.' },
+  { name: 'The Full Office', W: 3, H: 2, hours: ['L', 'S', 'V'], palette: ['R', 'Y', 'B'], seed: 67,
+    lore: 'One window must answer all three hours. A pane that serves the dawn must also serve the noon.' },
+  { name: 'Clerestory', W: 3, H: 2, hours: ['S', 'V'], palette: ['R', 'Y', 'B', 'C'], seed: 71,
+    lore: 'Clear glass adds light but no colour. Ruby beside clear is still ruby.' },
+  { name: 'Tomb of Abbot Hugh', W: 4, H: 2, hours: ['L', 'V'], palette: ['R', 'Y', 'B', 'L'], seed: 83,
+    lore: 'A plate of <b>lead</b> blocks the sun. Black marks ask for shadow: let no light touch that stone at that hour.' },
+  { name: 'The Chapter House', W: 4, H: 2, hours: ['L', 'S', 'V'], palette: ['R', 'Y', 'B', 'C'], seed: 97,
+    lore: 'The brothers argue here daily. Read every hour before you set a single pane.' },
+  { name: 'The Lady Chapel', W: 4, H: 2, hours: ['L', 'S', 'V'], palette: ['R', 'Y', 'B', 'C', 'L'], seed: 101,
+    lore: 'Every glass the workshop owns. Shadow and colour must share the floor.' },
+  { name: 'The Great West Window', W: 5, H: 2, hours: ['L', 'S', 'V'], palette: ['R', 'Y', 'B'], seed: 113,
+    lore: 'Five lancets wide. Pilgrims will see this one from the door.' },
+  { name: 'Rose of the Transept', W: 5, H: 2, hours: ['L', 'S', 'V'], palette: ['R', 'Y', 'B', 'C', 'L'], seed: 127,
+    lore: 'The masterwork. When it is set, the whole nave keeps the hours in colour.' },
+];
+function pilgrimageSpec(k) {
+  const rng = mulberry32(9000 + k * 7919);
+  const W = rng() < 0.5 ? 4 : 5;
+  const pals = [['R', 'Y', 'B'], ['R', 'Y', 'B', 'C'], ['R', 'Y', 'B', 'L'], ['R', 'Y', 'B', 'C', 'L']];
+  return { name: 'Pilgrimage ' + toRoman(k + 1), W, H: 2, hours: ['L', 'S', 'V'],
+    palette: pals[Math.floor(rng() * pals.length)], seed: 5000 + k * 104729,
+    lore: 'A window for a parish along the road. Each one is new.' };
+}
+function toRoman(n) {
+  const m = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+  let s = '';
+  for (const [v, r] of m) while (n >= v) { s += r; n -= v; }
+  return s;
+}
+// ENGINE END -----------------------------------------------------------------
+
+// Palette for drawing glass and light.
+const GLASS = {
+  R: { base: '#b3122d', hi: '#ff5d6c', beam: '#ff3b4f' },
+  Y: { base: '#d99412', hi: '#ffd76a', beam: '#ffc23a' },
+  B: { base: '#1b46b0', hi: '#6f9bff', beam: '#4f7dff' },
+  C: { base: '#b9c4c8', hi: '#ffffff', beam: '#fff2d6' },
+  L: { base: '#34333a', hi: '#5a5962', beam: null },
+};
+const LIGHT = {
+  W: '#fff0cc', R: '#ff3349', Y: '#ffc533', O: '#ff8a1f', B: '#3d72ff',
+  P: '#a24dff', G: '#2fc76a', K: '#8a5a2b', D: '#0c0a10',
+};
+
+const $ = s => document.querySelector(s);
+const svgNS = 'http://www.w3.org/2000/svg';
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------------------------------------------------------------- state
+const SAVE_KEY = 'lumen.v1';
+let save = { unlocked: 0, solved: {}, sound: true, pilgrim: 0 };
+try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = { ...save, ...s }; } catch (e) {}
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
+
+const levelCache = {};
+function getLevel(id) {
+  if (!levelCache[id]) {
+    const spec = id >= CAMPAIGN.length ? pilgrimageSpec(id - CAMPAIGN.length) : CAMPAIGN[id];
+    levelCache[id] = { ...generateLevel(spec), name: spec.name, lore: spec.lore, id };
+  }
+  return levelCache[id];
+}
+
+let G = null; // current game
+function startLevel(id, restore) {
+  const lv = getLevel(id);
+  G = {
+    id, lv,
+    board: lv.fixed.slice(),
+    locked: lv.fixed.map(Boolean),
+    inv: { ...lv.inventory },
+    sel: lv.palette.find(p => lv.inventory[p] > 0),
+    hour: lv.hours[0],
+    s: HOURS[lv.hours[0]].shift,
+    won: false, hints: 0, peek: null,
+  };
+  if (restore && restore.id === id) {
+    G.board = restore.board; G.locked = restore.locked; G.inv = restore.inv; G.hour = restore.hour;
+    G.s = HOURS[G.hour].shift; G.sel = restore.sel;
+  }
+  buildScene();
+  renderUI();
+  draw();
+}
+
+// ---------------------------------------------------------------- geometry
+let GEO = null;
+function computeGeo(lv) {
+  const { W, H } = lv;
+  const gap = 10;
+  const lw = Math.min(62, (300 - (W - 1) * gap) / W);
+  const total = W * lw + (W - 1) * gap;
+  const x0 = 200 - total / 2;
+  const ah = lw * 0.8;           // pointed arch height
+  const ph = H === 1 ? 118 : 76; // pane height
+  const roseR = Math.min(44, total / 2 - 6);
+  const roseCy = 22 + roseR;
+  const archTop = roseCy + roseR + 14;
+  const paneTop = archTop + ah;
+  const sill = paneTop + H * ph;
+  const N = floorWidth(W, H);
+  const FT = sill + 64, FB = FT + 92;
+  const topW = 300, botW = 392;
+  return { W, H, gap, lw, total, x0, ah, ph, roseR, roseCy, archTop, paneTop, sill, N, FT, FB,
+    ftl: 200 - topW / 2, fbl: 200 - botW / 2, twT: topW / N, twB: botW / N, VH: FB + 16 };
+}
+function paneRect(i) {
+  const c = i % GEO.W, r = Math.floor(i / GEO.W);
+  const x = GEO.x0 + c * (GEO.lw + GEO.gap);
+  const y = GEO.paneTop + r * GEO.ph;
+  return { c, r, x, y, w: GEO.lw, h: GEO.ph };
+}
+function panePath(i) {
+  const { r, x, y, w, h } = paneRect(i);
+  if (r === 0) {
+    const ah = GEO.ah, xm = x + w / 2;
+    return `M${x},${y + h}L${x},${y}Q${x},${y - ah * .55} ${xm},${y - ah}Q${x + w},${y - ah * .55} ${x + w},${y}L${x + w},${y + h}Z`;
+  }
+  return `M${x},${y}h${w}v${h}h${-w}Z`;
+}
+function tileQuad(f) { // f may be fractional
+  const a = GEO.ftl + f * GEO.twT, b = a + GEO.twT;
+  const c = GEO.fbl + f * GEO.twB, d = c + GEO.twB;
+  return [[a, GEO.FT], [b, GEO.FT], [d, GEO.FB], [c, GEO.FB]];
+}
+const pts = q => q.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ');
+
+// ---------------------------------------------------------------- scene
+const scene = $('#scene');
+let layers = {};
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(svgNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function buildScene() {
+  GEO = computeGeo(G.lv);
+  scene.setAttribute('viewBox', `0 0 400 ${GEO.VH.toFixed(0)}`);
+  scene.innerHTML = '';
+  const defs = el('defs', {}, scene);
+  defs.innerHTML = `
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1520"/><stop offset=".7" stop-color="#14111a"/><stop offset="1" stop-color="#0d0b11"/>
+    </linearGradient>
+    <linearGradient id="pillar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0e0c12"/><stop offset=".45" stop-color="#2b2532"/><stop offset="1" stop-color="#0e0c12"/>
+    </linearGradient>
+    <linearGradient id="floorg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1922"/><stop offset="1" stop-color="#2a2430"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx=".35" cy=".3" r=".9">
+      <stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset=".5" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#000" stop-opacity=".25"/>
+    </radialGradient>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#2c2b31"/><path d="M0 0v6" stroke="#46454d" stroke-width="2"/>
+    </pattern>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="1.6"/></filter>
+    ${Object.keys(GLASS).filter(k => GLASS[k].beam).map(k => `
+    <linearGradient id="beam-${k}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${GLASS[k].beam}" stop-opacity=".42"/><stop offset="1" stop-color="${GLASS[k].beam}" stop-opacity=".1"/>
+    </linearGradient>`).join('')}
+  `;
+  // Wall and sky tint
+  el('rect', { x: 0, y: 0, width: 400, height: GEO.VH, fill: 'url(#wall)' }, scene);
+  layers.sky = el('rect', { x: 0, y: 0, width: 400, height: GEO.sill + 20, fill: '#ffd9a0', opacity: .05 }, scene);
+  // Pillars
+  el('rect', { x: 0, y: 0, width: 26, height: GEO.FT, fill: 'url(#pillar)' }, scene);
+  el('rect', { x: 374, y: 0, width: 26, height: GEO.FT, fill: 'url(#pillar)' }, scene);
+  // Window recess (outer arch)
+  const pad = 14, ox = GEO.x0 - pad, ow = GEO.total + pad * 2, oTop = GEO.roseCy - GEO.roseR - 14;
+  el('path', { d: `M${ox},${GEO.sill + 8}L${ox},${GEO.paneTop - 10}Q${ox},${oTop + 10} ${200},${oTop - 8}Q${ox + ow},${oTop + 10} ${ox + ow},${GEO.paneTop - 10}L${ox + ow},${GEO.sill + 8}Z`,
+    fill: '#08070a', stroke: '#3a3342', 'stroke-width': 3 }, scene);
+  // Sill
+  el('rect', { x: ox - 8, y: GEO.sill + 6, width: ow + 16, height: 9, rx: 2, fill: '#3a3342' }, scene);
+
+  // Sun dial (sky arc, top right corner)
+  layers.dial = el('g', { transform: 'translate(365,26)' }, scene);
+  el('path', { d: 'M-18,8A18,18 0 0 1 18,8', fill: 'none', stroke: '#5b5163', 'stroke-width': 1.2, 'stroke-dasharray': '2 3' }, layers.dial);
+  el('line', { x1: -24, y1: 8, x2: 24, y2: 8, stroke: '#5b5163', 'stroke-width': 1 }, layers.dial);
+  layers.sun = el('circle', { r: 4.5, fill: '#ffd36b' }, layers.dial);
+
+  layers.rose = el('g', {}, scene);
+  layers.glass = el('g', {}, scene);
+  layers.floor = el('g', {}, scene);
+  layers.floorLit = el('g', {}, scene);
+  layers.beams = el('g', { style: 'mix-blend-mode:screen', 'pointer-events': 'none' }, scene);
+  layers.badges = el('g', { 'pointer-events': 'none' }, scene);
+  layers.hits = el('g', {}, scene);
+
+  drawRose();
+  drawFloorBase();
+  // Hit areas
+  for (let i = 0; i < G.lv.W * G.lv.H; i++) {
+    const p = el('path', { d: panePath(i), fill: 'transparent', class: 'pane-hit', 'data-pane': i }, layers.hits);
+  }
+  for (let f = 0; f < GEO.N; f++) {
+    el('polygon', { points: pts(tileQuad(f)), fill: 'transparent', class: 'tile-hit', 'data-tile': f }, layers.hits);
+  }
+}
+
+function drawRose() {
+  const g = layers.rose; g.innerHTML = '';
+  const cx = 200, cy = GEO.roseCy, R = GEO.roseR;
+  el('circle', { cx, cy, r: R + 3, fill: '#09080b', stroke: '#3a3342', 'stroke-width': 3 }, g);
+  // Petals take their colours from the solved window, otherwise dim.
+  const sol = G.won ? G.board.filter(p => p && p !== 'L') : [];
+  const petals = 8;
+  for (let k = 0; k < petals; k++) {
+    const a = (k / petals) * Math.PI * 2 - Math.PI / 2;
+    const px = cx + Math.cos(a) * R * .58, py = cy + Math.sin(a) * R * .58;
+    const col = sol.length ? GLASS[sol[k % sol.length]].base : '#2a2531';
+    el('circle', { cx: px.toFixed(1), cy: py.toFixed(1), r: (R * .33).toFixed(1), fill: col, stroke: '#09080b', 'stroke-width': 2.5 }, g);
+  }
+  el('circle', { cx, cy, r: R * .26, fill: sol.length ? '#ffd76a' : '#332d3a', stroke: '#09080b', 'stroke-width': 2.5 }, g);
+  if (sol.length) el('circle', { cx, cy, r: R, fill: '#ffd76a', opacity: .18, filter: 'url(#glow)' }, g);
+}
+
+function drawFloorBase() {
+  const g = layers.floor;
+  // Nave floor perspective slab
+  el('polygon', { points: pts([[GEO.ftl - 20, GEO.FT - 6], [400 - GEO.ftl + 20, GEO.FT - 6], [404, GEO.FB + 8], [-4, GEO.FB + 8]]), fill: '#0d0b10' }, g);
+  for (let f = 0; f < GEO.N; f++) {
+    el('polygon', { points: pts(tileQuad(f)), fill: 'url(#floorg)', stroke: '#0a090c', 'stroke-width': 2 }, g);
+  }
+}
+
+function hourSkyColor(s) {
+  // s: +1 dawn, 0 noon, -1 dusk
+  const dawn = [255, 170, 160], noon = [255, 236, 190], dusk = [255, 140, 70];
+  const t = Math.abs(s), to = s > 0 ? dawn : dusk;
+  return noon.map((v, i) => Math.round(v + (to[i] - v) * t));
+}
+
+// Draw everything that depends on the board or sun position.
+function draw() {
+  const { lv, board } = G;
+  const { W, H } = lv;
+  const s = G.s;
+  const atHour = HOUR_ORDER.find(h => Math.abs(HOURS[h].shift - s) < 1e-3 && lv.hours.includes(h));
+
+  const sky = hourSkyColor(s);
+  layers.sky.setAttribute('fill', `rgb(${sky})`);
+  layers.sun.setAttribute('cx', (-s * 18 * Math.cos(0)).toFixed(1));
+  layers.sun.setAttribute('cy', (8 - 18 * Math.sqrt(Math.max(0, 1 - s * s))).toFixed(1));
+
+  // Glass
+  const gg = layers.glass; gg.innerHTML = '';
+  const peekSet = new Set(G.peek ? G.peek.panes : []);
+  for (let i = 0; i < W * H; i++) {
+    const p = board[i];
+    const d = panePath(i);
+    if (!p) {
+      el('path', { d, fill: '#0f0d13', stroke: '#2c2633', 'stroke-width': 1 }, gg);
+      const { x, y, w, h } = paneRect(i);
+      el('path', { d: `M${x + w / 2 - 5},${y + h / 2}h10M${x + w / 2},${y + h / 2 - 5}v10`, stroke: '#4a4152', 'stroke-width': 1.2 }, gg);
+    } else {
+      const gl = GLASS[p];
+      el('path', { d, fill: p === 'L' ? 'url(#hatch)' : gl.base }, gg);
+      if (p !== 'L') {
+        el('path', { d, fill: gl.hi, opacity: .35, filter: 'url(#soft)', transform: '' }, gg);
+        el('path', { d, fill: 'url(#sheen)' }, gg);
+        // painted grisaille detail: a small roundel with a cross
+        const { x, y, w, h } = paneRect(i);
+        const cx = x + w / 2, cy = y + h / 2, rr = Math.min(w, h) * .2;
+        el('circle', { cx, cy, r: rr, fill: 'none', stroke: '#00000040', 'stroke-width': 1.3 }, gg);
+        el('path', { d: `M${cx - rr * .6},${cy}h${rr * 1.2}M${cx},${cy - rr * .6}v${rr * 1.2}`, stroke: '#00000040', 'stroke-width': 1.3 }, gg);
+      }
+    }
+    // Lead came
+    el('path', { d, fill: 'none', stroke: '#09080b', 'stroke-width': 3.5, 'stroke-linejoin': 'round' }, gg);
+    if (G.locked[i] && !G.won) {
+      const { x, y } = paneRect(i);
+      el('circle', { cx: x + 7, cy: y + 7, r: 2.6, fill: '#d6a542', stroke: '#09080b', 'stroke-width': 1 }, gg);
+    }
+    if (peekSet.has(i)) {
+      el('path', { d, fill: 'none', stroke: '#fff3c4', 'stroke-width': 2.2, 'stroke-dasharray': '4 3' }, gg);
+    }
+  }
+
+  // Beams
+  const bg = layers.beams; bg.innerHTML = '';
+  for (let i = 0; i < W * H; i++) {
+    const p = board[i];
+    if (!p || p === 'L') continue;
+    const { c, r, x, y, w, h } = paneRect(i);
+    const f = c + s * (H - r) + H;
+    const q = tileQuad(f);
+    const ys = y + h - 4;
+    const dim = G.peek && !peekSet.has(i) ? .35 : 1;
+    el('polygon', { points: pts([[x + 3, ys], [x + w - 3, ys], q[2], q[3]]), fill: `url(#beam-${p})`, opacity: dim }, bg);
+  }
+
+  // Floor light: shown only when the sun stands at a canonical hour.
+  const fl = layers.floorLit; fl.innerHTML = '';
+  const lights = atHour ? floorLight(lv, board, atHour) : null;
+  const feeds = atHour ? feeders(W, H, atHour) : null;
+  if (lights) {
+    lights.forEach((code, f) => {
+      if (code === 'D') return;
+      const q = pts(tileQuad(f));
+      el('polygon', { points: q, fill: LIGHT[code], opacity: .55, filter: 'url(#glow)' }, fl);
+      el('polygon', { points: q, fill: LIGHT[code], opacity: .78 }, fl);
+    });
+  }
+  if (G.peek) {
+    el('polygon', { points: pts(tileQuad(G.peek.tile)), fill: 'none', stroke: '#fff3c4', 'stroke-width': 2, 'stroke-dasharray': '4 3' }, fl);
+  }
+
+  // Requirement marks: one diamond per hour, placed where that hour's sun stands.
+  const bgd = layers.badges; bgd.innerHTML = '';
+  const slotX = { L: -1, S: 0, V: 1 };
+  for (const t of lv.targets) {
+    const q = tileQuad(t.tile);
+    const midTop = (q[0][0] + q[1][0]) / 2, midBot = (q[2][0] + q[3][0]) / 2;
+    const cy = GEO.FT + (GEO.FB - GEO.FT) * .55;
+    const cxm = (midTop + midBot) / 2;
+    const tw = (GEO.twT + GEO.twB) / 2;
+    const spacing = Math.min(14, tw / 3.1);
+    const cx = cxm + slotX[t.hour] * spacing;
+    const current = t.hour === atHour;
+    const met = targetMet(lv, board, t);
+    const rad = current ? Math.min(7.5, spacing * .55) : Math.min(5.5, spacing * .42);
+    const g = el('g', { transform: `translate(${cx.toFixed(1)},${cy.toFixed(1)})`, opacity: current || G.won ? 1 : .55 }, bgd);
+    const dia = `M0,${-rad * 1.25}L${rad},0L0,${rad * 1.25}L${-rad},0Z`;
+    if (current) el('path', { d: dia, fill: '#000', opacity: .6, transform: 'scale(1.45)' }, g);
+    el('path', { d: dia, fill: LIGHT[t.color], stroke: met ? '#ffe9a8' : '#09080b', 'stroke-width': met ? 2 : 1.5 }, g);
+    if (t.color === 'D') el('path', { d: `M${rad * .15},${-rad * .55}a${rad * .5},${rad * .5} 0 1 0 0,${rad * 1.1}a${rad * .38},${rad * .38} 0 1 1 0,${-rad * 1.1}`, fill: '#cfc6e0' }, g);
+    if (met && current) el('path', { d: `M${-rad * .9},${rad * 2.1}l${rad * .55},${rad * .5}l${rad * 1.1},${-rad * .9}`, fill: 'none', stroke: '#ffe9a8', 'stroke-width': 1.6, 'stroke-linecap': 'round' }, g);
+  }
+}
+
+// ---------------------------------------------------------------- UI
+function sunIcon(h, on) {
+  const x = { L: -11, S: 0, V: 11 }[h], y = h === 'S' ? 2 : 10;
+  return `<svg viewBox="-17 -2 34 16"><path d="M-14,13A14,14 0 0 1 14,13" fill="none" stroke="${on ? '#d6a542' : '#5b5163'}" stroke-width="1.2" stroke-dasharray="2 2.5"/><line x1="-17" y1="13" x2="17" y2="13" stroke="#5b5163"/><circle cx="${x}" cy="${y}" r="3.6" fill="${on ? '#ffd36b' : '#a89c86'}"/></svg>`;
+}
+function gemIcon(p) {
+  const g = GLASS[p];
+  const fill = p === 'L' ? `<rect x="3" y="4" width="24" height="28" rx="2" fill="url(#gh)"/>` : `<path d="M15 2L27 12L22 32H8L3 12Z" fill="${g.base}"/><path d="M15 2L27 12L15 15L3 12Z" fill="${g.hi}" opacity=".55"/><path d="M15 15L22 32H8Z" fill="#000" opacity=".18"/>`;
+  return `<svg viewBox="0 0 30 34"><defs><pattern id="gh" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#2c2b31"/><path d="M0 0v5" stroke="#55545c" stroke-width="2"/></pattern></defs>${fill}<path d="${p === 'L' ? 'M3 4h24v28H3z' : 'M15 2L27 12L22 32H8L3 12Z'}" fill="none" stroke="#09080b" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+
+function hourStats(h) {
+  const ts = G.lv.targets.filter(t => t.hour === h);
+  return { total: ts.length, met: ts.filter(t => targetMet(G.lv, G.board, t)).length };
+}
+
+function renderUI() {
+  const { lv } = G;
+  const isPil = G.id >= CAMPAIGN.length;
+  $('#lv-num').textContent = isPil ? 'THE PILGRIM ROAD' : 'WINDOW ' + toRoman(G.id + 1) + ' OF ' + toRoman(CAMPAIGN.length);
+  $('#lv-name').textContent = lv.name;
+  $('#lore').innerHTML = `<span>${lv.lore}</span>`;
+  renderHours();
+  renderTray();
+}
+function renderHours() {
+  const box = $('#hours'); box.innerHTML = '';
+  for (const h of G.lv.hours) {
+    const st = hourStats(h);
+    const b = document.createElement('button');
+    b.className = 'hour' + (G.hour === h ? ' on' : '') + (st.met === st.total && st.total ? ' done' : '');
+    b.innerHTML = `${sunIcon(h, G.hour === h)}<span class="hn">${HOURS[h].name}</span><span class="hs">${st.total ? `${st.met} of ${st.total} lit` : 'no marks'}</span>`;
+    b.setAttribute('aria-pressed', G.hour === h);
+    b.onclick = () => setHour(h);
+    box.appendChild(b);
+  }
+}
+function renderTray() {
+  const box = $('#tray'); box.innerHTML = '';
+  for (const p of G.lv.palette) {
+    const b = document.createElement('button');
+    const n = G.inv[p] || 0;
+    b.className = 'gem' + (G.sel === p ? ' sel' : '') + (n ? '' : ' empty');
+    b.dataset.piece = p;
+    b.innerHTML = `${gemIcon(p)}<span class="gn">${PIECES[p].name}</span><span class="ct">${n}</span>`;
+    b.setAttribute('aria-label', `${PIECES[p].name} glass, ${n} left`);
+    b.onclick = () => { G.sel = p; sfx.tick(p); renderTray(); };
+    box.appendChild(b);
+  }
+}
+function flashGem(p) {
+  const b = document.querySelector(`.gem[data-piece="${p}"]`);
+  if (!b) return;
+  b.classList.remove('flash'); void b.offsetWidth; b.classList.add('flash');
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+// ---------------------------------------------------------------- sun motion
+let anim = null;
+function animateSun(to, dur, done) {
+  cancelAnimationFrame(anim);
+  const from = G.s, t0 = performance.now();
+  if (reduceMotion || from === to) { G.s = to; draw(); done && done(); return; }
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur);
+    const e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    G.s = from + (to - from) * e;
+    draw();
+    if (k < 1) anim = requestAnimationFrame(step); else { G.s = to; draw(); done && done(); }
+  };
+  anim = requestAnimationFrame(step);
+}
+function setHour(h) {
+  if (G.won || G.hour === h) return;
+  G.hour = h; G.peek = null;
+  sfx.bell(h);
+  renderHours();
+  animateSun(HOURS[h].shift, 650 * Math.abs(HOURS[h].shift - G.s) + 200);
+}
+
+// ---------------------------------------------------------------- input
+scene.addEventListener('click', e => {
+  if (!G || G.won) return;
+  const pe = e.target.closest('[data-pane]');
+  const te = e.target.closest('[data-tile]');
+  if (pe) tapPane(+pe.dataset.pane);
+  else if (te) tapTile(+te.dataset.tile);
+});
+function tapPane(i) {
+  G.peek = null;
+  if (G.locked[i]) { toast('This pane is old glass, set long ago.'); return; }
+  const cur = G.board[i];
+  if (cur) {
+    G.inv[cur]++;
+    G.board[i] = null;
+    if (cur !== G.sel && G.inv[G.sel] > 0) { G.board[i] = G.sel; G.inv[G.sel]--; sfx.tick(G.sel); }
+    else sfx.lift();
+  } else {
+    if (!G.sel || !G.inv[G.sel]) {
+      const any = G.lv.palette.find(p => G.inv[p] > 0);
+      if (G.sel) flashGem(G.sel);
+      if (!any) return;
+      toast(`No ${PIECES[G.sel].name.toLowerCase()} left. Tap a pane to take its glass back.`);
+      return;
+    }
+    G.board[i] = G.sel; G.inv[G.sel]--;
+    sfx.tick(G.sel);
+    if (navigator.vibrate) try { navigator.vibrate(8); } catch (e) {}
+  }
+  if (!G.inv[G.sel]) { const nx = G.lv.palette.find(p => G.inv[p] > 0); if (nx) G.sel = nx; }
+  renderTray(); renderHours(); draw();
+  checkWin();
+}
+let peekTimer;
+function tapTile(f) {
+  const h = HOUR_ORDER.find(k => Math.abs(HOURS[k].shift - G.s) < 1e-3);
+  if (!h) return;
+  const panes = feeders(G.lv.W, G.lv.H, h)[f];
+  G.peek = { tile: f, panes };
+  const marks = G.lv.targets.filter(t => t.tile === f);
+  if (!panes.length) toast(`No window light reaches this stone at ${HOURS[h].name}.`);
+  else if (marks.length) toast(marks.map(t => `${HOURS[t.hour].name}: ${LIGHT_NAMES[t.color]}`).join(' · '));
+  draw();
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => { if (G.peek && G.peek.tile === f) { G.peek = null; draw(); } }, 2200);
+}
+
+function checkWin() {
+  const { lv, board } = G;
+  if (board.some(p => !p)) return;
+  const bad = lv.targets.filter(t => !targetMet(lv, board, t));
+  if (bad.length) {
+    const h = bad[0].hour;
+    toast(`The window is full, but ${bad.length} mark${bad.length > 1 ? 's are' : ' is'} still wrong.` + (G.hour !== h ? ` Check ${HOURS[h].name}.` : ''));
+    return;
+  }
+  G.won = true;
+  save.solved[G.id] = Math.min(save.solved[G.id] ?? 99, G.hints);
+  if (G.id < CAMPAIGN.length) save.unlocked = Math.max(save.unlocked, G.id + 1);
+  else save.pilgrim = Math.max(save.pilgrim, G.id - CAMPAIGN.length + 1);
+  persist();
+  sfx.win();
+  drawRose();
+  // Let the sun walk the whole day across the finished window.
+  const seq = [1, 0, -1];
+  let k = 0;
+  const next = () => {
+    if (k >= seq.length) { setTimeout(showWin, 350); return; }
+    const to = seq[k++];
+    animateSun(to, 900, () => setTimeout(next, 380));
+  };
+  draw();
+  setTimeout(next, 300);
+}
+
+function hint() {
+  if (!G || G.won) return;
+  const { lv } = G;
+  const wrong = [];
+  for (let i = 0; i < lv.W * lv.H; i++) if (!G.locked[i] && G.board[i] !== lv.solution[i]) wrong.push(i);
+  if (!wrong.length) return;
+  const i = wrong[Math.floor(Math.random() * wrong.length)];
+  const want = lv.solution[i];
+  if (G.board[i]) { G.inv[G.board[i]]++; G.board[i] = null; }
+  if (!G.inv[want]) {
+    // Pull the needed glass out of a pane where it doesn't belong.
+    const j = wrong.find(k => k !== i && G.board[k] === want);
+    G.board[j] = null; G.inv[want]++;
+  }
+  G.board[i] = want; G.inv[want]--; G.locked[i] = true;
+  G.hints++;
+  sfx.bell('S');
+  toast(`A pane of ${PIECES[want].name.toLowerCase()} is set and sealed.`);
+  renderTray(); renderHours(); draw();
+  checkWin();
+}
+
+// ---------------------------------------------------------------- overlays
+const ov = $('#overlay-root');
+function closeOverlay() { ov.innerHTML = ''; }
+function showWin() {
+  const next = G.id + 1;
+  const isLast = G.id === CAMPAIGN.length - 1;
+  const lines = ['The light falls true.', 'The brothers fall silent at the sight.', 'Even the abbot looks up from his ledger.', 'Pilgrims will kneel here.'];
+  ov.innerHTML = `<div class="overlay">
+    <h1>Consecrated</h1>
+    <h2>${G.lv.name}</h2>
+    <p class="inc">${isLast ? 'The cathedral is complete. Every hour of the day now falls in colour across the nave.' : lines[G.id % lines.length]}</p>
+    ${G.hints ? `<p>${G.hints} pane${G.hints > 1 ? 's' : ''} set by the master glazier.</p>` : ''}
+    <div class="levels-actions">
+      <button class="btn" id="ov-next">${isLast ? 'Walk the pilgrim road' : next >= CAMPAIGN.length ? 'Next parish' : 'Next window'}</button>
+      <button class="btn ghost" id="ov-stay">Admire it</button>
+    </div></div>`;
+  $('#ov-next').onclick = () => { closeOverlay(); startLevel(next); };
+  $('#ov-stay').onclick = () => { closeOverlay(); G.won = true; admire(); };
+}
+function admire() {
+  // Allow scrolling the hours over the finished glass.
+  G.won = false; G.locked = G.locked.map(() => true); G.admiring = true;
+  $('#lore').innerHTML = '<span>Finished. Switch hours to watch it, or open the windows list to move on.</span>';
+  renderHours(); draw();
+}
+function showLevels() {
+  const cells = CAMPAIGN.map((c, i) => {
+    const open = i <= save.unlocked;
+    const done = save.solved[i] !== undefined;
+    const lv = done ? getLevel(i) : null;
+    const cols = lv ? lv.solution.filter(p => p !== 'L').slice(0, 4).map(p => GLASS[p].base) : ['#2a2531', '#241f2b', '#2a2531', '#241f2b'];
+    while (cols.length < 4) cols.push(cols[0]);
+    return `<button class="lv" data-lv="${i}" ${open ? '' : 'disabled'} aria-label="Window ${i + 1}${done ? ', consecrated' : ''}">
+      <svg viewBox="0 0 64 76"><path d="M4 74V30Q4 6 32 2Q60 6 60 30V74Z" fill="#09080b"/>
+      <path d="M9 72V31Q9 12 32 7V72Z" fill="${cols[0]}"/><path d="M55 72V31Q55 12 32 7V72Z" fill="${cols[1]}"/>
+      <path d="M9 50H55V72H9Z" fill="${cols[2]}" opacity=".85"/><circle cx="32" cy="30" r="8" fill="${cols[3]}" stroke="#09080b" stroke-width="2.5"/>
+      <path d="M4 74V30Q4 6 32 2Q60 6 60 30V74ZM32 7V72M9 50H55" fill="none" stroke="${done ? '#d6a542' : '#3a3342'}" stroke-width="2.5"/></svg>
+      <span>${toRoman(i + 1)}</span></button>`;
+  }).join('');
+  const pilOpen = save.unlocked >= CAMPAIGN.length;
+  ov.innerHTML = `<div class="overlay">
+    <h1>Lumen</h1>
+    <p>Set the glass so the sun paints the floor true at every hour of prayer.</p>
+    <div id="levels-grid">${cells}</div>
+    <div class="levels-actions">
+      <button class="btn ghost" id="ov-pil" ${pilOpen ? '' : 'disabled style="opacity:.35"'}>Pilgrim road${save.pilgrim ? ' · ' + toRoman(save.pilgrim + 1) : ''}</button>
+      <button class="btn ghost" id="ov-how">How to play</button>
+      <button class="btn ghost" id="ov-snd">Sound ${save.sound ? 'on' : 'off'}</button>
+    </div>
+    <button class="btn" id="ov-close">Return</button>
+  </div>`;
+  ov.querySelectorAll('[data-lv]').forEach(b => b.onclick = () => { closeOverlay(); startLevel(+b.dataset.lv); });
+  $('#ov-close').onclick = closeOverlay;
+  $('#ov-how').onclick = showHow;
+  $('#ov-snd').onclick = () => { save.sound = !save.sound; persist(); $('#ov-snd').textContent = 'Sound ' + (save.sound ? 'on' : 'off'); };
+  if (pilOpen) $('#ov-pil').onclick = () => { closeOverlay(); startLevel(CAMPAIGN.length + save.pilgrim); };
+}
+function showHow() {
+  ov.innerHTML = `<div class="overlay">
+    <h2>How the light falls</h2>
+    <div class="howto">
+      <div><b>Set the glass.</b> Pick a glass from the tray, then tap an empty pane. Tap a set pane to take it back.</div>
+      <div><b>Read the floor.</b> Diamonds on the stones ask for a colour of light. Their position tells the hour: left for Lauds at dawn, middle for Sext at noon, right for Vespers at dusk.</div>
+      <div><b>Follow the sun.</b> At dawn the light leans right, at dusk it leans left. The upper tier throws its light twice as far as the lower.</div>
+      <div><b>Mingle colours.</b> Two beams on one stone blend: ruby and gold make amber, gold and cobalt make green, cobalt and ruby make violet. Clear glass adds light, lead adds shadow.</div>
+      <div><b>Consecrate.</b> Use every glass in the tray and satisfy every mark at every hour.</div>
+    </div>
+    <button class="btn" id="ov-close">Back</button></div>`;
+  $('#ov-close').onclick = showLevels;
+}
+
+// ---------------------------------------------------------------- sound
+const sfx = (() => {
+  let ctx = null;
+  function ac() {
+    if (!save.sound) return null;
+    if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  function tone(freq, dur, type = 'sine', vol = .15, delay = 0) {
+    const c = ac(); if (!c) return;
+    const t = c.currentTime + delay;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + .008);
+    g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(g).connect(c.destination);
+    o.start(t); o.stop(t + dur + .05);
+  }
+  const pitch = { R: 1318.5, Y: 1567.98, B: 1174.66, C: 1975.53, L: 196 };
+  return {
+    tick(p) { if (p === 'L') { tone(110, .25, 'triangle', .2); tone(220, .12, 'square', .03); } else { tone(pitch[p], .35, 'sine', .12); tone(pitch[p] * 2.76, .12, 'sine', .03); } },
+    lift() { tone(880, .12, 'triangle', .06); },
+    bell(h) { const f = { L: 293.66, S: 392, V: 261.63 }[h] || 392; tone(f, 2.2, 'sine', .12); tone(f * 2.01, 1.2, 'sine', .05); tone(f * 2.76, .7, 'sine', .03); },
+    win() { [293.66, 369.99, 440, 587.33].forEach((f, i) => { tone(f, 3, 'sine', .1, i * .22); tone(f * 2.01, 1.6, 'sine', .035, i * .22); }); },
+  };
+})();
+
+// ---------------------------------------------------------------- boot
+$('#btn-menu').onclick = showLevels;
+$('#btn-hint').onclick = hint;
+$('#btn-reset').onclick = () => { if (G) { G.admiring = false; startLevel(G.id); } };
+
+window.claude?.hot?.snapshot?.(() => G && !G.won ? { id: G.id, board: G.board, locked: G.locked, inv: G.inv, hour: G.hour, sel: G.sel } : {});
+function boot(data) {
+  const id = data && typeof data.id === 'number' ? data.id : Math.min(save.unlocked, CAMPAIGN.length - 1);
+  startLevel(id, data && data.board ? data : null);
+}
+window.claude?.hot?.ready ? window.claude.hot.ready(boot) : boot(window.claude?.hot?.data ?? {});
+</script>
+</body>
+</html>
