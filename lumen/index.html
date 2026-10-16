@@ -895,7 +895,7 @@ const PAINT_DESIGNS = [
 const paintCache = {};
 const isMasterpiece = id => id >= PAINT_DESIGNS.length;
 const PAINT_TOTAL = () => PAINT_DESIGNS.length + MASTERPIECES.length;
-const GLASS_KEY = id => 'lumen.glass.v1.' + id;
+const GLASS_KEY = id => 'lumen.glass.v2.' + id;
 function getDesign(id) {
   if (paintCache[id]) return paintCache[id];
   if (isMasterpiece(id)) {
@@ -1079,41 +1079,52 @@ const MASTERPIECES = [
       });
     } },
   { name: 'Girl with a Pearl Earring', artist: 'After Johannes Vermeer, about 1665', spacing: 22, frame: ['yellow', 'turban'],
-    palette: { bg: ['Shadow', '#15110e'], skin: ['Skin', '#ecc9a2'], skinMid: ['Warm skin', '#cf9a72'], skinDark: ['Shade', '#8c5c3c'],
-      turban: ['Ultramarine', '#2c5ba8'], turbanDark: ['Deep blue', '#1a3670'], yellow: ['Yellow', '#d8b257'], yellowDark: ['Ochre', '#9a7733'],
-      jacket: ['Jacket', '#a77f3e'], jacketDark: ['Brown', '#5d4422'], collar: ['Collar', '#eee7d8'], lips: ['Lips', '#b44334'],
-      pearl: ['Pearl', '#d9dee2'], eye: ['Eye', '#2b1d14'] },
+    // Faces in stained glass are a few large pieces, not crazy paving.
+    calm: [[214, 300, 62, 96], [218, 410, 40, 34]],
+    palette: { bg: ['Shadow', '#15110e'], skin: ['Skin', '#efcfaa'], skinMid: ['Warm skin', '#d6a47c'], skinDark: ['Shade', '#8f5f3f'],
+      turban: ['Ultramarine', '#2c5ba8'], turbanDark: ['Deep blue', '#1a3670'], yellow: ['Yellow', '#dcb65c'], yellowDark: ['Ochre', '#9a7733'],
+      jacket: ['Jacket', '#a77f3e'], jacketDark: ['Brown', '#5d4422'], collar: ['Collar', '#eee7d8'], lips: ['Lips', '#c24a3a'],
+      pearl: ['Pearl', '#cfd6dc'], eye: ['Eye', '#2b1d14'] },
     draw(c, P) {
       const fill = (d, col) => { c.fillStyle = col; c.fill(new Path2D(d)); };
       const circ = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); };
       const ell = (x, y, rx, ry, rot, col) => { c.fillStyle = col; c.beginPath(); c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); c.fill(); };
       c.fillStyle = P.bg; c.fillRect(0, 0, 400, 560);
-      // Jacket and collar
-      fill('M40,560 C60,470 120,420 190,410 C250,404 330,430 380,500 L380,560Z', P.jacket);
-      fill('M110,560 C130,500 170,460 210,450 C180,480 160,520 160,560Z', P.jacketDark);
-      fill('M300,560 C300,510 320,480 360,470 C370,500 375,530 380,560Z', P.jacketDark);
-      fill('M160,430 C200,440 250,440 290,428 C280,446 240,458 200,458 C180,456 166,446 160,430Z', P.collar);
-      // Neck
-      fill('M180,350 C178,390 182,420 190,440 C220,446 250,440 268,428 C262,400 262,370 262,340Z', P.skinMid);
-      // The yellow cloth falling from the turban
-      fill('M250,170 C300,180 320,240 310,320 C305,370 290,410 300,440 C270,430 262,380 268,330 C272,280 262,220 250,170Z', P.yellow);
-      fill('M290,230 C305,280 300,350 292,400 C300,410 304,425 300,440 C290,410 290,360 296,310 C300,270 296,250 290,230Z', P.yellowDark);
-      // Face, turned toward us over the shoulder
-      fill('M150,250 C150,190 190,160 230,165 C275,170 290,220 285,280 C282,330 260,380 220,392 C185,400 160,370 152,330 C148,305 150,280 150,250Z', P.skin);
-      fill('M255,190 C280,215 290,260 284,300 C280,340 262,375 232,390 C252,350 262,300 255,250 C252,225 252,205 255,190Z', P.skinMid);
-      fill('M262,300 C272,330 264,360 246,380 C256,350 260,325 262,300Z', P.skinDark);
-      // Eyes, nose and parted lips
-      ell(190, 262, 16, 9, -.08, P.collar); circ(192, 263, 7, P.eye); circ(195, 260, 2.4, P.collar);
-      ell(248, 258, 13, 8, -.1, P.collar); circ(247, 259, 6, P.eye); circ(249, 257, 2, P.collar);
-      fill('M220,262 C222,290 214,310 206,318 C214,324 226,324 234,316 C228,300 226,280 220,262Z', P.skinMid);
-      fill('M196,342 C210,336 230,336 242,342 C230,354 210,356 196,342Z', P.lips);
-      // The blue turban
-      fill('M146,250 C140,190 170,140 230,132 C280,128 300,170 296,214 C270,190 240,182 205,185 C180,188 160,210 146,250Z', P.turban);
-      fill('M160,200 C185,160 230,150 270,160 C250,166 220,170 200,180 C185,188 170,198 160,200Z', P.turbanDark);
-      fill('M226,132 C250,110 285,112 300,135 C298,160 288,180 278,190 C276,165 262,146 226,132Z', P.yellow);
-      fill('M245,145 C265,138 282,150 285,170 C276,160 262,152 245,145Z', P.turbanDark);
-      // The pearl
-      circ(266, 352, 13, P.pearl); circ(262, 347, 4.5, P.collar); ell(268, 362, 7, 3, 0, P.skinDark);
+      // Her shoulder turned away, the jacket sweeping up from the lower left
+      fill('M30,560 C50,480 110,440 180,432 C240,428 300,445 345,490 C362,510 372,535 378,560Z', P.jacket);
+      fill('M95,560 C110,505 140,470 180,452 C160,485 150,525 152,560Z', P.jacketDark);
+      fill('M290,560 C292,520 305,490 335,478 C352,500 365,530 370,560Z', P.jacketDark);
+      // Neck, shaded on the right
+      fill('M188,365 C186,395 186,420 182,440 L258,440 C252,415 250,390 252,362Z', P.skinMid);
+      fill('M232,372 C240,395 244,420 250,440 L258,440 C252,415 250,390 252,362Z', P.skinDark);
+      // White collar
+      fill('M158,440 C190,452 240,454 284,440 C280,456 250,468 216,468 C190,468 168,458 158,440Z', P.collar);
+      // Yellow cloth falling from the crown down her back
+      fill('M248,150 C292,158 312,200 306,262 C300,320 288,372 300,440 C276,432 266,392 268,344 C270,290 270,220 248,150Z', P.yellow);
+      fill('M286,200 C300,250 296,320 288,380 C292,400 298,420 300,440 C286,410 282,370 286,320 C290,276 292,236 286,200Z', P.yellowDark);
+      // The face: lit from the left, turned a little toward us
+      fill('M168,222 C162,250 160,290 168,326 C176,356 192,382 214,390 C236,394 256,376 266,346 C276,312 276,262 268,220Z', P.skin);
+      fill('M252,232 C266,262 268,312 258,348 C250,370 238,384 222,390 C238,394 256,378 266,346 C276,312 276,262 268,220Z', P.skinMid);
+      // Eyes looking back at us, irises to the left
+      ell(193, 280, 14.5, 7.5, 0, P.collar); circ(188, 280, 6.8, P.eye); circ(186, 277.5, 2, P.collar);
+      ell(242, 278, 13, 7, 0, P.collar); circ(237, 278, 6.3, P.eye); circ(235, 275.5, 1.8, P.collar);
+      fill('M178,272 C186,266 200,266 208,272 C200,269 186,269 178,272Z', P.skinMid);
+      fill('M229,270 C236,265 248,265 255,270 C247,268 236,268 229,270Z', P.skinMid);
+      // Nose: shadow down its right side and under the tip
+      fill('M220,282 C224,298 228,314 226,324 C222,328 214,330 208,326 C216,326 222,322 222,314 C222,302 220,292 220,282Z', P.skinMid);
+      ell(214, 328, 7, 2.6, 0, P.skinDark);
+      // Parted lips with a gleam on the lower one
+      fill('M197,350 C204,344 212,346 215,348 C219,346 227,345 233,350 C222,352 208,352 197,350Z', P.lips);
+      fill('M199,352 C208,350 224,350 231,352 C226,362 206,362 199,352Z', P.lips);
+      fill('M199,351 C210,353 222,353 231,351', P.skinDark);
+      ell(214, 356, 5, 1.6, 0, P.skin);
+      // Turban: ochre crown and the blue band wrapping the head
+      fill('M168,170 C176,128 220,108 258,118 C286,126 300,150 296,178 C282,160 250,152 220,154 C196,156 178,162 168,170Z', P.yellow);
+      fill('M152,280 C146,240 152,198 172,176 C200,160 250,158 290,176 C296,196 290,214 276,226 C250,212 210,208 176,222 C168,240 166,262 168,290Z', P.turban);
+      fill('M160,236 C170,206 200,190 240,188 C262,188 280,194 290,204 C268,198 238,198 210,206 C186,214 170,226 160,236Z', P.turbanDark);
+      fill('M152,280 C150,262 152,246 158,232 C162,250 164,268 168,290Z', P.turbanDark);
+      // The pearl, catching the light below the turban
+      circ(174, 336, 12, P.pearl); circ(170, 331, 4.4, P.collar); ell(176, 345, 6, 2.4, 0, P.yellowDark);
     } },
 ];
 
@@ -1167,10 +1178,27 @@ function cutGlass(spec, W = 400, H = 560) {
   const sp = spec.spacing, rng = mulberry32(spec.name.length * 977 + 13);
   const gw = Math.ceil(W / sp), gh = Math.ceil(H / sp), sites = [];
   for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) sites.push([(i + .15 + rng() * .7) * sp, (j + .15 + rng() * .7) * sp]);
+  // Calm areas (faces) get only a few broad cuts, and keep their small details.
+  const calm = spec.calm || [];
+  const isCalm = (x, y) => calm.some(([cx, cy, rx, ry]) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1);
+  const csp = sp * 3.2, cgw = Math.ceil(W / csp), cgh = Math.ceil(H / csp), csites = [];
+  for (let j = 0; j < cgh; j++) for (let i = 0; i < cgw; i++) csites.push([(i + .2 + rng() * .6) * csp, (j + .2 + rng() * .6) * csp]);
   const lab = new Int32Array(n).fill(-1);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = y * W + x;
     if (col2[i] < 0) continue;
+    if (calm.length && isCalm(x, y)) {
+      const ci = Math.floor(x / csp), cj = Math.floor(y / csp);
+      let bs = 0, bd = Infinity;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const a = ci + di, b = cj + dj;
+        if (a < 0 || b < 0 || a >= cgw || b >= cgh) continue;
+        const q = b * cgw + a, dx = csites[q][0] - x, dy = csites[q][1] - y, d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; bs = q; }
+      }
+      lab[i] = (sites.length + bs) * 32 + col2[i];
+      continue;
+    }
     const ci = Math.floor(x / sp), cj = Math.floor(y / sp);
     let bs = 0, bd = Infinity;
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
@@ -1209,6 +1237,7 @@ function cutGlass(spec, W = 400, H = 560) {
     if (!order.length) break;
     for (const k of order) {
       if (!alive[k] || psize[k] >= minA) continue;
+      if (calm.length && psize[k] >= 10) { const j0 = mem[k][0]; if (isCalm(j0 % W, Math.floor(j0 / W))) continue; }
       const nb = {};
       for (const j of mem[k]) {
         const x = j % W;
