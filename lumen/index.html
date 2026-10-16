@@ -207,7 +207,8 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 #mirror-grid { display: grid; grid-template-columns: repeat(3, 64px); gap: 14px; justify-content: center; }
 #paint-list { display: grid; gap: 12px; width: 100%; max-width: 340px; }
 .pcard { display: flex; gap: 12px; align-items: center; text-align: left; padding: 8px; border-radius: 12px; border: 1px solid var(--stone-hi); background: var(--stone); }
-.pcard svg { width: 76px; height: 76px; flex: none; }
+.pcard svg, .pcard img { width: 76px; height: 76px; flex: none; object-fit: contain; }
+#paint-list h3 { margin: 6px 0 -4px; }
 .pcard b { display: block; font-family: var(--font-label); font-weight: normal; font-size: 17px; color: var(--vellum); }
 .pcard small { display: block; color: var(--vellum-dim); font-size: 13.5px; font-style: italic; }
 .pcard .bar { height: 5px; border-radius: 3px; background: var(--lead); margin-top: 6px; overflow: hidden; }
@@ -892,8 +893,25 @@ const PAINT_DESIGNS = [
   } },
 ];
 const paintCache = {};
+const isMasterpiece = id => id >= PAINT_DESIGNS.length;
+const PAINT_TOTAL = () => PAINT_DESIGNS.length + MASTERPIECES.length;
+const GLASS_KEY = id => 'lumen.glass.v1.' + id;
 function getDesign(id) {
   if (paintCache[id]) return paintCache[id];
+  if (isMasterpiece(id)) {
+    const m = MASTERPIECES[id - PAINT_DESIGNS.length];
+    let pieces = null;
+    try { pieces = JSON.parse(localStorage.getItem(GLASS_KEY(id))); } catch (e) {}
+    if (!Array.isArray(pieces) || !pieces.length) {
+      pieces = cutGlass(m);
+      try { localStorage.setItem(GLASS_KEY(id), JSON.stringify(pieces)); } catch (e) {}
+    }
+    const order = [];
+    for (const p of pieces) if (!order.includes(p.col)) order.push(p.col);
+    for (const p of pieces) p.n = order.indexOf(p.col);
+    return paintCache[id] = { id, name: m.name, blurb: m.artist + '.', pieces, box: [16, 16, 368, 536], masterpiece: true,
+      colors: order.map(k => ({ name: m.palette[k][0], c: m.palette[k][1] })) };
+  }
   const spec = PAINT_DESIGNS[id];
   const { pieces, box } = spec.build();
   // Number the colours in order of first appearance from the centre out.
@@ -903,6 +921,390 @@ function getDesign(id) {
   return paintCache[id] = { id, name: spec.name, blurb: spec.blurb, pieces, box, colors: order.map(k => PAINT_COLORS[k]) };
 }
 // PAINT ENGINE END -----------------------------------------------------------
+// MASTERPIECES START ---------------------------------------------------------
+// Famous paintings recut as stained glass. Each scene is painted in flat
+// colours on a hidden canvas, then cut into glass: colour areas are split into
+// pieces a glazier could cut, slivers are merged, and every piece is traced
+// into a smooth outline with lead along the cuts.
+const ARCH = { x: 20, w: 360, top: 20, bottom: 548 };
+function archPath2D() {
+  const { x, w, top, bottom } = ARCH, r = w / 2;
+  return new Path2D(`M${x},${bottom}L${x},${top + r}A${r},${r} 0 0 1 ${x + w},${top + r}L${x + w},${bottom}Z`);
+}
+const MASTERPIECES = [
+  { name: 'The Starry Night', artist: 'After Vincent van Gogh, 1889', spacing: 24, frame: ['gold', 'night'],
+    palette: { night: ['Midnight', '#14215a'], cobalt: ['Cobalt', '#2a4b9b'], sky: ['Sky', '#5a86c6'], pale: ['Pale blue', '#a9cbe4'],
+      gold: ['Star gold', '#f2c935'], cream: ['Starlight', '#fff3b8'], amber: ['Amber', '#e88f2a'], hill: ['Hill blue', '#24315a'],
+      slate: ['Slate', '#6c7fa6'], roof: ['Roof', '#3b2f4a'], cypress: ['Cypress', '#16261c'], green: ['Green', '#3f6040'], field: ['Field', '#52703e'] },
+    draw(c, P) {
+      c.fillStyle = P.night; c.fillRect(0, 0, 400, 560);
+      const stroke = (d, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round'; c.stroke(new Path2D(d)); };
+      const fill = (d, col) => { c.fillStyle = col; c.fill(new Path2D(d)); };
+      const circ = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); };
+      // Rolling bands of wind across the sky
+      stroke('M10,300 C80,260 130,330 210,290 S330,250 400,280', P.cobalt, 26);
+      stroke('M0,240 C70,200 120,270 190,235 S300,180 400,215', P.sky, 18);
+      stroke('M0,345 C90,320 160,360 250,330 S360,320 400,335', P.sky, 14);
+      stroke('M40,200 C110,160 170,215 240,180', P.pale, 10);
+      // The great swirl
+      let d = 'M200,250';
+      for (let k = 0; k <= 60; k++) { const a = k * .21, r = 6 + k * 1.15; d += `L${(200 + Math.cos(a) * r * 1.4).toFixed(1)},${(245 + Math.sin(a) * r * .7).toFixed(1)}`; }
+      stroke(d, P.pale, 11); stroke(d, P.cobalt, 4);
+      let d2 = 'M110,150';
+      for (let k = 0; k <= 40; k++) { const a = k * .25 + 2, r = 4 + k * 1.1; d2 += `L${(120 + Math.cos(a) * r).toFixed(1)},${(150 + Math.sin(a) * r * .8).toFixed(1)}`; }
+      stroke(d2, P.sky, 9);
+      // Stars with halos
+      for (const [x, y, r] of [[95, 95, 20], [175, 70, 16], [255, 115, 14], [60, 185, 15], [320, 210, 17], [150, 330, 12], [265, 300, 13], [205, 140, 10]]) {
+        circ(x, y, r * 1.55, P.sky); circ(x, y, r * 1.15, P.pale); circ(x, y, r * .8, P.gold); circ(x, y, r * .38, P.cream);
+      }
+      // The moon
+      circ(330, 95, 44, P.amber); circ(330, 95, 32, P.gold); circ(330, 95, 22, P.cream); circ(340, 87, 17, P.gold);
+      // Hills and village
+      fill('M0,380 C70,350 120,370 180,355 S300,330 400,350 L400,560 L0,560Z', P.hill);
+      fill('M0,410 C80,395 150,415 230,400 S340,390 400,405 L400,560 L0,560Z', P.slate);
+      for (const [x, y, w, h] of [[150, 425, 34, 24], [195, 432, 30, 20], [240, 422, 36, 26], [290, 430, 30, 22], [330, 425, 36, 26], [110, 435, 28, 20]]) {
+        fill(`M${x},${y}h${w}v${h}h${-w}Z`, P.hill);
+        fill(`M${x - 4},${y}L${x + w / 2},${y - 14}L${x + w + 4},${y}Z`, P.roof);
+        fill(`M${x + w * .3},${y + 6}h9v8h-9Z`, P.gold);
+      }
+      fill('M262,425 L270,350 L278,425Z', P.roof);
+      fill('M255,425h30v28h-30Z', P.hill);
+      fill('M0,470 C90,455 200,480 400,462 L400,560 L0,560Z', P.field);
+      stroke('M20,505 C120,490 220,515 380,495', P.green, 10);
+      // The cypress, a dark flame in the foreground
+      fill('M48,560 C40,470 60,420 58,350 C56,290 78,230 86,160 C92,120 100,95 104,80 C112,120 118,160 126,230 C136,300 150,360 148,440 C146,500 160,530 168,560Z', P.cypress);
+      stroke('M90,540 C80,460 96,380 98,260 C100,200 104,150 104,120', P.green, 9);
+      stroke('M120,540 C126,470 120,400 118,320', P.green, 7);
+    } },
+  { name: 'The Great Wave', artist: 'After Katsushika Hokusai, about 1831', spacing: 24, frame: ['prussian', 'foam'],
+    palette: { paper: ['Parchment', '#ead9b8'], dusk: ['Dusk', '#b9a789'], prussian: ['Prussian', '#16305f'], deep: ['Deep sea', '#0d2246'],
+      blue: ['Wave blue', '#3d6ea6'], light: ['Light blue', '#8db3d3'], foam: ['Foam', '#f7f2e6'], boat: ['Boat', '#d6b072'],
+      fuji: ['Fuji', '#4a5568'], cloud: ['Cloud', '#cfc3a8'] },
+    draw(c, P) {
+      const fill = (d, col) => { c.fillStyle = col; c.fill(new Path2D(d)); };
+      const stroke = (d, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round'; c.stroke(new Path2D(d)); };
+      const circ = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); };
+      c.fillStyle = P.paper; c.fillRect(0, 0, 400, 560);
+      fill('M0,0H400V150C300,170 120,130 0,160Z', P.dusk);
+      fill('M250,250 C280,240 330,250 360,262 C330,268 290,266 250,262Z', P.cloud);
+      // Mount Fuji, small and far away
+      fill('M190,420 L262,330 L336,420Z', P.fuji);
+      fill('M245,352 L262,330 L280,352 L272,360 L262,350 L254,362Z', P.foam);
+      // The sea
+      fill('M0,420 C80,405 160,430 240,415 S360,405 400,420 L400,560 L0,560Z', P.deep);
+      // The great wave: body, inner bands and claws of foam
+      fill('M0,560 L0,330 C20,250 70,170 150,140 C210,118 270,135 300,175 C270,160 240,165 225,190 C215,210 230,235 250,250 C200,250 160,225 150,260 C140,300 160,360 210,420 C240,455 270,500 300,560Z', P.prussian);
+      stroke('M20,520 C10,420 40,300 110,215 C150,170 200,160 240,170', P.blue, 18);
+      stroke('M60,540 C50,450 70,360 120,290 C150,250 180,235 205,230', P.light, 10);
+      stroke('M110,550 C100,480 110,410 150,350', P.blue, 12);
+      stroke('M150,140 C210,118 270,135 300,175', P.foam, 12);
+      for (let k = 0; k < 9; k++) {
+        const t = k / 8, x = 225 + 75 * t, y = 175 + 75 * Math.sin(t * 2.2);
+        circ(x, y, 9 - k * .5, P.foam);
+      }
+      for (const [x, y, r] of [[300, 178, 10], [292, 196, 8], [282, 212, 7], [268, 226, 7], [252, 240, 6], [110, 175, 8], [90, 195, 7], [70, 220, 6]]) circ(x, y, r, P.foam);
+      // A second wave on the right
+      fill('M250,560 C270,500 300,470 340,455 C370,445 395,455 400,465 L400,560Z', P.prussian);
+      stroke('M300,470 C330,455 365,452 395,462', P.foam, 9);
+      // Boats sliding through the trough
+      fill('M120,455 C170,445 240,450 300,470 L292,480 C230,462 170,460 116,467Z', P.boat);
+      fill('M40,505 C90,490 150,494 200,512 L194,522 C140,506 90,504 36,516Z', P.boat);
+      for (let k = 0; k < 6; k++) circ(150 + k * 22, 452 + k * 2.5, 5, P.deep);
+      for (let k = 0; k < 5; k++) circ(70 + k * 22, 498 + k * 2.5, 5, P.deep);
+      for (const [x, y] of [[30, 430], [200, 545], [350, 500], [260, 520], [120, 540]]) circ(x, y, 6, P.foam);
+    } },
+  { name: 'Impression, Sunrise', artist: 'After Claude Monet, 1872', spacing: 26, frame: ['teal', 'peach'],
+    palette: { mist: ['Mist', '#8297ab'], grey: ['Pale grey', '#bcc6c8'], peach: ['Peach', '#e9b597'], lilac: ['Lilac', '#9b8daa'],
+      sun: ['Sun', '#f2561b'], glow: ['Glow', '#f58b3b'], teal: ['Teal', '#4b6c79'], water: ['Water', '#37515d'],
+      blue: ['Harbour blue', '#3d5a78'], boat: ['Boat', '#262a35'] },
+    draw(c, P) {
+      const fill = (d, col) => { c.fillStyle = col; c.fill(new Path2D(d)); };
+      const stroke = (d, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.stroke(new Path2D(d)); };
+      const circ = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); };
+      c.fillStyle = P.mist; c.fillRect(0, 0, 400, 560);
+      for (const [y, col, w] of [[120, P.grey, 26], [175, P.peach, 20], [215, P.grey, 16], [250, P.peach, 24], [290, P.lilac, 14]]) stroke(`M0,${y} C120,${y - 14} 260,${y + 12} 400,${y - 4}`, col, w);
+      // Masts and cranes in the haze
+      for (const [x, h] of [[60, 120], [80, 90], [110, 140], [330, 110], [350, 80]]) fill(`M${x},${310}h7v${-h}h-7Z`, P.lilac);
+      fill('M40,310 C80,300 140,305 180,312 L180,318 L40,318Z', P.lilac);
+      fill('M300,310 C330,302 370,302 400,308 L400,318 L300,318Z', P.lilac);
+      // Water
+      fill('M0,316H400V560H0Z', P.water);
+      for (let k = 0; k < 14; k++) {
+        const y = 330 + k * 16, x = (k * 67) % 300;
+        stroke(`M${x},${y} h${70 + (k % 3) * 20}`, k % 2 ? P.teal : P.blue, 9);
+        stroke(`M${(x + 180) % 360},${y + 6} h60`, P.teal, 7);
+      }
+      // The sun and its broken reflection
+      circ(232, 236, 21, P.sun);
+      for (let k = 0; k < 9; k++) stroke(`M${222 - (k % 2) * 8},${330 + k * 22} h${28 - k}`, k % 2 ? P.glow : P.sun, 9);
+      // Boats
+      fill('M120,420 C150,414 190,414 215,420 L205,432 C180,428 150,428 128,432Z', P.boat);
+      fill('M162,418 h7 v-34 h-7Z', P.boat);
+      circ(165, 380, 6, P.boat);
+      fill('M40,470 C60,466 90,466 106,470 L100,478 C82,476 62,476 46,478Z', P.boat);
+      fill('M300,380 C315,377 335,377 348,380 L343,386 C330,384 316,384 305,386Z', P.boat);
+    } },
+  { name: 'Sunflowers', artist: 'After Vincent van Gogh, 1888', spacing: 24, frame: ['ochre', 'blue'],
+    palette: { wall: ['Wall', '#e8cf6a'], table: ['Table', '#d59a2c'], vase: ['Vase', '#e4b44c'], vaseShade: ['Vase shade', '#b9822a'],
+      blue: ['Blue', '#2d55a8'], petal: ['Petal', '#f7c91f'], orange: ['Orange', '#e5781f'], seed: ['Seed', '#7a4a1c'],
+      dark: ['Dark seed', '#45290f'], stem: ['Stem', '#6d8f2b'], leaf: ['Leaf', '#40601d'], ochre: ['Ochre', '#a8741e'] },
+    draw(c, P) {
+      const fill = (d, col) => { c.fillStyle = col; c.fill(new Path2D(d)); };
+      const stroke = (d, col, w) => { c.strokeStyle = col; c.lineWidth = w; c.lineCap = 'round'; c.stroke(new Path2D(d)); };
+      const circ = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); };
+      c.fillStyle = P.wall; c.fillRect(0, 0, 400, 560);
+      fill('M0,430H400V560H0Z', P.table);
+      stroke('M0,432H400', P.ochre, 6);
+      // Stems
+      const heads = [[200, 170, 40], [120, 210, 34], [285, 205, 36], [160, 290, 30], [255, 300, 32], [90, 320, 26], [320, 330, 28], [200, 110, 26], [140, 130, 24], [270, 120, 25], [205, 245, 24], [60, 250, 22], [345, 255, 22]];
+      for (const [x, y] of heads) stroke(`M200,400 Q${(200 + x) / 2},${(400 + y) / 2 + 30} ${x},${y}`, P.stem, 6);
+      fill('M150,330 C110,320 90,350 100,370 C120,360 140,350 150,330Z', P.leaf);
+      fill('M250,340 C300,330 320,360 305,378 C285,365 265,355 250,340Z', P.leaf);
+      // Vase
+      fill('M140,520 C120,470 130,420 160,395 L240,395 C270,420 280,470 260,520Z', P.vase);
+      fill('M220,400 C250,425 262,470 248,520 L260,520 C280,470 270,420 240,395Z', P.vaseShade);
+      stroke('M128,455 C170,462 230,462 272,455', P.blue, 9);
+      // Flower heads: a ring of petals around a seeded centre
+      heads.forEach(([x, y, r], k) => {
+        const n = 12;
+        for (let q = 0; q < n; q++) {
+          const a = q / n * Math.PI * 2 + k;
+          const tip = [x + Math.cos(a) * r * 1.45, y + Math.sin(a) * r * 1.45];
+          const l = [x + Math.cos(a - .22) * r * .8, y + Math.sin(a - .22) * r * .8], rr = [x + Math.cos(a + .22) * r * .8, y + Math.sin(a + .22) * r * .8];
+          fill(`M${l[0]},${l[1]}L${tip[0]},${tip[1]}L${rr[0]},${rr[1]}Z`, q % 3 === 0 ? P.orange : P.petal);
+        }
+        circ(x, y, r * .85, P.seed);
+        circ(x, y, r * .5, k % 2 ? P.dark : P.orange);
+        circ(x, y, r * .22, P.dark);
+      });
+    } },
+  { name: 'Girl with a Pearl Earring', artist: 'After Johannes Vermeer, about 1665', spacing: 22, frame: ['yellow', 'turban'],
+    palette: { bg: ['Shadow', '#15110e'], skin: ['Skin', '#ecc9a2'], skinMid: ['Warm skin', '#cf9a72'], skinDark: ['Shade', '#8c5c3c'],
+      turban: ['Ultramarine', '#2c5ba8'], turbanDark: ['Deep blue', '#1a3670'], yellow: ['Yellow', '#d8b257'], yellowDark: ['Ochre', '#9a7733'],
+      jacket: ['Jacket', '#a77f3e'], jacketDark: ['Brown', '#5d4422'], collar: ['Collar', '#eee7d8'], lips: ['Lips', '#b44334'],
+      pearl: ['Pearl', '#d9dee2'], eye: ['Eye', '#2b1d14'] },
+    draw(c, P) {
+      const fill = (d, col) => { c.fillStyle = col; c.fill(new Path2D(d)); };
+      const circ = (x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); };
+      const ell = (x, y, rx, ry, rot, col) => { c.fillStyle = col; c.beginPath(); c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); c.fill(); };
+      c.fillStyle = P.bg; c.fillRect(0, 0, 400, 560);
+      // Jacket and collar
+      fill('M40,560 C60,470 120,420 190,410 C250,404 330,430 380,500 L380,560Z', P.jacket);
+      fill('M110,560 C130,500 170,460 210,450 C180,480 160,520 160,560Z', P.jacketDark);
+      fill('M300,560 C300,510 320,480 360,470 C370,500 375,530 380,560Z', P.jacketDark);
+      fill('M160,430 C200,440 250,440 290,428 C280,446 240,458 200,458 C180,456 166,446 160,430Z', P.collar);
+      // Neck
+      fill('M180,350 C178,390 182,420 190,440 C220,446 250,440 268,428 C262,400 262,370 262,340Z', P.skinMid);
+      // The yellow cloth falling from the turban
+      fill('M250,170 C300,180 320,240 310,320 C305,370 290,410 300,440 C270,430 262,380 268,330 C272,280 262,220 250,170Z', P.yellow);
+      fill('M290,230 C305,280 300,350 292,400 C300,410 304,425 300,440 C290,410 290,360 296,310 C300,270 296,250 290,230Z', P.yellowDark);
+      // Face, turned toward us over the shoulder
+      fill('M150,250 C150,190 190,160 230,165 C275,170 290,220 285,280 C282,330 260,380 220,392 C185,400 160,370 152,330 C148,305 150,280 150,250Z', P.skin);
+      fill('M255,190 C280,215 290,260 284,300 C280,340 262,375 232,390 C252,350 262,300 255,250 C252,225 252,205 255,190Z', P.skinMid);
+      fill('M262,300 C272,330 264,360 246,380 C256,350 260,325 262,300Z', P.skinDark);
+      // Eyes, nose and parted lips
+      ell(190, 262, 16, 9, -.08, P.collar); circ(192, 263, 7, P.eye); circ(195, 260, 2.4, P.collar);
+      ell(248, 258, 13, 8, -.1, P.collar); circ(247, 259, 6, P.eye); circ(249, 257, 2, P.collar);
+      fill('M220,262 C222,290 214,310 206,318 C214,324 226,324 234,316 C228,300 226,280 220,262Z', P.skinMid);
+      fill('M196,342 C210,336 230,336 242,342 C230,354 210,356 196,342Z', P.lips);
+      // The blue turban
+      fill('M146,250 C140,190 170,140 230,132 C280,128 300,170 296,214 C270,190 240,182 205,185 C180,188 160,210 146,250Z', P.turban);
+      fill('M160,200 C185,160 230,150 270,160 C250,166 220,170 200,180 C185,188 170,198 160,200Z', P.turbanDark);
+      fill('M226,132 C250,110 285,112 300,135 C298,160 288,180 278,190 C276,165 262,146 226,132Z', P.yellow);
+      fill('M245,145 C265,138 282,150 285,170 C276,160 262,152 245,145Z', P.turbanDark);
+      // The pearl
+      circ(266, 352, 13, P.pearl); circ(262, 347, 4.5, P.collar); ell(268, 362, 7, 3, 0, P.skinDark);
+    } },
+];
+
+// --- cutting the glass
+function cutGlass(spec, W = 400, H = 560) {
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  const keys = Object.keys(spec.palette), P = {};
+  keys.forEach(k => P[k] = spec.palette[k][1]);
+  const arch = archPath2D();
+  c.save(); c.clip(arch); spec.draw(c, P); c.restore();
+  // The window frame: a band of alternating jewels around the arch
+  c.save(); c.clip(arch);
+  c.lineWidth = 22; c.strokeStyle = P[spec.frame[0]]; c.stroke(arch);
+  c.setLineDash([16, 16]); c.strokeStyle = P[spec.frame[1]]; c.stroke(arch);
+  c.restore();
+  const img = c.getImageData(0, 0, W, H).data;
+  const mk = document.createElement('canvas'); mk.width = W; mk.height = H;
+  const m = mk.getContext('2d', { willReadFrequently: true }); m.fillStyle = '#fff'; m.fill(arch);
+  const mask = m.getImageData(0, 0, W, H).data;
+  // Snap every pixel to the nearest palette colour.
+  const pal = keys.map(k => rgbOf(P[k])), n = W * H;
+  const col = new Int16Array(n).fill(-1), cache = new Map();
+  for (let i = 0; i < n; i++) {
+    if (mask[i * 4 + 3] < 128) continue;
+    const r = img[i * 4], g = img[i * 4 + 1], b = img[i * 4 + 2], key = r << 16 | g << 8 | b;
+    let best = cache.get(key);
+    if (best === undefined) {
+      let bd = Infinity;
+      pal.forEach((p, k) => { const d = (p[0] - r) ** 2 + (p[1] - g) ** 2 + (p[2] - b) ** 2; if (d < bd) { bd = d; best = k; } });
+      cache.set(key, best);
+    }
+    col[i] = best;
+  }
+  // Majority filter cleans up antialiased edges.
+  const col2 = col.slice();
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x;
+    if (col[i] < 0) continue;
+    const cnt = {};
+    let bk = col[i], bv = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const v = col[i + dy * W + dx];
+      if (v < 0) continue;
+      cnt[v] = (cnt[v] || 0) + 1;
+      if (cnt[v] > bv) { bv = cnt[v]; bk = v; }
+    }
+    if (bv >= 5) col2[i] = bk;
+  }
+  // Glazier's cuts: a jittered lattice of cutting points splits colour areas.
+  const sp = spec.spacing, rng = mulberry32(spec.name.length * 977 + 13);
+  const gw = Math.ceil(W / sp), gh = Math.ceil(H / sp), sites = [];
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) sites.push([(i + .15 + rng() * .7) * sp, (j + .15 + rng() * .7) * sp]);
+  const lab = new Int32Array(n).fill(-1);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (col2[i] < 0) continue;
+    const ci = Math.floor(x / sp), cj = Math.floor(y / sp);
+    let bs = 0, bd = Infinity;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const a = ci + di, b = cj + dj;
+      if (a < 0 || b < 0 || a >= gw || b >= gh) continue;
+      const s = b * gw + a, dx = sites[s][0] - x, dy = sites[s][1] - y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; bs = s; }
+    }
+    lab[i] = bs * 32 + col2[i];
+  }
+  // Connected pieces
+  const pid = new Int32Array(n).fill(-1), pcol = [], psize = [];
+  const stack = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (lab[i] < 0 || pid[i] >= 0) continue;
+    const id = pcol.length, L = lab[i];
+    let sp2 = 0, size = 0;
+    stack[sp2++] = i; pid[i] = id;
+    while (sp2) {
+      const j = stack[--sp2]; size++;
+      const x = j % W;
+      if (j >= W && pid[j - W] < 0 && lab[j - W] === L) { pid[j - W] = id; stack[sp2++] = j - W; }
+      if (j < n - W && pid[j + W] < 0 && lab[j + W] === L) { pid[j + W] = id; stack[sp2++] = j + W; }
+      if (x > 0 && pid[j - 1] < 0 && lab[j - 1] === L) { pid[j - 1] = id; stack[sp2++] = j - 1; }
+      if (x < W - 1 && pid[j + 1] < 0 && lab[j + 1] === L) { pid[j + 1] = id; stack[sp2++] = j + 1; }
+    }
+    pcol.push(L & 31); psize.push(size);
+  }
+  // Merge slivers too small to cut into the neighbour they share most edge with.
+  const minA = Math.max(40, sp * sp * .12);
+  const members = () => { const m = pcol.map(() => []); for (let i = 0; i < n; i++) if (pid[i] >= 0) m[pid[i]].push(i); return m; };
+  let mem = members();
+  const alive = pcol.map(() => true);
+  for (let pass = 0; pass < 3; pass++) {
+    const order = pcol.map((_, k) => k).filter(k => alive[k] && psize[k] < minA).sort((a, b) => psize[a] - psize[b]);
+    if (!order.length) break;
+    for (const k of order) {
+      if (!alive[k] || psize[k] >= minA) continue;
+      const nb = {};
+      for (const j of mem[k]) {
+        const x = j % W;
+        for (const q of [j - W, j + W, x > 0 ? j - 1 : -1, x < W - 1 ? j + 1 : -1]) {
+          if (q < 0 || q >= n) continue;
+          const o = pid[q];
+          if (o >= 0 && o !== k) nb[o] = (nb[o] || 0) + 1;
+        }
+      }
+      let best = -1, bv = 0;
+      for (const o in nb) if (nb[o] > bv) { bv = nb[o]; best = +o; }
+      if (best < 0) continue;
+      for (const j of mem[k]) pid[j] = best;
+      mem[best] = mem[best].concat(mem[k]); mem[k] = [];
+      psize[best] += psize[k]; psize[k] = 0; alive[k] = false;
+    }
+  }
+  // Renumber surviving pieces.
+  const remap = new Int32Array(pcol.length).fill(-1), pieces = [];
+  pcol.forEach((cc, k) => { if (alive[k] && psize[k] > 0) { remap[k] = pieces.length; pieces.push({ colKey: keys[cc], px: mem[k] }); } });
+  for (let i = 0; i < n; i++) if (pid[i] >= 0) pid[i] = remap[pid[i]];
+  // Distance from each pixel to its piece edge, to seat the numbers.
+  const dist = new Float32Array(n);
+  for (let i = 0; i < n; i++) dist[i] = pid[i] < 0 ? 0 : 1e9;
+  const edge = i => { const x = i % W, k = pid[i]; return i < W || i >= n - W || x === 0 || x === W - 1 || pid[i - W] !== k || pid[i + W] !== k || pid[i - 1] !== k || pid[i + 1] !== k; };
+  for (let i = 0; i < n; i++) if (pid[i] >= 0 && edge(i)) dist[i] = 1;
+  for (let y = 1; y < H; y++) for (let x = 1; x < W - 1; x++) {
+    const i = y * W + x; if (dist[i] <= 1) continue;
+    const k = pid[i];
+    for (const [q, w] of [[i - 1, 1], [i - W, 1], [i - W - 1, 1.41], [i - W + 1, 1.41]]) if (pid[q] === k) dist[i] = Math.min(dist[i], dist[q] + w);
+  }
+  for (let y = H - 2; y >= 0; y--) for (let x = W - 2; x > 0; x--) {
+    const i = y * W + x; if (dist[i] <= 1) continue;
+    const k = pid[i];
+    for (const [q, w] of [[i + 1, 1], [i + W, 1], [i + W + 1, 1.41], [i + W - 1, 1.41]]) if (pid[q] === k) dist[i] = Math.min(dist[i], dist[q] + w);
+  }
+  // Trace each piece's outline along pixel edges, then smooth it like a cut.
+  const V = W + 1;
+  const out = pieces.map((p, k) => {
+    const edges = new Map();
+    const add = (a, b) => { const l = edges.get(a); if (l) l.push(b); else edges.set(a, [b]); };
+    let bi = p.px[0], bd = 0;
+    for (const j of p.px) {
+      const x = j % W, y = (j - x) / W;
+      if (dist[j] > bd) { bd = dist[j]; bi = j; }
+      if (y === 0 || pid[j - W] !== k) add(y * V + x, y * V + x + 1);
+      if (x === W - 1 || pid[j + 1] !== k) add(y * V + x + 1, (y + 1) * V + x + 1);
+      if (y === H - 1 || pid[j + W] !== k) add((y + 1) * V + x + 1, (y + 1) * V + x);
+      if (x === 0 || pid[j - 1] !== k) add((y + 1) * V + x, y * V + x);
+    }
+    let d = '';
+    while (edges.size) {
+      const start = edges.keys().next().value;
+      const loop = [];
+      let cur = start;
+      do {
+        loop.push(cur);
+        const l = edges.get(cur);
+        const nx = l.pop();
+        if (!l.length) edges.delete(cur);
+        cur = nx;
+      } while (cur !== start && edges.has(cur));
+      if (loop.length < 4) continue;
+      let pts = loop.map(v => [v % V, Math.floor(v / V)]);
+      pts = pts.filter((p2, i) => { const a = pts[(i - 1 + pts.length) % pts.length], b = pts[(i + 1) % pts.length]; return !((a[0] === p2[0] && p2[0] === b[0]) || (a[1] === p2[1] && p2[1] === b[1])); });
+      for (let it = 0; it < 2; it++) {
+        const s = [];
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i], b = pts[(i + 1) % pts.length];
+          s.push([a[0] * .75 + b[0] * .25, a[1] * .75 + b[1] * .25], [a[0] * .25 + b[0] * .75, a[1] * .25 + b[1] * .75]);
+        }
+        pts = s;
+      }
+      pts = rdp(pts, .55);
+      if (pts.length < 3) continue;
+      d += 'M' + pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join('L') + 'Z';
+    }
+    const lx = bi % W, ly = Math.floor(bi / W);
+    return { d, col: p.colKey, lx, ly, fs: clampFs(bd * 1.05), area: p.px.length };
+  }).filter(p => p.d);
+  return out;
+}
+function rdp(pts, eps) {
+  if (pts.length < 4) return pts;
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const st = [[0, pts.length - 1]];
+  while (st.length) {
+    const [a, b] = st.pop();
+    let md = 0, mi = -1;
+    const [x1, y1] = pts[a], [x2, y2] = pts[b], dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs(dy * pts[i][0] - dx * pts[i][1] + x2 * y1 - y2 * x1) / L; if (d > md) { md = d; mi = i; } }
+    if (md > eps) { keep[mi] = 1; st.push([a, mi], [mi, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+// MASTERPIECES END -----------------------------------------------------------
 
 // Palette for drawing glass and light.
 const GLASS = {
@@ -1683,7 +2085,8 @@ function showHome() {
   const lightDone = Object.keys(save.solved).filter(k => +k < CAMPAIGN.length).length;
   const riddleDone = RIDDLES.filter((r, i) => save.riddles[i] && save.riddles[i].solved).length;
   const mirrorDone = MIRROR_LEVELS.filter((m, i) => save.mirror[i]).length;
-  const paintDone = PAINT_DESIGNS.filter((d, i) => (save.paint[i] || '').indexOf('0') < 0 && save.paint[i]).length;
+  let paintDone = 0;
+  for (let i = 0; i < PAINT_TOTAL(); i++) if (save.paint[i] && save.paint[i].indexOf('0') < 0) paintDone++;
   ov.innerHTML = `<div class="home">
     <svg id="home-svg" viewBox="0 0 400 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The nave of the cathedral with three great windows"></svg>
     <div class="home-top"><h1>Lumen</h1><p>Choose a window</p></div>
@@ -1810,7 +2213,7 @@ function showHome() {
   };
   plaque(slots.light, 'light', 'Hours of Light', `${lightDone} of ${CAMPAIGN.length} consecrated`);
   plaque(slots.mirror, 'mirror', 'Mirrors & Shutters', `${mirrorDone} of ${MIRROR_LEVELS.length} lit`);
-  plaque({ x: 141, w: 118, py: 192 }, 'paint', "Glazier's Workshop", `${paintDone} of ${PAINT_DESIGNS.length} complete`);
+  plaque({ x: 141, w: 118, py: 192 }, 'paint', "Glazier's Workshop", `${paintDone} of ${PAINT_TOTAL()} complete`);
   plaque(slots.riddle, 'riddle', 'Riddle Windows', `${riddleDone} of ${RIDDLES.length} revealed`);
 
   // Dust in the light
@@ -1856,13 +2259,18 @@ function showLevels(mode) {
       <p>Open and close the shutters, turn the mirrors, and steer the sun onto every medallion.</p>
       <div id="mirror-grid">${cells}</div>`;
   } else if (mode === 'paint') {
-    const cards = PAINT_DESIGNS.map((d, i) => {
-      const ds = getDesign(i), f = paintSaved(i, ds.pieces.length), pct = Math.round(f.filter(Boolean).length / f.length * 100);
-      return `<button class="pcard" data-pd="${i}">${paintThumb(i)}<div><b>${ds.name}</b><small>${ds.blurb} ${ds.pieces.length} pieces.</small>
-        <div class="bar"><i style="width:${pct}%"></i></div><small>${pct === 100 ? 'Completed' : pct ? pct + '% painted' : 'Not started'}</small></div></button>`;
-    }).join('');
+    const card = i => {
+      const st = save.paint[i] || '', pct = st ? Math.floor(st.split('1').length - 1) / st.length * 100 : 0;
+      const name = isMasterpiece(i) ? MASTERPIECES[i - PAINT_DESIGNS.length].name : PAINT_DESIGNS[i].name;
+      const sub = isMasterpiece(i) ? MASTERPIECES[i - PAINT_DESIGNS.length].artist + '.' : getDesign(i).blurb + ' ' + getDesign(i).pieces.length + ' pieces.';
+      const shown = Math.floor(pct);
+      return `<button class="pcard" data-pd="${i}">${paintThumb(i)}<div><b>${name}</b><small>${sub}</small>
+        <div class="bar"><i style="width:${shown}%"></i></div><small>${shown === 100 ? 'Completed' : st && shown ? shown + '% painted' : st ? 'Begun' : 'Not started'}</small></div></button>`;
+    };
+    const cards = '<h3>Rose windows</h3>' + PAINT_DESIGNS.map((d, i) => card(i)).join('')
+      + '<h3>Masterpieces in glass</h3>' + MASTERPIECES.map((m, k) => card(PAINT_DESIGNS.length + k)).join('');
     body = `<h1>The Glazier's Workshop</h1>
-      <p>Paint by number. Pick a colour, tap its pieces, and watch the window come alive. Pinch or use + and &minus; to zoom.</p>
+      <p>Paint by number. Pick a colour, tap its pieces, and watch the window come alive. Pinch or use + and &minus; to zoom. The masterpieces are famous paintings recut as stained glass, with 500 to 700 pieces each.</p>
       <div id="paint-list">${cards}</div>`;
   } else if (mode === 'light') {
     const cells = CAMPAIGN.map((c, i) => {
@@ -2561,10 +2969,21 @@ function mirrorHint() {
 let PG = null;
 function lum(h) { const [r, g, b] = rgbOf(h); return (.299 * r + .587 * g + .114 * b) / 255; }
 function paintSaved(id, n) {
-  const s = save.paint[id];
+  let s = save.paint[id];
+  if (s && s.length !== n) s = null;
   return Array.from({ length: n }, (_, i) => s ? s[i] === '1' : false);
 }
 function startPaint(id) {
+  if (isMasterpiece(id) && !paintCache[id]) {
+    closeOverlay();
+    let cached = false;
+    try { cached = !!localStorage.getItem(GLASS_KEY(id)); } catch (e) {}
+    if (!cached) {
+      toast('The glazier is cutting the glass…');
+      setTimeout(() => { getDesign(id); startPaint(id); }, 60);
+      return;
+    }
+  }
   MODE = 'paint'; G = null; RG = null; MG = null;
   closeOverlay();
   const ds = getDesign(id);
@@ -2593,7 +3012,7 @@ function buildPaintScene() {
   el('rect', { x: b.x - 2000, y: b.y - 2000, width: b.w + 4000, height: b.h + 4000, fill: '#0e0c12' }, scene);
   const pg = el('g', {}, scene), lg = el('g', { 'pointer-events': 'none' }, scene);
   PG.els = ds.pieces.map((p, i) => {
-    const path = el('path', { d: p.d, 'data-p': i, stroke: CAME, 'stroke-width': 1.3, 'stroke-linejoin': 'round' }, pg);
+    const path = el('path', { d: p.d, 'data-p': i, stroke: CAME, 'stroke-width': ds.masterpiece ? 1.6 : 1.3, 'stroke-linejoin': 'round', 'fill-rule': 'evenodd' }, pg);
     const t = el('text', { x: p.lx.toFixed(1), y: (p.ly + p.fs * .36).toFixed(1), 'font-size': p.fs.toFixed(1), 'text-anchor': 'middle', 'font-family': 'Georgia, serif', fill: '#4a3c28' }, lg);
     t.textContent = p.n + 1;
     return { path, t };
@@ -2606,7 +3025,7 @@ function buildPaintScene() {
 function pieceFill(i) {
   const p = PG.ds.pieces[i], col = PG.ds.colors[p.n].c;
   if (PG.filled[i]) return col;
-  return p.n === PG.sel ? shade(col, .62) : '#d6cbb0';
+  return '#d6cbb0';
 }
 function refreshPaint(only) {
   const list = only !== undefined ? [only] : PG.ds.pieces.map((p, i) => i);
@@ -2614,7 +3033,6 @@ function refreshPaint(only) {
     const e = PG.els[i];
     e.path.setAttribute('fill', pieceFill(i));
     e.t.style.display = PG.filled[i] ? 'none' : '';
-    e.t.setAttribute('font-weight', PG.ds.pieces[i].n === PG.sel ? 'bold' : 'normal');
   }
 }
 function paintCounts() {
@@ -2676,7 +3094,7 @@ function paintWon() {
 function showPaintWin() {
   if (PG.winShown) return;
   PG.winShown = true; clearTimeout(PG.winTimer);
-  const next = PG.id + 1, last = next >= PAINT_DESIGNS.length;
+  const next = PG.id + 1, last = next >= PAINT_TOTAL();
   ov.innerHTML = `<div class="sheet"><h1>Completed</h1><h2>${PG.ds.name}</h2>
     <p class="inc">${PG.ds.pieces.length} pieces cut, painted and leaded.</p>
     <div class="levels-actions"><button class="btn" id="ov-next">${last ? 'Back to the workshop' : 'Next window'}</button><button class="btn ghost" id="ov-stay">Admire it</button></div></div>`;
@@ -2749,7 +3167,22 @@ function zoomAt(clientX, clientY, f) {
   setView({ x: m.x - (m.x - v.x) * f, y: m.y - (m.y - v.y) * f, w: v.w * f, h: v.h * f });
 }
 function zoomCentre(f) { const r = scene.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, f); }
+const sceneThumbs = {};
+function sceneThumb(id) {
+  if (sceneThumbs[id]) return sceneThumbs[id];
+  const m = MASTERPIECES[id - PAINT_DESIGNS.length], cv = document.createElement('canvas');
+  cv.width = 152; cv.height = 212;
+  const c = cv.getContext('2d'), P = {};
+  for (const k in m.palette) P[k] = m.palette[k][1];
+  c.scale(.4, .4); c.translate(-10, -10);
+  const arch = archPath2D();
+  c.save(); c.clip(arch); m.draw(c, P);
+  c.lineWidth = 22; c.strokeStyle = P[m.frame[0]]; c.stroke(arch); c.restore();
+  c.lineWidth = 4; c.strokeStyle = '#09080b'; c.stroke(arch);
+  return sceneThumbs[id] = cv.toDataURL('image/png');
+}
 function paintThumb(id, dim) {
+  if (isMasterpiece(id) && !paintCache[id]) return `<img src="${sceneThumb(id)}" alt="">`;
   const ds = getDesign(id), filled = paintSaved(id, ds.pieces.length);
   const [x, y, w, h] = ds.box;
   return `<svg viewBox="${x - 4} ${y - 4} ${w + 8} ${h + 8}" preserveAspectRatio="xMidYMid meet">` +
