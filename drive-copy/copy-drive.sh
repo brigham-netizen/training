@@ -16,6 +16,7 @@ fi
 src="${1%/}"
 dst="${2%/}"
 
+command -v rsync >/dev/null || { echo "rsync is not installed. On Linux: sudo apt install rsync (macOS already has it)." >&2; exit 1; }
 [ -d "$src" ] || { echo "Source '$src' not found. Is the external drive plugged in?" >&2; exit 1; }
 mkdir -p "$dst"
 
