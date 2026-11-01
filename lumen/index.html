@@ -174,8 +174,9 @@ header { display: flex; align-items: center; gap: 8px; min-height: 40px; }
 
 .toast {
   position: absolute; left: 50%; top: 8px; transform: translateX(-50%);
-  background: #1b1621f2; border: 1px solid var(--stone-hi); border-radius: 999px;
-  padding: 6px 14px; font-size: 14px; font-style: italic; white-space: nowrap;
+  background: #1b1621f2; border: 1px solid var(--stone-hi); border-radius: 16px;
+  padding: 6px 14px; font-size: 14px; font-style: italic; text-align: center;
+  width: max-content; max-width: calc(100% - 16px); line-height: 1.3; z-index: 2;
   pointer-events: none; opacity: 0; transition: opacity .25s;
 }
 .toast.show { opacity: 1; }
@@ -1525,7 +1526,7 @@ function flashGem(p) {
 let toastTimer;
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), Math.max(1800, msg.length * 55));
 }
 
 // ---------------------------------------------------------------- sun motion
@@ -2542,12 +2543,14 @@ function drawMirror() {
       el('path', { d: `M${cx},${cy - h * .32}v${h * .64}M${cx - w * .25},${cy - h * .1}h${w * .5}`, stroke: ok ? '#4d4555' : '#b8604a', 'stroke-width': 2.4, 'stroke-linecap': 'round' }, rg);
       continue;
     }
-    if (ok) el('circle', { cx, cy, r: r * 1.9, fill: LIGHT[t.code], opacity: .35, filter: 'url(#m-glow)' }, rg);
-    el('circle', { cx, cy, r: r + 3, fill: '#2a2017', stroke: ok ? '#ffe9a8' : '#a8823c', 'stroke-width': ok ? 2.4 : 1.8 }, rg);
-    let q = '';
-    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; q += `M${cx + Math.cos(a) * r * .42 + r * .38},${cy + Math.sin(a) * r * .42}a${r * .38},${r * .38} 0 1 0 0,.01`; }
-    el('path', { d: q, fill: LIGHT[t.code], opacity: ok ? 1 : .45, stroke: '#6b4f1d', 'stroke-width': 1 }, rg);
-    el('circle', { cx, cy, r: r * .28, fill: ok ? '#fff6dc' : cur === 'D' ? '#2a2017' : LIGHT[cur], stroke: '#6b4f1d', 'stroke-width': 1 }, rg);
+    // The jewel always shows, at full strength, the colour this relic needs.
+    if (ok) el('circle', { cx, cy, r: r * 2, fill: LIGHT[t.code], opacity: .4, filter: 'url(#m-glow)' }, rg);
+    el('circle', { cx, cy, r: r + 3, fill: '#2a2017', stroke: ok ? '#ffe9a8' : '#a8823c', 'stroke-width': ok ? 2.6 : 1.8 }, rg);
+    el('circle', { cx, cy, r: r * .8, fill: LIGHT[t.code], stroke: '#3a2a10', 'stroke-width': 1.4 }, rg);
+    el('ellipse', { cx: cx - r * .25, cy: cy - r * .3, rx: r * .3, ry: r * .18, fill: '#fff', opacity: .45, transform: `rotate(-30 ${cx - r * .25} ${cy - r * .3})` }, rg);
+    // The wrong light, if any, shows as a dashed ring around the brass.
+    if (!ok && cur !== 'D') el('circle', { cx, cy, r: r + 7, fill: 'none', stroke: LIGHT[cur], 'stroke-width': 2.4, 'stroke-dasharray': '3 2.6' }, rg);
+    if (ok) el('path', { d: `M${cx - r * .32},${cy + r * .02}l${r * .22},${r * .24}l${r * .44},${-r * .46}`, fill: 'none', stroke: '#fff8e6', 'stroke-width': 2.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, rg);
   }
   // Columns and bronze mirrors
   const pc = rLayers.mPieces; pc.innerHTML = '';
@@ -2601,8 +2604,19 @@ function drawMirror() {
     }
     if (MG.locked.win.has(k)) el('circle', { cx: r.x + r.w / 2, cy: r.y + r.h / 2, r: 2.4, fill: GILT, stroke: CAME, 'stroke-width': .8 }, g);
   });
-  $('#lore').innerHTML = `<span>${lv.lore}<br><b>${met} of ${lv.targets.length} relics ready</b></span>`;
+  $('#lore').innerHTML = `<span>${lv.lore}<br><b>${met} of ${lv.targets.length} relics ready</b> · tap a relic to see what it needs</span>`;
   return met === lv.targets.length;
+}
+const MIX_OF = { O: 'ruby and gold together', G: 'gold and cobalt together', P: 'ruby and cobalt together', W: 'a clear window', R: 'a ruby window', Y: 'a gold window', B: 'a cobalt window' };
+function explainRelic(e) {
+  const p = svgPoint(e), lv = MG.lv, c = Math.floor((p.x - MGEO.ox) / MGEO.cs), r = Math.floor((p.y - MGEO.oy) / MGEO.cs);
+  if (c < 0 || r < 0 || c >= lv.W || r >= lv.H) return;
+  const t = lv.targets.find(t => t.i === r * lv.W + c);
+  if (!t) return;
+  const cur = mirrorState().codes[t.i];
+  if (t.code === 'D') { toast(cur === 'D' ? 'This crypt slab must stay dark. It is.' : 'This crypt slab must stay dark, but light is reaching it.'); return; }
+  const now = cur === 'D' ? 'No light reaches it yet.' : cur === t.code ? 'It has it.' : `It is getting ${LIGHT_NAMES[cur]}.`;
+  toast(`Needs ${LIGHT_NAMES[t.code]} light, from ${MIX_OF[t.code]}. ${now}`);
 }
 // The reward: the chapel's old floor mosaic shows through in the light.
 function revealMosaic(animate) {
@@ -2635,7 +2649,7 @@ scene.addEventListener('click', e => {
     if (MG.locked.mir.has(j)) { toast('The master glazier has fixed this mirror.'); return; }
     MG.rot[j] ^= 1;
     sfx.paint('W');
-  } else return;
+  } else { explainRelic(e); return; }
   if (drawMirror()) mirrorWon();
 });
 function mirrorWon() {
