@@ -24,3 +24,13 @@ Settings used: Starry Night `{"cx":0.45,"squash":0.68,"k":22,"merge":8,"sat":1.5
 Great Wave `{"cx":0.42,"squash":0.62}`, Sunflowers `{"k":22,"merge":7,"sat":1.6}`,
 Girl with a Pearl Earring `{"cx":0.45,"cy":0.42,"zoom":1.2}`,
 Birth of Venus `{"squash":0.78}`.
+
+# Building the Sacristan's Mirrors chapels
+
+`chapels.js` holds the names, lines and difficulty curve for chapels 7-50;
+`build-chapels.js` generates every chapel with the game's own generator,
+checks each has exactly one solution by trying every shutter and mirror
+setting, and writes `chapels.json`. Its contents are embedded in `index.html`
+as `CHAPELS` (the three harder original chapels are slotted in by difficulty).
+
+    node build-chapels.js
