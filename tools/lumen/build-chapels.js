@@ -1,5 +1,5 @@
 const fs=require('fs');
-const src=fs.readFileSync(__dirname + '/../index.html','utf8');
+const src=fs.readFileSync(__dirname + '/../../lumen/index.html','utf8');
 const eng=src.split('// ENGINE START')[1].split('// ENGINE END')[0].replace(/^[^\n]*\n/,'');
 const me=src.slice(src.indexOf('// MIRROR ENGINE START'), src.indexOf('// MIRROR ENGINE END'));
 eval(eng+me+';global.M={genMirrorLevel,mTrace,mCfg,MIRROR_LEVELS};');
